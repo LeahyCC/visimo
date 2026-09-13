@@ -10,7 +10,7 @@
  * rows tick independently: the treble row with the hats, the sub row with the
  * kick. A row that never ticks is an emitter that will never fire.
  */
-import { BAND_HIT, BAND_NAMES, BAND_PULSE, F } from '../audio/FeatureExtractor'
+import { BAND_HIT, BAND_NAMES, BAND_PULSE, F, keyLabel } from '../audio/FeatureExtractor'
 
 export type HudStats = {
   fps: number
@@ -30,8 +30,8 @@ const ROWS = BAND_NAMES.length + 1
 const ROW_HEIGHT = 15
 const BARS_TOP = 12
 const TRACE_HEIGHT = 56
-/** The six lines of text under the trace, the last of which is the preset. */
-const FOOTER = 96
+/** The eight lines of text under the trace, the last of which is the preset. */
+const FOOTER = 124
 
 export class Hud {
   private readonly context: CanvasRenderingContext2D | null
@@ -168,13 +168,29 @@ export class Hud {
       top + height + 26,
     )
 
+    // The harmony: the key the hue stands for, how surely, and whether a
+    // chord just moved. A clarity near 0 means the hue is a memory.
     ctx.fillText(
-      `${stats.fps.toFixed(0)} fps  ${stats.frameMs.toFixed(1)} ms  ${stats.scene}`,
+      `key ${keyLabel(packet[F.keyHue] ?? 0)}  clarity ${slow(F.keyClarity)}  hue ${slow(F.keyHue)}  change ${slow(F.harmonicChange)}`,
       x + 8,
       top + height + 40,
     )
-    ctx.fillText(stats.adapter.slice(0, 44), x + 8, top + height + 54)
-    ctx.fillText(`post ${stats.post}`, x + 8, top + height + 68)
-    ctx.fillText(`preset ${stats.preset}`, x + 8, top + height + 82)
+
+    // The structure: which section this is, whether it has been heard before
+    // and whether it just began.
+    ctx.fillText(
+      `section ${Math.round(packet[F.section] ?? 0)}  recall ${slow(F.recall)}  novelty ${slow(F.novelty)}`,
+      x + 8,
+      top + height + 54,
+    )
+
+    ctx.fillText(
+      `${stats.fps.toFixed(0)} fps  ${stats.frameMs.toFixed(1)} ms  ${stats.scene}`,
+      x + 8,
+      top + height + 68,
+    )
+    ctx.fillText(stats.adapter.slice(0, 44), x + 8, top + height + 82)
+    ctx.fillText(`post ${stats.post}`, x + 8, top + height + 96)
+    ctx.fillText(`preset ${stats.preset}`, x + 8, top + height + 110)
   }
 }

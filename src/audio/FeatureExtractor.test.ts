@@ -11,7 +11,11 @@ import {
   Envelope,
   F,
   FeatureExtractor,
+  keyHueOf,
+  keyLabel,
+  keyOf,
   PACKET_LENGTH,
+  pitchClass,
 } from './FeatureExtractor'
 
 const SAMPLE_RATE = 48000
@@ -108,11 +112,13 @@ describe('FeatureExtractor', () => {
   const make = (fftSize = FFT_SIZE) => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize })
 
   it('has the documented packet length and indices', () => {
-    expect(PACKET_LENGTH).toBe(28)
+    expect(PACKET_LENGTH).toBe(34)
     expect(F.treble).toBe(4)
     expect(F.tempoBpm).toBe(21)
     expect(F.dt).toBe(23)
     expect(F.tempo).toBe(27)
+    expect(F.harmonicChange).toBe(30)
+    expect(F.section).toBe(33)
     expect(make().packet).toHaveLength(PACKET_LENGTH)
   })
 
@@ -159,6 +165,10 @@ describe('FeatureExtractor', () => {
     }
     expect(onsets).toBe(0)
     for (let index = 0; index <= F.tempoBpm; index++) expect(packet[index]).toBe(0)
+    expect(packet[F.keyClarity]).toBe(0)
+    expect(packet[F.harmonicChange]).toBe(0)
+    expect(packet[F.recall]).toBe(0)
+    expect(packet[F.section]).toBe(1)
     // The song-scale features rest in the middle, not at zero: silence is
     // neither lifting nor dropping, and neither bass-led nor bright.
     expect(packet[F.pace]).toBe(0)
@@ -603,5 +613,186 @@ describe('onsets at any frame rate', () => {
       onsets += packet[F.onset] ?? 0
     }
     expect(onsets).toBeGreaterThan(0)
+  })
+})
+
+describe('harmony', () => {
+  const make = () => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
+  const halfBin = SAMPLE_RATE / FFT_SIZE / 2
+
+  /** Tones at these frequencies, each landing on its nearest bin, over a quiet floor. */
+  const tones =
+    (...hz: number[]) =>
+    (at: number) =>
+      hz.some((tone) => Math.abs(at - tone) <= halfBin) ? -20 : -100
+
+  const octaves = (...hz: number[]) => hz.flatMap((tone) => [tone, tone * 2, tone * 4])
+  const C_MAJOR = tones(...octaves(130.81, 164.81, 196))
+  const A_MINOR = tones(...octaves(110, 130.81, 164.81))
+  const G_MAJOR = tones(...octaves(196, 246.94, 293.66))
+  const F_SHARP_MAJOR = tones(...octaves(185, 233.08, 277.18))
+
+  const hold = (extractor: FeatureExtractor, level: (hz: number) => number, seconds: number) => {
+    let packet: Float32Array = extractor.packet
+    for (let t = 0; t < seconds; t += DT) packet = extractor.update(spectrum(level), DT)
+    return packet
+  }
+
+  it('names pitch classes and places keys on the circle of fifths', () => {
+    expect(pitchClass(440)).toBe(9)
+    expect(pitchClass(261.63)).toBe(0)
+    expect(pitchClass(392)).toBe(7)
+    expect(keyHueOf(0, true)).toBe(0)
+    expect(keyHueOf(7, true)).toBeCloseTo(1 / 12)
+    expect(keyHueOf(5, true)).toBeCloseTo(11 / 12)
+    // A minor is the same notes as C major, so the same place.
+    expect(keyHueOf(9, false)).toBe(keyHueOf(0, true))
+    expect(keyLabel(0)).toBe('C / Am')
+    expect(keyLabel(1 / 12)).toBe('G / Em')
+    expect(keyLabel(3 / 12)).toBe('A / F#m')
+  })
+
+  it('finds the key of a held chord and is sure of it', () => {
+    const packet = hold(make(), C_MAJOR, 8)
+    expect(packet[F.keyHue] ?? 1).toBeLessThan(0.02)
+    expect(packet[F.keyClarity] ?? 0).toBeGreaterThan(0.5)
+    expect(keyOf([6, 0, 0, 0, 4, 0, 0, 5, 0, 0, 0, 0]).major).toBe(true)
+    expect(keyOf([6, 0, 0, 0, 4, 0, 0, 5, 0, 0, 0, 0]).tonic).toBe(0)
+  })
+
+  // The reason the hue is by key signature and not by tonic: the profiles
+  // flip between a key and its relative on real music every few bars, and a
+  // colour that flipped with them would say nothing.
+  it('gives a relative minor the same hue as its major', () => {
+    const major = hold(make(), C_MAJOR, 8)[F.keyHue] ?? 0
+    const minor = hold(make(), A_MINOR, 8)[F.keyHue] ?? 0
+    expect(Math.abs(major - minor)).toBeLessThan(0.02)
+    const dominant = hold(make(), G_MAJOR, 8)[F.keyHue] ?? 0
+    expect(dominant).toBeCloseTo(1 / 12, 1)
+  })
+
+  it('lifts harmonicChange when the chord moves and lets it settle', () => {
+    const extractor = make()
+    const before = hold(extractor, C_MAJOR, 6)[F.harmonicChange] ?? 1
+    expect(before).toBeLessThan(0.1)
+    const moved = hold(extractor, F_SHARP_MAJOR, 0.6)[F.harmonicChange] ?? 0
+    expect(moved).toBeGreaterThan(0.5)
+    const settled = hold(extractor, F_SHARP_MAJOR, 8)[F.harmonicChange] ?? 1
+    expect(settled).toBeLessThan(0.15)
+  })
+
+  it('loses clarity when the notes stop but keeps the hue', () => {
+    const extractor = make()
+    const sounding = hold(extractor, G_MAJOR, 8)
+    const hue = sounding[F.keyHue] ?? 0
+    expect(sounding[F.keyClarity] ?? 0).toBeGreaterThan(0.5)
+    const silent = hold(extractor, silence, 8)
+    expect(silent[F.keyClarity] ?? 1).toBeLessThan(0.1)
+    expect(silent[F.keyHue]).toBeCloseTo(hue, 2)
+  })
+
+  it('hears little clarity in noise', () => {
+    const next = random(3)
+    const extractor = make()
+    let packet: Float32Array = extractor.packet
+    for (let t = 0; t < 8; t += DT)
+      packet = extractor.update(
+        spectrum(() => -30 + (next() - 0.5) * 30),
+        DT,
+      )
+    expect(packet[F.keyClarity] ?? 1).toBeLessThan(0.4)
+  })
+})
+
+describe('structure', () => {
+  const make = () => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
+
+  /**
+   * Two passages that sound nothing alike: a bass-led one clicking the sub
+   * band twice a second, and a bright one holding a chord with hats. Each
+   * runs for `seconds`, and the packet is sampled every quarter second.
+   */
+  const passages = {
+    low: (frame: number) =>
+      spectrum(frame % 30 === 0 ? only(20, 250, -15) : (hz) => (hz < 250 ? -30 : -100)),
+    high: (frame: number) =>
+      spectrum(
+        frame % 10 === 0
+          ? (hz) => (hz > 4000 ? -20 : hz > 1000 && hz < 3000 ? -30 : -100)
+          : (hz) => (hz > 1000 && hz < 3000 ? -30 : -100),
+      ),
+  }
+
+  function play(extractor: FeatureExtractor, script: [keyof typeof passages, number][]) {
+    const samples: { t: number; section: number; recall: number; novelty: number }[] = []
+    let t = 0
+    let frame = 0
+    for (const [name, seconds] of script) {
+      const passage = passages[name]
+      for (let s = 0; s < seconds; s += DT) {
+        const packet = extractor.update(passage(frame), DT)
+        frame++
+        t += DT
+        if (frame % 15 === 0)
+          samples.push({
+            t,
+            section: packet[F.section] ?? 0,
+            recall: packet[F.recall] ?? 0,
+            novelty: packet[F.novelty] ?? 0,
+          })
+      }
+    }
+    return samples
+  }
+
+  const between = (samples: ReturnType<typeof play>, from: number, to: number) =>
+    samples.filter((s) => s.t >= from && s.t < to)
+
+  it('numbers a new passage and gives a returning one its old number', () => {
+    const samples = play(make(), [
+      ['low', 30],
+      ['high', 30],
+      ['low', 30],
+    ])
+    const first = between(samples, 10, 30).map((s) => s.section)
+    const second = between(samples, 45, 60).map((s) => s.section)
+    const third = between(samples, 75, 90).map((s) => s.section)
+    expect(new Set(first)).toEqual(new Set([1]))
+    expect(new Set(second)).toEqual(new Set([2]))
+    expect(new Set(third)).toEqual(new Set([1]))
+  })
+
+  it('recalls a passage only once it has come back', () => {
+    const samples = play(make(), [
+      ['low', 30],
+      ['high', 30],
+      ['low', 30],
+    ])
+    const firstTime = Math.max(...between(samples, 20, 30).map((s) => s.recall))
+    const comeBack = Math.max(...between(samples, 75, 90).map((s) => s.recall))
+    expect(firstTime).toBeLessThan(0.3)
+    expect(comeBack).toBeGreaterThan(0.7)
+  })
+
+  it('lifts novelty at a boundary and not within a passage', () => {
+    const samples = play(make(), [
+      ['low', 30],
+      ['high', 30],
+    ])
+    const within = Math.max(...between(samples, 20, 30).map((s) => s.novelty))
+    const across = Math.max(...between(samples, 30, 40).map((s) => s.novelty))
+    expect(within).toBeLessThan(0.3)
+    expect(across).toBeGreaterThan(0.6)
+  })
+
+  it('keeps one section through a steady passage and through silence', () => {
+    const steady = play(make(), [['high', 60]])
+    expect(new Set(steady.map((s) => s.section))).toEqual(new Set([1]))
+    const extractor = make()
+    let packet: Float32Array = extractor.packet
+    for (let s = 0; s < 40; s += DT) packet = extractor.update(spectrum(silence), DT)
+    expect(packet[F.section]).toBe(1)
+    expect(packet[F.recall]).toBe(0)
+    expect(packet[F.novelty]).toBe(0)
   })
 })

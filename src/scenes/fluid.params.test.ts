@@ -514,8 +514,8 @@ describe('event pool', () => {
       }
       return sum
     }
-    expect(total(1 / 60)).toBeCloseTo(params.eventDye, 1)
-    expect(total(1 / 144)).toBeCloseTo(params.eventDye, 1)
+    expect(total(1 / 60) / params.eventDye).toBeCloseTo(1, 1)
+    expect(total(1 / 144) / params.eventDye).toBeCloseTo(1, 1)
     expect(eventEnvelope(0, 1)).toBe(1)
     expect(eventEnvelope(1, 1)).toBe(0)
   })

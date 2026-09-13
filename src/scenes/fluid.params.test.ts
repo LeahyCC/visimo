@@ -12,6 +12,10 @@ import {
   FLUID_DEFAULTS,
   fluidFrame,
   fluidParams,
+  LAYOUT_BLEND_SECONDS,
+  layoutMix,
+  layoutOf,
+  LAYOUTS,
   MAX_EMITTERS,
   PALETTE_SIZE,
   PALETTE_STOPS,
@@ -154,6 +158,83 @@ describe('fluid frame', () => {
   })
 })
 
+describe('layouts', () => {
+  const at = (section: number, mix = 1, time = 7.3) => {
+    const to = layoutOf(section)
+    return fluidFrame(fluidParams(plume.sceneParams), packet({ time }), 1 / 60, square, {
+      from: layoutOf(1),
+      to,
+      mix,
+    })
+  }
+
+  it('starts at the first layout and cycles once the ranks run out', () => {
+    expect(layoutOf(1)).toBe(LAYOUTS[0])
+    expect(layoutOf(2)).toBe(LAYOUTS[1])
+    expect(layoutOf(LAYOUTS.length + 1)).toBe(LAYOUTS[0])
+    expect(layoutOf(0)).toBe(LAYOUTS[0])
+    expect(layoutOf(2.4)).toBe(LAYOUTS[1])
+  })
+
+  it('eases a change in over the blend time', () => {
+    expect(layoutMix(0)).toBe(0)
+    expect(layoutMix(LAYOUT_BLEND_SECONDS / 2)).toBeCloseTo(0.5, 6)
+    expect(layoutMix(LAYOUT_BLEND_SECONDS)).toBe(1)
+    expect(layoutMix(LAYOUT_BLEND_SECONDS * 3)).toBe(1)
+    expect(layoutMix(-1)).toBe(0)
+  })
+
+  it('changes where the emitters are, and glides there', () => {
+    const before = at(2, 0).splats
+    const after = at(2, 1).splats
+    const halfway = at(2, 0.5).splats
+    const still = fluidFrame(fluidParams(plume.sceneParams), packet({ time: 7.3 }), 1 / 60, square)
+    let moved = 0
+    before.forEach((splat, index) => {
+      // At mix 0 a change has not started: the same frame as no change.
+      expect(splat.x).toBeCloseTo(still.splats[index]?.x ?? -1, 6)
+      expect(splat.y).toBeCloseTo(still.splats[index]?.y ?? -1, 6)
+      const to = after[index]
+      const mid = halfway[index]
+      if (!to || !mid) throw new Error('missing splat')
+      if (Math.hypot(to.x - splat.x, to.y - splat.y) > 0.01) moved++
+      expect(mid.x).toBeCloseTo((splat.x + to.x) / 2, 6)
+      expect(mid.y).toBeCloseTo((splat.y + to.y) / 2, 6)
+    })
+    expect(moved).toBeGreaterThan(0)
+  })
+
+  it('keeps every emitter on screen in every layout at the loudest spread', () => {
+    const wide = visibleExtent(1920, 1080)
+    const features = packet({ time: 4.2, energy: 1, swell: 1 })
+    const tuning = resolveScene(plume.sceneParams, plume.audioMapping, features, {})
+    LAYOUTS.forEach((layout, index) => {
+      const built = fluidFrame(fluidParams(tuning), features, 1 / 60, wide, {
+        from: layout,
+        to: layout,
+        mix: 1,
+      })
+      for (const splat of built.splats) {
+        expect(Math.abs(splat.x - 0.5), `layout ${index}`).toBeLessThanOrEqual(wide.x)
+        expect(Math.abs(splat.y - 0.5), `layout ${index}`).toBeLessThanOrEqual(wide.y)
+      }
+    })
+  })
+
+  it('never pushes in no direction, whatever the figure', () => {
+    LAYOUTS.forEach((layout) => {
+      for (const time of [0, 1.1, 3.7, 20]) {
+        const built = fluidFrame(fluidParams(plume.sceneParams), packet({ time }), 1 / 60, square, {
+          from: layout,
+          to: layout,
+          mix: 1,
+        })
+        for (const splat of built.splats) expect(Math.hypot(splat.dx, splat.dy)).toBeCloseTo(1, 6)
+      }
+    })
+  })
+})
+
 describe('palette', () => {
   it('is one opaque row of the requested length', () => {
     const lut = paletteLut()
@@ -189,6 +270,11 @@ describe('sim uniform', () => {
     expect(out[2]).toBeCloseTo(1 / 512, 8)
     expect(out[12]).toBeCloseTo(visible.x * 2, 6)
     expect(out[13]).toBeCloseTo(visible.y * 2, 6)
+  })
+
+  it('carries the saturation in the slot the shader reads it from', () => {
+    const out = writeSimUniform(frame(), 512, square, new Float32Array(SIM_UNIFORM_FLOATS))
+    expect(out[11]).toBeCloseTo(plume.sceneParams.saturation, 6)
   })
 
   it('never writes a radius the shader would divide by zero', () => {

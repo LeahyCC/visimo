@@ -16,7 +16,7 @@ struct Sim {
   grid: vec2<f32>,
   texel: vec2<f32>,
   step: vec4<f32>,   // dt, velocity decay, dye decay, vorticity
-  mix: vec4<f32>,    // viscosity alpha, colour intensity, live emitters, 0
+  mix: vec4<f32>,    // viscosity alpha, colour intensity, live emitters, saturation
   cover: vec4<f32>,  // canvas to grid scale, x and y, then 0, 0
   splats: array<Splat, 5>,
 }

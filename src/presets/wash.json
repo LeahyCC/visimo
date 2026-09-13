@@ -8,6 +8,7 @@
     "vorticity": 26,
     "viscosity": 0.06,
     "intensity": 1,
+    "saturation": 1,
     "spread": 0.5,
     "force": 0.8,
     "dye": 3,
@@ -15,7 +16,7 @@
     "hitDye": 0.9,
     "radius": 0.02,
     "colourShift": 0.5,
-    "colourDrift": 0.012,
+    "colourDrift": 0,
     "orbitSpeed": 0.1,
     "emitters": 3,
     "voice": 0.45
@@ -38,6 +39,7 @@
     { "from": "energy", "to": "spread", "gain": 0.16 },
     { "from": "beatPulse", "to": "intensity", "gain": 0.8 },
     { "from": "lowEnd", "to": "colourShift", "gain": 0.25, "curve": "square" },
-    { "from": "beatPulse", "to": "bloom.intensity", "gain": 0.2 }
+    { "from": "beatPulse", "to": "bloom.intensity", "gain": 0.2 },
+    { "from": "keyHue", "to": "colourShift", "gain": 1 }
   ]
 }

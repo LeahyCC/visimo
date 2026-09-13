@@ -31,12 +31,20 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
   let uv = (in.uv - vec2<f32>(0.5, 0.5)) * sim.cover.xy + vec2<f32>(0.5, 0.5);
   let sample = textureSample(dye, samp, uv);
   let density = max(sample.x, 0.0);
-  let coord = atan2(sample.z, sample.y) / TAU + 0.5;
+  // The dye carries its palette coordinate as an angle; this turns it back.
+  // fract rather than a half turn added: atan2 runs from -0.5 to 0.5 of a
+  // turn, and adding a half put every colour half a palette from where the
+  // scene had asked for it, which nothing noticed while the palette drifted.
+  let coord = fract(atan2(sample.z, sample.y) / TAU);
   let tint = textureSample(palette, samp, vec2<f32>(coord, 0.5)).rgb;
+  // Saturation pulls the tint toward its own grey, so a passage with no key
+  // to speak of can be drawn with less colour than one that has.
+  let grey = dot(tint, vec3<f32>(0.299, 0.587, 0.114));
+  let coloured = mix(vec3<f32>(grey), tint, sim.mix.w);
   // Dye stacks without limit where plumes cross. This bends it into 0 to 1,
   // so a thick one reads as its own colour instead of a flat white mass, and
   // the intensity above puts the brightest of it past the bloom threshold.
   let amount = 1.0 - exp(-density * 1.2);
   let base = vec3<f32>(0.008, 0.012, 0.02);
-  return vec4<f32>(base + tint * amount * sim.mix.y, 1.0);
+  return vec4<f32>(base + coloured * amount * sim.mix.y, 1.0);
 }

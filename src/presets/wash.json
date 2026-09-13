@@ -19,7 +19,12 @@
     "colourDrift": 0,
     "orbitSpeed": 0.1,
     "emitters": 3,
-    "voice": 0.7
+    "voice": 0.7,
+    "events": 12,
+    "eventLife": 1.2,
+    "eventForce": 0.3,
+    "eventDye": 2,
+    "eventRadius": 0.014
   },
   "postParams": {
     "feedback": { "amount": 0.3, "decay": 0.7, "zoom": 1.004, "rotate": 0.0006 },

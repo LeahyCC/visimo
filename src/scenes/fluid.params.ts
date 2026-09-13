@@ -10,19 +10,25 @@
  * which is this scene's own shape in the way the Lissajous orbit is, and what
  * that is worth is still a knob the preset sets.
  */
-import { BAND_COUNT, BAND_HIT, F } from '../audio/FeatureExtractor'
+import { BAND_COUNT, BAND_HIT, BAND_HIT_CENTRE, BAND_HIT_WIDTH, F } from '../audio/FeatureExtractor'
 import { FLUID_KNOBS } from '../presets/knobs'
 import type { FluidKnob, Tuning } from '../presets/knobs'
 import { DEFAULT_FLUID_SIZE, FLUID_SIZES, SOFTWARE_FLUID_SIZE } from './catalog'
 
 /**
- * One emitter per band, and there are five bands. The WGSL array is this long
- * and the uniform is always sized for all of them; how many a frame fills is
- * the `emitters` knob. Raising this means adding a band in
- * `audio/FeatureExtractor.ts` and raising `MAX_EMITTERS` and the array length
- * in `shaders/fluid.common.wgsl` to match.
+ * The bed: one emitter per band, and there are five bands. How many of them
+ * a frame fills is the `emitters` knob.
  */
-export const MAX_EMITTERS = BAND_COUNT
+export const MAX_BED_EMITTERS = BAND_COUNT
+/** The pool of short-lived event emitters behind the bed. */
+export const MAX_EVENTS = 32
+/**
+ * Every splat slot the shader has: the bed and then the events. The WGSL
+ * array is this long and the uniform is always sized for all of them.
+ * Raising either count means raising `MAX_EMITTERS` and the array length in
+ * `shaders/fluid.common.wgsl` to match; nothing enforces it.
+ */
+export const MAX_EMITTERS = MAX_BED_EMITTERS + MAX_EVENTS
 export const PALETTE_SIZE = 256
 
 /** Floats in the sim uniform; the Sim struct in fluid.common.wgsl matches. */
@@ -350,6 +356,16 @@ export const FLUID_DEFAULTS: FluidParams = {
    * existed; at 1 each one is only its band, in its own colour and size.
    */
   voice: 0,
+  /** How many event emitters may be alive at once, up to `MAX_EVENTS`; 0 is off. */
+  events: 0,
+  /** Seconds one lives. */
+  eventLife: 0.8,
+  /** Velocity a full-strength event adds over its life, in grid widths per second. */
+  eventForce: 0.4,
+  /** Dye a full-strength event adds over its life. */
+  eventDye: 1.5,
+  /** Gaussian radius of an event before its band and width scale it, in grid widths. */
+  eventRadius: 0.008,
 }
 
 /**
@@ -358,7 +374,114 @@ export const FLUID_DEFAULTS: FluidParams = {
  * the uniform both need a whole number of slots that exist.
  */
 export const emitterCount = (params: FluidParams) =>
-  Math.min(MAX_EMITTERS, Math.max(1, Math.round(params.emitters)))
+  Math.min(MAX_BED_EMITTERS, Math.max(1, Math.round(params.emitters)))
+
+/** The `events` knob as a count of slots, 0 up to `MAX_EVENTS`. */
+export const eventCap = (params: FluidParams) =>
+  Math.min(MAX_EVENTS, Math.max(0, Math.round(params.events)))
+
+/** One hit, alive for a while. `age` runs from 0 to `life`. */
+export type LiveEvent = {
+  band: number
+  /** Where the hit landed across the spectrum, 0 at 20 Hz to 1 at 16 kHz. */
+  centre: number
+  /** How wide it was, as a fraction of that span. */
+  width: number
+  strength: number
+  age: number
+  life: number
+}
+
+/**
+ * The pool of event emitters. Every band hit spawns one, into an empty slot
+ * or over the one nearest its end when the cap is full, and each lives for
+ * `life` seconds. The scene keeps one of these and hands its live events to
+ * `fluidFrame`, so the frame stays a function of its arguments.
+ */
+export class EventPool {
+  private readonly slots: (LiveEvent | null)[] = Array.from({ length: MAX_EVENTS }, () => null)
+
+  /** Age every event, drop the dead, and spawn one per band that hit this frame. */
+  step(features: Float32Array, dt: number, cap: number, life: number) {
+    for (let index = 0; index < this.slots.length; index++) {
+      const event = this.slots[index]
+      if (!event) continue
+      event.age += dt
+      if (event.age >= event.life) this.slots[index] = null
+    }
+    const limit = Math.min(MAX_EVENTS, Math.max(0, Math.round(cap)))
+    if (limit === 0) {
+      this.slots.fill(null)
+      return
+    }
+
+    for (let band = 0; band < BAND_COUNT; band++) {
+      const strength = features[BAND_HIT + band] ?? 0
+      if (strength <= 0) continue
+      this.spawn(
+        {
+          band,
+          centre: Math.min(1, Math.max(0, features[BAND_HIT_CENTRE + band] ?? 0.5)),
+          width: Math.min(1, Math.max(0, features[BAND_HIT_WIDTH + band] ?? 0)),
+          strength: Math.min(1, strength),
+          age: 0,
+          life: Math.max(0.05, life),
+        },
+        limit,
+      )
+    }
+  }
+
+  /** The events alive now, in slot order. */
+  live(): LiveEvent[] {
+    const out: LiveEvent[] = []
+    for (const event of this.slots) if (event) out.push(event)
+    return out
+  }
+
+  // An empty slot within the cap if there is one, else the event nearest its
+  // end gives way: a busy passage keeps the newest sounds on screen.
+  private spawn(event: LiveEvent, limit: number) {
+    let count = 0
+    let oldest = -1
+    let oldestLeft = Infinity
+    for (let index = 0; index < limit; index++) {
+      const held = this.slots[index]
+      if (!held) {
+        this.slots[index] = event
+        return
+      }
+      count++
+      const left = held.life - held.age
+      if (left < oldestLeft) {
+        oldestLeft = left
+        oldest = index
+      }
+    }
+    if (count >= limit && oldest >= 0) this.slots[oldest] = event
+  }
+}
+
+/** Which bed emitter covers a band, when there are `count` of them. */
+export function emitterOf(count: number, band: number): number {
+  for (let index = 0; index < count; index++) {
+    const [from, to] = bandsOf(count, index)
+    if (band >= from && band < to) return index
+  }
+
+  return 0
+}
+
+/**
+ * How an event's remaining life scales what it adds, and what that curve
+ * sums to over a whole life as a fraction of it. Steep at the start and
+ * gone at the end, so a hit reads as a hit and not a glow.
+ */
+export const eventEnvelope = (age: number, life: number) => {
+  const left = 1 - Math.min(1, Math.max(0, age / life))
+  return left * left
+}
+const EVENT_ENVELOPE_AREA = 1 / 3
 
 /** The resolved knobs as this scene's own object, defaults for the rest. */
 export function fluidParams(tuning: Tuning): FluidParams {
@@ -392,7 +515,10 @@ export function fluidParams(tuning: Tuning): FluidParams {
  *
  * `layout` is where the emitters ride, chosen by the song's section and
  * blended from the last one so a change glides; the scene keeps that state
- * and hands it in, so this stays a function of its arguments.
+ * and hands it in, so this stays a function of its arguments. `events` are
+ * the pool's live hits, and each becomes a splat of its own behind the bed:
+ * under its band's emitter, at the height its pitch puts it (low sounds at
+ * the bottom), sized by its band and its width, fading over its life.
  */
 export function fluidFrame(
   params: FluidParams,
@@ -400,6 +526,7 @@ export function fluidFrame(
   dt: number,
   visible: Extent,
   layout: LayoutBlend = STILL_LAYOUT,
+  events: readonly LiveEvent[] = [],
 ): FluidFrame {
   const step = Math.min(MAX_STEP, Math.max(0.001, dt))
   const time = features[F.time] ?? 0
@@ -445,6 +572,30 @@ export function fluidFrame(
       colour: wrap(
         time * params.colourDrift + mix(index / count, voice.tint, blend) + params.colourShift,
       ),
+    })
+  }
+
+  // The events. What one adds over its whole life is the knob, whatever the
+  // life and the frame rate: each frame gets the envelope's share of it.
+  const cap = eventCap(params)
+  for (const event of events.slice(0, cap)) {
+    const bed = splats[emitterOf(count, event.band)]
+    if (!bed) continue
+    const voice = BAND_VOICES[event.band] ?? BAND_VOICES[0]
+    const share = (eventEnvelope(event.age, event.life) * step) / (event.life * EVENT_ENVELOPE_AREA)
+    const worth = event.strength * share
+    // Height by pitch: the bottom of the visible band is 20 Hz and the top is
+    // 16 kHz, kept a little in from the edges.
+    const height = (0.5 - event.centre) * 1.6
+    splats.push({
+      x: bed.x,
+      y: 0.5 + Math.min(1, Math.max(-1, height)) * visible.y,
+      dx: bed.dx,
+      dy: bed.dy,
+      force: params.eventForce * worth,
+      radius: params.eventRadius * (voice?.size ?? 1) * (0.7 + 3 * event.width),
+      dye: params.eventDye * worth,
+      colour: wrap(time * params.colourDrift + (voice?.tint ?? 0) + params.colourShift),
     })
   }
 

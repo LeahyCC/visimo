@@ -112,13 +112,15 @@ describe('FeatureExtractor', () => {
   const make = (fftSize = FFT_SIZE) => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize })
 
   it('has the documented packet length and indices', () => {
-    expect(PACKET_LENGTH).toBe(34)
+    expect(PACKET_LENGTH).toBe(44)
     expect(F.treble).toBe(4)
     expect(F.tempoBpm).toBe(21)
     expect(F.dt).toBe(23)
     expect(F.tempo).toBe(27)
     expect(F.harmonicChange).toBe(30)
     expect(F.section).toBe(33)
+    expect(F.subHitCentre).toBe(34)
+    expect(F.trebleHitWidth).toBe(43)
     expect(make().packet).toHaveLength(PACKET_LENGTH)
   })
 
@@ -794,5 +796,42 @@ describe('structure', () => {
     expect(packet[F.section]).toBe(1)
     expect(packet[F.recall]).toBe(0)
     expect(packet[F.novelty]).toBe(0)
+  })
+})
+
+describe('where a hit landed', () => {
+  const make = () => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
+
+  /** Quiet for a second, then one frame with `low` to `high` Hz at -15 dB. */
+  function strike(low: number, high: number) {
+    const extractor = make()
+    const quiet = spectrum(flat(-60))
+    for (let frame = 0; frame < 60; frame++) extractor.update(quiet, DT)
+    return extractor.update(
+      spectrum((hz) => (hz >= low && hz < high ? -15 : -60)),
+      DT,
+    )
+  }
+
+  it('puts a low hit low and a high hit high, on the frame it fires', () => {
+    const kick = strike(20, 100)
+    expect(kick[F.subHit] ?? 0).toBeGreaterThan(0)
+    expect(kick[F.subHitCentre] ?? 1).toBeLessThan(0.3)
+    const hat = strike(6000, 14000)
+    expect(hat[F.trebleHit] ?? 0).toBeGreaterThan(0)
+    expect(hat[F.trebleHitCentre] ?? 0).toBeGreaterThan(0.8)
+  })
+
+  it('reads a wide hit as wider than a narrow one', () => {
+    const wide = strike(1000, 16000)
+    const narrow = strike(5000, 6000)
+    expect(wide[F.trebleHitWidth] ?? 0).toBeGreaterThan((narrow[F.trebleHitWidth] ?? 0) * 2)
+  })
+
+  it('rests at the band middle before any rise', () => {
+    const packet = make().update(spectrum(silence), DT)
+    expect(packet[F.subHitCentre] ?? 0).toBeGreaterThan(0)
+    expect(packet[F.subHitCentre] ?? 1).toBeLessThan(packet[F.trebleHitCentre] ?? 0)
+    expect(packet[F.subHitWidth]).toBe(0)
   })
 })

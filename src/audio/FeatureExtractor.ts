@@ -24,12 +24,12 @@
  *   18     onset           0 | 1     1 on the frame an onset was detected anywhere
  *   19     onsetStrength   0..1      how that onset compares with the loudest recent one
  *   20     beatPulse       0..1      jumps to 1 on an onset, then decays
- *   21     tempoBpm        bpm       0 until the flux autocorrelation settles on a period
+ *   21     tempoBpm        bpm       0 until the tempo tracker settles on a period
  *   22     time            s         seconds of features so far
  *   23     dt              s         this frame's step
  *   24     pace            0..1      onsets a second, decayed over half a minute
- *   25     swell           0..1      energy now against energy over half a minute; 0.5 is steady
- *   26     weight          0..1      low against high over ten seconds; 1 is bass-led
+ *   25     swell           0..1      loudness now against the last half minute, in dB; 0.5 is steady
+ *   26     weight          0..1      where the spectral centroid sits over ten seconds; 1 is bass-led
  *   27     tempo           0..1      `tempoBpm` across 60 to 200, smoothed so it ramps
  *   28     keyHue          0..1      the key's place on the circle of fifths, a relative
  *                                    major and minor sharing one; ramps over seconds
@@ -43,6 +43,8 @@
  *                                    16 kHz, that band's rise landed this frame
  *   39-43  subHitWidth..trebleHitWidth
  *                          0..1      how wide that rise was, as a fraction of the same span
+ *   44     tempoConfidence 0..1      how well the chosen period correlates; gate `tempo` on it
+ *   45     beatPhase       0..1      where in the beat we are, 0 on the beat and rising to the next
  *
  * Each band detects its own onsets, against its own flux and its own adaptive
  * threshold, which is what lets one emitter answer the kick and another the
@@ -70,11 +72,18 @@
  * the rise the band saw, and mean something on the frame the band's hit
  * fired; between hits they hold the last rise, or the band's own middle.
  *
+ * Rows 44 and 45 are the beat as a clock rather than as a reaction.
+ * `beatPhase` runs ahead to where the next beat is predicted, and
+ * `tempoConfidence` says how much to believe it; both come from the tempo
+ * tracker in `TempoTracker.ts`, which reads each band's own rise.
+ *
  * Nothing on the GPU binds this. Every consumer reads the Float32Array on the
- * CPU, so the layout is free of any vec4 alignment.
+ * CPU, so the layout is free of any vec4 alignment. Rows are only ever added
+ * at the end: the indices are public API.
  */
+import { TEMPO_MAX_BPM, TEMPO_MIN_BPM, TempoTracker } from './TempoTracker'
 
-export const PACKET_LENGTH = 44
+export const PACKET_LENGTH = 46
 
 /** The five bands, in order. Band `i` is packet slot `i`. */
 export const BAND_NAMES = ['sub', 'bass', 'lowMid', 'highMid', 'treble'] as const
@@ -133,6 +142,8 @@ export const F = {
   lowMidHitWidth: 41,
   highMidHitWidth: 42,
   trebleHitWidth: 43,
+  tempoConfidence: 44,
+  beatPhase: 45,
 } as const
 
 export type BandSpec = {
@@ -311,6 +322,11 @@ const PACE_SECONDS = 30
 const PACE_FULL = 12
 const SWELL_SHORT_MS = 2000
 const SWELL_LONG_MS = 30000
+// A passage this many dB above its half-minute average reads as a full drop,
+// and this many below as a full breakdown. Measured in dB so the two are the
+// same distance from steady: as a ratio, half the loudness was the floor and
+// one and a half times was already the ceiling.
+const SWELL_RANGE_DB = 6
 const WEIGHT_MS = 10000
 const TEMPO_RAMP_MS = 5000
 const MIN_DT = 0.001
@@ -402,25 +418,32 @@ const STRUCTURE_CHROMA_WEIGHT = 1
 const STRUCTURE_HIGH_WEIGHT = 2
 const RECALL_RAMP_MS = 1000
 const NOVELTY_RAMP_MS = 500
-const TEMPO_MIN_BPM = 60
-const TEMPO_MAX_BPM = 200
-// The flux is resampled to this rate for the autocorrelation, so the window
-// and the lags are in seconds whatever the frame rate. Replaying recorded
-// tracks through longer windows made the beat lose out to the bar more often,
-// not less.
-const TEMPO_RATE = 100
-const TEMPO_WINDOW_SECONDS = 5
-const TEMPO_EVERY_SECONDS = 1
-const TEMPO_PREFERRED_BPM = 120
-// Width of the preference, in octaves: 60 and 240 score about half of 120.
-const TEMPO_PREFERENCE_OCTAVES = 0.9
-// Below this normalised correlation nothing is periodic enough to call.
-const TEMPO_MIN_CORRELATION = 0.05
-const TEMPO_HALF_LAG_RATIO = 0.6
-const TEMPO_COMPRESSION = 3
-// One reading a second can still jump for a bar; the median of the last few
-// holds the tempo steady through it.
-const TEMPO_MEDIAN_OF = 5
+
+const decibels = (level: number) => 20 * Math.log10(Math.max(level, QUIET))
+
+/**
+ * The log-frequency centroid of a spectrum that is flat between two edges,
+ * which is where the centroid of a band with nothing in particular in it
+ * sits. The integral of log2(f) has a closed form, and this is it divided by
+ * the width.
+ */
+export function flatLogCentroid(low: number, high: number): number {
+  const antiderivative = (hz: number) => hz * Math.log2(hz) - hz / Math.LN2
+  return (antiderivative(high) - antiderivative(low)) / (high - low)
+}
+
+// Weight maps the spectral centroid between the low group's flat centroid
+// and the high group's: a track that is all sub and bass reads about 1, one
+// that is all highMid and treble reads 0, and equal power per octave reads
+// about 0.6, because the low group is fewer octaves wide than the high one.
+const LOW_GROUP_CENTROID = flatLogCentroid(
+  DEFAULT_BANDS[0]?.low ?? 20,
+  DEFAULT_BANDS[1]?.high ?? 250,
+)
+const HIGH_GROUP_CENTROID = flatLogCentroid(
+  DEFAULT_BANDS[3]?.low ?? 1000,
+  DEFAULT_BANDS[4]?.high ?? 16000,
+)
 
 /** What one run of the detector found this frame. */
 export type Onset = {
@@ -996,12 +1019,25 @@ export class Structure {
 export type Character = {
   /** Onsets a second, decayed over half a minute and scaled. */
   pace: number
-  /** Energy now against energy over half a minute. 0.5 is steady. */
+  /** Loudness now against loudness over half a minute, in dB. 0.5 is steady. */
   swell: number
-  /** Low against high. 1 is a bass-led track, 0 a bright sparse one. */
+  /** Where the spectral centroid sits. 1 is a bass-led track, 0 a bright sparse one. */
   weight: number
   /** The BPM guess across 60 to 200, smoothed so it ramps rather than steps. */
   tempo: number
+}
+
+/** What one frame hands the song: the whole-spectrum numbers it is summarised by. */
+export type Frame = {
+  onset: boolean
+  /** The raw RMS across the whole span, not the packet's normalised `energy`. */
+  loudness: number
+  /**
+   * The spectral centroid, already mapped so 0 is the low group's flat
+   * centroid and 1 the high group's; NaN on a frame with nothing in it.
+   */
+  brightness: number
+  bpm: number
 }
 
 /**
@@ -1023,8 +1059,8 @@ export class Song {
   private paceCount = 0
   private readonly short = new Envelope(SWELL_SHORT_MS, SWELL_SHORT_MS)
   private readonly long = new Envelope(SWELL_LONG_MS, SWELL_LONG_MS)
-  private readonly low = new Envelope(WEIGHT_MS, WEIGHT_MS)
-  private readonly high = new Envelope(WEIGHT_MS, WEIGHT_MS)
+  private readonly brightness = new Envelope(WEIGHT_MS, WEIGHT_MS)
+  private brightnessSeen = false
   private readonly ramp = new Envelope(TEMPO_RAMP_MS, TEMPO_RAMP_MS)
   private elapsed = 0
 
@@ -1032,10 +1068,13 @@ export class Song {
    * `loudness` is the raw RMS, deliberately not the packet's `energy`: that
    * one is divided by its own recent peak, so it reads about 1 through any
    * steady passage however loud, and a feature built on it could never see a
-   * chorus coming. `bands` are the normalised levels, where what is wanted is
-   * which parts of the spectrum are occupied rather than by how much.
+   * chorus coming. `brightness` is the centroid of the raw power, not of the
+   * normalised levels, for the same reason: two bands that both have content
+   * both normalise toward 1, and a balance read from them sat at 0.5 for
+   * anything with a kick and a hat in it.
    */
-  step(onset: boolean, loudness: number, bands: Float32Array, bpm: number, dt: number): Character {
+  step(frame: Frame, dt: number): Character {
+    const { onset, loudness, brightness, bpm } = frame
     this.elapsed += dt
     // A decayed count rather than a rate measured between hits: it needs no
     // memory of when the last one was and it cannot spike on one close pair.
@@ -1051,21 +1090,31 @@ export class Song {
     const long = this.long.value
     // Centred on 0.5 so one row can lift a knob in a drop and another thin it
     // in a breakdown, from this one feature with opposite gains.
-    const swell = long > 1e-9 ? clamp01(short / long - 0.5) : 0.5
+    const swell =
+      long > 1e-9 ? clamp01(0.5 + (decibels(short) - decibels(long)) / (2 * SWELL_RANGE_DB)) : 0.5
 
-    const low = this.low.step(Math.max(bands[F.sub] ?? 0, bands[F.bass] ?? 0), dt)
-    const high = this.high.step(Math.max(bands[F.highMid] ?? 0, bands[F.treble] ?? 0), dt)
-    const spread = low + high
+    // The centroid is only smoothed on frames that have one. Silence holds
+    // whatever the last passage was, and the first frame with anything in it
+    // is taken outright rather than ramped up to from the middle.
+    if (Number.isFinite(brightness)) {
+      if (this.brightnessSeen) this.brightness.step(brightness, dt)
+      else {
+        this.brightness.value = brightness
+        this.brightnessSeen = true
+      }
+    }
 
-    // A bpm of 0 means the autocorrelation has not settled; hold the ramp
-    // where it is rather than dragging the scene down to nothing.
+    const weight = this.brightnessSeen ? 1 - this.brightness.value : 0.5
+
+    // A bpm of 0 means the tracker has not settled; hold the ramp where it
+    // is rather than dragging the scene down to nothing.
     const target = bpm > 0 ? clamp01((bpm - TEMPO_MIN_BPM) / (TEMPO_MAX_BPM - TEMPO_MIN_BPM)) : null
     const tempo = target === null ? this.ramp.value : this.ramp.step(target, dt)
 
     return {
       pace: clamp01(this.paceCount / PACE_SECONDS / PACE_FULL),
       swell,
-      weight: spread > 1e-4 ? low / spread : 0.5,
+      weight,
       tempo,
     }
   }
@@ -1104,23 +1153,18 @@ export class FeatureExtractor {
   private readonly octaves: Float32Array
   /** Each band's own middle on the same scale, for a frame with no rise. */
   private readonly bandMiddle: Float32Array
+  /** log2 of each bin's centre frequency, for the centroid `weight` reads. */
+  private readonly logFrequencies: Float32Array
   /** The song-scale features, one step a frame off what the rest works out. */
   private readonly song = new Song()
   private readonly harmony = new Harmony()
   private readonly structure = new Structure()
+  /** The tempo and the beat, off the bands' own flux. */
+  private readonly tempo: TempoTracker
   private readonly binHz: number
   /** The bins the chroma reads peaks between, inclusive. */
   private readonly chromaLow: number
   private readonly chromaHigh: number
-  private readonly tempoWindow = new Float32Array(TEMPO_RATE * TEMPO_WINDOW_SECONDS)
-  private tempoAt = 0
-  private tempoFilled = 0
-  /** Seconds since the flux was last resampled into the tempo window. */
-  private tempoClock = 0
-  private sinceTempo = 0
-  private tempo = 0
-  private readonly tempoReadings = new Float32Array(TEMPO_MEDIAN_OF)
-  private tempoReadingAt = 0
   private time = 0
 
   constructor(options: FeatureOptions) {
@@ -1164,6 +1208,12 @@ export class FeatureExtractor {
       this.bands.map((band) => place(Math.sqrt(band.low * band.high))),
     )
     this.bandCentre.set(this.bandMiddle)
+    this.logFrequencies = new Float32Array(this.bins)
+    // Bin 0 is DC and outside every band; it gets a finite number so a stray
+    // weight on it cannot poison the centroid.
+    for (let bin = 0; bin < this.bins; bin++)
+      this.logFrequencies[bin] = Math.log2(Math.max(bin, 0.5) * this.binHz)
+    this.tempo = new TempoTracker(this.bands.length)
   }
 
   /**
@@ -1231,20 +1281,33 @@ export class FeatureExtractor {
       this.bandFlux[band] = rises / total
     }
 
+    // The whole span in one pass: its power, its flux, and where its power
+    // sits on a log-frequency axis, which is the centroid `weight` reads.
     const { start, weights, total } = this.span
     let squares = 0
     let flux = 0
+    let centroid = 0
     for (let index = 0; index < weights.length; index++) {
       const weight = weights[index] ?? 0
       if (weight === 0) continue
       const bin = start + index
       const magnitude = magnitudes[bin] ?? 0
-      squares += weight * magnitude * magnitude
+      const power = weight * magnitude * magnitude
+      squares += power
+      centroid += power * (this.logFrequencies[bin] ?? 0)
       const rise = (logs[bin] ?? 0) - (previousLogs[bin] ?? 0)
       if (rise > 0) flux += weight * rise
     }
     this.remember(logs, now)
     const rms = Math.sqrt(squares / total)
+    // Below the quiet floor there is nothing to take the centroid of; the
+    // song holds its last reading rather than reading noise.
+    const brightness =
+      rms >= QUIET
+        ? clamp01(
+            (centroid / squares - LOW_GROUP_CENTROID) / (HIGH_GROUP_CENTROID - LOW_GROUP_CENTROID),
+          )
+        : NaN
 
     // The chroma, from the peaks of the log spectrum. A peak's frequency is
     // refined between bins with a parabola through its neighbours, since a
@@ -1281,15 +1344,22 @@ export class FeatureExtractor {
     packet[F.onsetStrength] = whole.strength
     packet[F.beatPulse] = whole.pulse
 
-    // Flux over its mean, compressed: a few huge hits would otherwise own
-    // the autocorrelation and the beat between them would not register.
-    this.trackTempo(Math.log1p(TEMPO_COMPRESSION * whole.flux), dt)
-    packet[F.tempoBpm] = this.tempo
+    // The tempo reads each band's own rise rather than the whole spectrum's,
+    // for the reason pace does below: a kick that lives in three sub bins
+    // barely moves the flux of the whole spectrum, and the beat in most music
+    // is the kick and the snare taking turns.
+    const beat = this.tempo.step(this.bandFlux, dt)
+    packet[F.tempoBpm] = beat.bpm
+    packet[F.tempoConfidence] = beat.confidence
+    packet[F.beatPhase] = beat.phase
 
     // Pace counts a hit in any band, since a kick that lives in three sub
     // bins barely moves the flux of the whole spectrum; the global detector
     // is for broadband hits and the beat pulse the post stack reads.
-    const song = this.song.step(anyBand || whole.onset, rms, packet, this.tempo, dt)
+    const song = this.song.step(
+      { onset: anyBand || whole.onset, loudness: rms, brightness, bpm: beat.bpm },
+      dt,
+    )
     packet[F.pace] = song.pace
     packet[F.swell] = song.swell
     packet[F.weight] = song.weight
@@ -1326,94 +1396,5 @@ export class FeatureExtractor {
     this.historyAt[this.historyHead] = now
     this.historyHead = (this.historyHead + 1) % FLUX_HISTORY
     this.historyCount = Math.min(FLUX_HISTORY, this.historyCount + 1)
-  }
-
-  // Autocorrelation of the last few seconds of compressed flux, once a
-  // second, over the lags that mean 60 to 200 beats per minute. The flux is
-  // resampled to a fixed rate on the way in, so the lags mean the same
-  // tempos whatever the frame rate. Correlations are normalised so long lags
-  // are not penalised for having fewer samples.
-  // Each lag is scored with its multiples added in (a beat's half-bar and bar
-  // agree with it) and weighted toward the tempos people tap (around 120),
-  // because a bar-long pattern correlates as well as a beat-long one and
-  // would otherwise read half-time. When the half lag correlates nearly as
-  // well it wins for the same reason.
-  private trackTempo(flux: number, dt: number) {
-    const window = this.tempoWindow
-    // Sample and hold: a frame longer than the resampling period fills the
-    // samples it spans with its own reading.
-    this.tempoClock += dt
-    while (this.tempoClock >= 1 / TEMPO_RATE) {
-      this.tempoClock -= 1 / TEMPO_RATE
-      window[this.tempoAt] = flux
-      this.tempoAt = (this.tempoAt + 1) % window.length
-      this.tempoFilled = Math.min(window.length, this.tempoFilled + 1)
-    }
-    this.sinceTempo += dt
-    if (this.sinceTempo < TEMPO_EVERY_SECONDS || this.tempoFilled < window.length) return
-    this.sinceTempo = 0
-    const length = window.length
-    let mean = 0
-    for (let i = 0; i < length; i++) mean += window[i] ?? 0
-    mean /= length
-    let variance = 0
-    for (let i = 0; i < length; i++) variance += ((window[i] ?? 0) - mean) ** 2
-    variance /= length
-    if (variance <= 0) {
-      this.report(0)
-      return
-    }
-    const minLag = Math.max(1, Math.floor((60 * TEMPO_RATE) / TEMPO_MAX_BPM))
-    const maxLag = Math.min(length >> 1, Math.ceil((60 * TEMPO_RATE) / TEMPO_MIN_BPM))
-    const correlation = new Float32Array(maxLag + 1)
-    for (let lag = minLag; lag <= maxLag; lag++) {
-      let sum = 0
-      for (let i = lag; i < length; i++) {
-        const a = (window[(this.tempoAt + i) % length] ?? 0) - mean
-        const b = (window[(this.tempoAt + i - lag) % length] ?? 0) - mean
-        sum += a * b
-      }
-      correlation[lag] = sum / ((length - lag) * variance)
-    }
-    const bpm = (lag: number) => (60 * TEMPO_RATE) / lag
-    const preference = (lag: number) =>
-      Math.exp(-0.5 * (Math.log2(bpm(lag) / TEMPO_PREFERRED_BPM) / TEMPO_PREFERENCE_OCTAVES) ** 2)
-    let bestLag = 0
-    let best = 0
-    let total = 0
-    for (let lag = minLag; lag <= maxLag; lag++) {
-      const value = correlation[lag] ?? 0
-      total += value
-      const harmonics =
-        value + 0.5 * (correlation[2 * lag] ?? 0) + 0.25 * (correlation[4 * lag] ?? 0)
-      const score = harmonics * preference(lag)
-      if (score > best) {
-        best = score
-        bestLag = lag
-      }
-    }
-    const average = total / (maxLag - minLag + 1)
-    const raw = correlation[bestLag] ?? 0
-    if (!bestLag || raw < TEMPO_MIN_CORRELATION || raw < 3 * Math.max(average, 0)) {
-      this.report(0)
-      return
-    }
-    const half = Math.round(bestLag / 2)
-    if (half >= minLag && (correlation[half] ?? 0) >= TEMPO_HALF_LAG_RATIO * raw) bestLag = half
-    // The peak is refined between samples with a parabola through its
-    // neighbours, since at 100 samples a second one lag is 2% of a tempo.
-    const left = correlation[bestLag - 1] ?? 0
-    const right = correlation[bestLag + 1] ?? 0
-    const centre = correlation[bestLag] ?? 0
-    const curve = left - 2 * centre + right
-    const offset = curve < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (left - right)) / curve)) : 0
-    this.report(bpm(bestLag + offset))
-  }
-
-  private report(reading: number) {
-    this.tempoReadings[this.tempoReadingAt] = reading
-    this.tempoReadingAt = (this.tempoReadingAt + 1) % TEMPO_MEDIAN_OF
-    const sorted = Array.from(this.tempoReadings).sort((a, b) => a - b)
-    this.tempo = sorted[TEMPO_MEDIAN_OF >> 1] ?? 0
   }
 }

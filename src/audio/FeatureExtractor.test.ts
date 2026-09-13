@@ -105,8 +105,7 @@ describe('Envelope', () => {
 })
 
 describe('FeatureExtractor', () => {
-  const make = (fftSize = FFT_SIZE) =>
-    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize, nominalFrameRate: 60 })
+  const make = (fftSize = FFT_SIZE) => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize })
 
   it('has the documented packet length and indices', () => {
     expect(PACKET_LENGTH).toBe(28)
@@ -203,11 +202,7 @@ describe('FeatureExtractor', () => {
     // 140 BPM at 70 frames a second is 30 frames a beat. Beats alternate a
     // strong and a slightly softer hit, so the two-beat lag correlates as well
     // as the one-beat lag and a naive pick would say 70.
-    const extractor = new FeatureExtractor({
-      sampleRate: SAMPLE_RATE,
-      fftSize: FFT_SIZE,
-      nominalFrameRate: 70,
-    })
+    const extractor = new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
     const quiet = spectrum(flat(-40))
     const strong = spectrum(flat(-10))
     const soft = spectrum(flat(-13))
@@ -260,8 +255,7 @@ describe('FeatureExtractor', () => {
 })
 
 describe('per-band onsets', () => {
-  const make = () =>
-    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, nominalFrameRate: 60 })
+  const make = () => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
 
   /**
    * Run `frames` frames, clicking each named band on its own period. A click
@@ -373,8 +367,7 @@ describe('per-band onsets', () => {
 })
 
 describe('band accuracy', () => {
-  const make = (fftSize = FFT_SIZE) =>
-    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize, nominalFrameRate: 60 })
+  const make = (fftSize = FFT_SIZE) => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize })
 
   const settle = (extractor: FeatureExtractor, frame: Float32Array, frames = 120) => {
     let packet: Float32Array = extractor.packet
@@ -423,8 +416,7 @@ describe('band accuracy', () => {
 })
 
 describe('onset flux against absolute level', () => {
-  const make = () =>
-    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, nominalFrameRate: 60 })
+  const make = () => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
 
   /** Click the sub band every 30 frames over a floor `db` below it. */
   const hits = (loudDb: number, frames = 360) => {
@@ -450,8 +442,7 @@ describe('onset flux against absolute level', () => {
 })
 
 describe('the song rather than the frame', () => {
-  const make = () =>
-    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, nominalFrameRate: 60 })
+  const make = () => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
 
   /** Click the whole spectrum every `every` frames, for `seconds`. */
   function clicks(every: number, seconds: number, extractor = make()) {
@@ -464,13 +455,13 @@ describe('the song rather than the frame', () => {
     return packet
   }
 
-  // Onsets a second, scaled so 8 is full. A click every 10 frames at 60 fps is
-  // 6 a second, which is busy but not flat out.
+  // Onsets a second in any band, scaled so 12 is full. A click every 10
+  // frames at 60 fps is 6 a second, which is busy but not flat out.
   it('settles pace near how busy the music actually is', () => {
     const busy = clicks(10, 60)[F.pace] ?? 0
     const sparse = clicks(60, 60)[F.pace] ?? 0
-    expect(busy).toBeGreaterThan(0.5)
-    expect(sparse).toBeLessThan(0.2)
+    expect(busy).toBeGreaterThan(0.4)
+    expect(sparse).toBeLessThan(0.15)
     expect(busy).toBeGreaterThan(sparse * 3)
   })
 
@@ -538,5 +529,79 @@ describe('the song rather than the frame', () => {
       last = now
     }
     expect(biggest).toBeLessThan(0.02)
+  })
+})
+
+describe('onsets at any frame rate', () => {
+  const make = (fluxFloor?: number) =>
+    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, fluxFloor })
+
+  /**
+   * Two clicks a second, each 40 ms long, played to an extractor stepped at
+   * `fps`. The click is a span of time rather than one frame, the way a real
+   * hit is, so a faster frame rate sees more frames of it and not more hits,
+   * and it is longer than a frame at the slowest rate so none is skipped.
+   */
+  function clicksAt(fps: number, seconds: number, floor?: number) {
+    const extractor = make(floor)
+    const quiet = spectrum(flat(-40))
+    const loud = spectrum(flat(-10))
+    const dt = 1 / fps
+    const hits: number[] = []
+    for (let t = 0; t < seconds; t += dt) {
+      const inClick = (t + 1e-9) % 0.5 < 0.04
+      const packet = extractor.update(inClick ? loud : quiet, dt)
+      if (packet[F.onset]) hits.push(Math.round(t * 1000))
+    }
+    return hits
+  }
+
+  // The reason the flux is measured over a fixed lag and the windows over a
+  // fixed time: at 144 frames a second two analyser reads a frame apart are
+  // nearly the same window, and a detector fed per-frame rises fired on the
+  // jitter between them, about twice a second on a sustained pad.
+  it('finds the same clicks at 30, 60 and 144 frames a second', () => {
+    const at30 = clicksAt(30, 5.9)
+    const at60 = clicksAt(60, 5.9)
+    const at144 = clicksAt(144, 5.9)
+    expect(at60.length).toBeGreaterThan(8)
+    expect(at30.length).toBe(at60.length)
+    expect(at144.length).toBe(at60.length)
+    // And at the same moments, to within a frame of the slowest rate.
+    at60.forEach((ms, index) => {
+      expect(Math.abs((at144[index] ?? 0) - ms)).toBeLessThan(40)
+    })
+  })
+
+  // The failure the floor exists for: once the music has stopped for longer
+  // than the window, the threshold is mean plus a few deviations of nothing,
+  // and without a floor the jitter of a quiet pad clears it.
+  it('stays quiet on a jittering pad after the hits stop', () => {
+    const extractor = make()
+    const next = random(11)
+    const loud = spectrum(flat(-10))
+    let after = 0
+    for (let frame = 0; frame < 900; frame++) {
+      const pad = spectrum(() => -40 + (next() - 0.5) * 3)
+      const packet = extractor.update(frame < 180 && frame % 30 === 0 ? loud : pad, DT)
+      if (frame >= 300 && packet[F.onset]) after++
+      if (frame >= 300)
+        for (let band = 0; band < BAND_COUNT; band++) after += packet[BAND_HIT + band] ? 1 : 0
+    }
+    expect(after).toBe(0)
+  })
+
+  it('lets the floor be turned off', () => {
+    const extractor = make(0)
+    const next = random(11)
+    let onsets = 0
+    for (let frame = 0; frame < 600; frame++) {
+      const packet = extractor.update(
+        spectrum(() => -40 + (next() - 0.5) * 4),
+        DT,
+      )
+      onsets += packet[F.onset] ?? 0
+    }
+    expect(onsets).toBeGreaterThan(0)
   })
 })

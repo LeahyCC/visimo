@@ -38,6 +38,11 @@
  *   31     recall          0..1      how closely this passage matches one heard earlier
  *   32     novelty         0..1      how different this passage is from ten seconds ago
  *   33     section         1..       which section this is; a number comes back with its passage
+ *   34-38  subHitCentre..trebleHitCentre
+ *                          0..1      where across the spectrum, in octaves from 20 Hz to
+ *                                    16 kHz, that band's rise landed this frame
+ *   39-43  subHitWidth..trebleHitWidth
+ *                          0..1      how wide that rise was, as a fraction of the same span
  *
  * Each band detects its own onsets, against its own flux and its own adaptive
  * threshold, which is what lets one emitter answer the kick and another the
@@ -59,11 +64,17 @@
  * `section` is an id rather than a level, read by a scene the way it reads
  * an onset, and it is what lets a returning passage return to the same look.
  *
+ * Rows 34 to 43 say where each band's hit landed and how wide it was, so a
+ * scene can give a sound a place of its own: a kick low and fat, a hat high
+ * and small, a note between at its pitch. They are written every frame from
+ * the rise the band saw, and mean something on the frame the band's hit
+ * fired; between hits they hold the last rise, or the band's own middle.
+ *
  * Nothing on the GPU binds this. Every consumer reads the Float32Array on the
  * CPU, so the layout is free of any vec4 alignment.
  */
 
-export const PACKET_LENGTH = 34
+export const PACKET_LENGTH = 44
 
 /** The five bands, in order. Band `i` is packet slot `i`. */
 export const BAND_NAMES = ['sub', 'bass', 'lowMid', 'highMid', 'treble'] as const
@@ -73,6 +84,9 @@ export const BAND_COUNT = BAND_NAMES.length
 /** Where a band's own onset lands, and where its decaying pulse does. */
 export const BAND_HIT = BAND_COUNT
 export const BAND_PULSE = BAND_COUNT * 2
+/** Where each band's hit landed across the spectrum, and how wide it was. */
+export const BAND_HIT_CENTRE = 34
+export const BAND_HIT_WIDTH = BAND_HIT_CENTRE + BAND_COUNT
 
 export const F = {
   sub: 0,
@@ -109,6 +123,16 @@ export const F = {
   recall: 31,
   novelty: 32,
   section: 33,
+  subHitCentre: 34,
+  bassHitCentre: 35,
+  lowMidHitCentre: 36,
+  highMidHitCentre: 37,
+  trebleHitCentre: 38,
+  subHitWidth: 39,
+  bassHitWidth: 40,
+  lowMidHitWidth: 41,
+  highMidHitWidth: 42,
+  trebleHitWidth: 43,
 } as const
 
 export type BandSpec = {
@@ -291,6 +315,10 @@ const WEIGHT_MS = 10000
 const TEMPO_RAMP_MS = 5000
 const MIN_DT = 0.001
 const MAX_DT = 0.1
+// The span a hit's place is measured across, in octaves: 20 Hz to 16 kHz is
+// 9.64 of them, and a place is the fraction of the way up.
+const SPAN_LOW_HZ = 20
+const SPAN_OCTAVES = Math.log2(16000 / SPAN_LOW_HZ)
 // Chroma is read from spectral peaks between these, each weighted by its
 // log magnitude. Peaks rather than every bin because drums fill every bin
 // and flatten a magnitude chroma: on a real track the peak-picked chroma
@@ -1069,6 +1097,13 @@ export class FeatureExtractor {
   private readonly detector: OnsetDetector
   /** Each band's half-wave rectified rise, refilled in the band loop. */
   private readonly bandFlux: Float32Array
+  /** Where that rise sat across the spectrum, and how wide it was. */
+  private readonly bandCentre: Float32Array
+  private readonly bandWidth: Float32Array
+  /** Each bin's place across the span, 0 at 20 Hz to 1 at 16 kHz, by octave. */
+  private readonly octaves: Float32Array
+  /** Each band's own middle on the same scale, for a frame with no rise. */
+  private readonly bandMiddle: Float32Array
   /** The song-scale features, one step a frame off what the rest works out. */
   private readonly song = new Song()
   private readonly harmony = new Harmony()
@@ -1119,6 +1154,16 @@ export class FeatureExtractor {
     this.detectors = this.filters.map((filter) => detector(filter.total))
     this.detector = detector(this.span.total)
     this.bandFlux = new Float32Array(this.bands.length)
+    this.bandCentre = new Float32Array(this.bands.length)
+    this.bandWidth = new Float32Array(this.bands.length)
+    const place = (hz: number) =>
+      clamp01(Math.log2(Math.max(hz, SPAN_LOW_HZ) / SPAN_LOW_HZ) / SPAN_OCTAVES)
+    this.octaves = new Float32Array(this.bins)
+    for (let bin = 0; bin < this.bins; bin++) this.octaves[bin] = place(bin * this.binHz)
+    this.bandMiddle = new Float32Array(
+      this.bands.map((band) => place(Math.sqrt(band.low * band.high))),
+    )
+    this.bandCentre.set(this.bandMiddle)
   }
 
   /**
@@ -1152,6 +1197,10 @@ export class FeatureExtractor {
       const { start, weights, total } = filter
       let squares = 0
       let rises = 0
+      // The rise's first and second moments across the span, so a hit can
+      // say where it landed and how wide it was.
+      let risePlace = 0
+      let riseSpread = 0
       for (let index = 0; index < weights.length; index++) {
         const weight = weights[index] ?? 0
         if (weight === 0) continue
@@ -1159,7 +1208,19 @@ export class FeatureExtractor {
         const magnitude = magnitudes[bin] ?? 0
         squares += weight * magnitude * magnitude
         const rise = (logs[bin] ?? 0) - (previousLogs[bin] ?? 0)
-        if (rise > 0) rises += weight * rise
+        if (rise > 0) {
+          const weighted = weight * rise
+          const place = this.octaves[bin] ?? 0
+          rises += weighted
+          risePlace += weighted * place
+          riseSpread += weighted * place * place
+        }
+      }
+
+      if (rises > 0) {
+        const centre = risePlace / rises
+        this.bandCentre[band] = centre
+        this.bandWidth[band] = Math.sqrt(Math.max(0, riseSpread / rises - centre * centre))
       }
       // The root mean square, which is what the energy in a band is; the mean
       // of the magnitudes would divide one bright partial by the whole band.
@@ -1208,6 +1269,8 @@ export class FeatureExtractor {
       const found = this.detectors[band]?.step(this.bandFlux[band] ?? 0, dt)
       packet[BAND_HIT + band] = found?.strength ?? 0
       packet[BAND_PULSE + band] = found?.pulse ?? 0
+      packet[BAND_HIT_CENTRE + band] = this.bandCentre[band] ?? 0
+      packet[BAND_HIT_WIDTH + band] = this.bandWidth[band] ?? 0
       anyBand ||= found?.onset ?? false
     }
 

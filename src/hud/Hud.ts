@@ -10,7 +10,7 @@
  * rows tick independently: the treble row with the hats, the sub row with the
  * kick. A row that never ticks is an emitter that will never fire.
  */
-import { BAND_HIT, BAND_NAMES, BAND_PULSE, F } from '../audio/FeatureExtractor'
+import { BAND_HIT, BAND_NAMES, BAND_PULSE, F, keyLabel } from '../audio/FeatureExtractor'
 
 export type HudStats = {
   fps: number
@@ -30,8 +30,8 @@ const ROWS = BAND_NAMES.length + 1
 const ROW_HEIGHT = 15
 const BARS_TOP = 12
 const TRACE_HEIGHT = 56
-/** The six lines of text under the trace, the last of which is the preset. */
-const FOOTER = 96
+/** The eight lines of text under the trace, the last of which is the preset, then the beat bar. */
+const FOOTER = 132
 
 export class Hud {
   private readonly context: CanvasRenderingContext2D | null
@@ -152,8 +152,11 @@ export class Hud {
     ctx.fillStyle = '#cfd8d3'
     const tempo = packet[F.tempoBpm] ?? 0
     const beat = packet[F.beatPulse] ?? 0
+    const slow = (at: number) => (packet[at] ?? 0).toFixed(2)
+    // The tempo to a tenth, since the tracker is good to that, with its
+    // confidence beside it.
     ctx.fillText(
-      `flux ${(packet[F.flux] ?? 0).toFixed(2)}  thr ${(packet[F.fluxThreshold] ?? 0).toFixed(2)}  beat ${beat.toFixed(2)}  ${tempo ? `${Math.round(tempo)} bpm` : 'tempo ?'}`,
+      `flux ${slow(F.flux)}  thr ${slow(F.fluxThreshold)}  beat ${beat.toFixed(2)}  ${tempo ? `${tempo.toFixed(1)} bpm` : 'tempo ?'} (${slow(F.tempoConfidence)})`,
       x + 8,
       top + height + 12,
     )
@@ -161,20 +164,44 @@ export class Hud {
     // The song rather than the frame. These move over tens of seconds, so the
     // way to tell whether one is worth mapping is to watch this line for a
     // while before wiring it to a knob.
-    const slow = (at: number) => (packet[at] ?? 0).toFixed(2)
     ctx.fillText(
       `pace ${slow(F.pace)}  swell ${slow(F.swell)}  weight ${slow(F.weight)}  tempo ${slow(F.tempo)}`,
       x + 8,
       top + height + 26,
     )
 
+    // The harmony: the key the hue stands for, how surely, and whether a
+    // chord just moved. A clarity near 0 means the hue is a memory.
     ctx.fillText(
-      `${stats.fps.toFixed(0)} fps  ${stats.frameMs.toFixed(1)} ms  ${stats.scene}`,
+      `key ${keyLabel(packet[F.keyHue] ?? 0)}  clarity ${slow(F.keyClarity)}  hue ${slow(F.keyHue)}  change ${slow(F.harmonicChange)}`,
       x + 8,
       top + height + 40,
     )
-    ctx.fillText(stats.adapter.slice(0, 44), x + 8, top + height + 54)
-    ctx.fillText(`post ${stats.post}`, x + 8, top + height + 68)
-    ctx.fillText(`preset ${stats.preset}`, x + 8, top + height + 82)
+
+    // The structure: which section this is, whether it has been heard before
+    // and whether it just began.
+    ctx.fillText(
+      `section ${Math.round(packet[F.section] ?? 0)}  recall ${slow(F.recall)}  novelty ${slow(F.novelty)}`,
+      x + 8,
+      top + height + 54,
+    )
+
+    ctx.fillText(
+      `${stats.fps.toFixed(0)} fps  ${stats.frameMs.toFixed(1)} ms  ${stats.scene}`,
+      x + 8,
+      top + height + 68,
+    )
+    ctx.fillText(stats.adapter.slice(0, 44), x + 8, top + height + 82)
+    ctx.fillText(`post ${stats.post}`, x + 8, top + height + 96)
+    ctx.fillText(`preset ${stats.preset}`, x + 8, top + height + 110)
+
+    // The beat phase as a bar that sweeps once a beat. If it lands as the
+    // beat does, the tracker has the tempo; if it drifts against the music it
+    // has a fraction of it. Grey while there is no tempo and it is coasting.
+    const bar = top + height + 122
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)'
+    ctx.fillRect(x + 8, bar - 3, width - 16, 6)
+    ctx.fillStyle = tempo ? 'rgba(255, 200, 80, 0.95)' : 'rgba(255, 255, 255, 0.25)'
+    ctx.fillRect(x + 8, bar - 3, (width - 16) * (packet[F.beatPhase] ?? 0), 6)
   }
 }

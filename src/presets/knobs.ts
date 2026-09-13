@@ -19,13 +19,32 @@
  * `onset` is not: they are events rather than levels, and a scene reads an
  * event straight from the packet.
  *
- * The last four are the song rather than the frame, and they move over tens of
- * seconds: `pace` is how busy the track is, `swell` whether this passage is
- * lifting or dropping, `weight` whether it is bass-led or bright, `tempo` the
- * BPM guess normalised. They are what makes a ballad and a drum and bass track
- * look different without swapping the preset. Reach for `pace` rather than
- * `tempo` when what you mean is "fast": the BPM guess is the weak part of the
- * extractor and the README says by how much.
+ * `pace`, `swell`, `weight` and `tempo` are the song rather than the frame,
+ * and they move over tens of seconds: `pace` is how busy the track is,
+ * `swell` whether this passage is lifting or dropping, `weight` whether it is
+ * bass-led or bright, `tempo` the BPM guess normalised. They are what makes a
+ * ballad and a drum and bass track look different without swapping the
+ * preset. Reach for `pace` rather than `tempo` when what you mean is "fast":
+ * the BPM guess is the weak part of the extractor and the README says by how
+ * much.
+ *
+ * Then the harmony. `keyHue` is where the key sits on the circle of fifths,
+ * 0 to 1 and wrapping, so a song has a colour of its own and a modulation
+ * moves it; `keyClarity` is how surely that key is heard, 0 on drums alone;
+ * `harmonicChange` lifts for a couple of seconds when a chord moves.
+ *
+ * Then the structure. `recall` is how closely this passage matches one heard
+ * earlier in the track, so a chorus coming back reads as a return;
+ * `novelty` lifts for a few seconds when a new passage begins. The section
+ * id itself is not here, for the reason the hits are not: a scene reads it
+ * straight from the packet and chooses a layout with it.
+ *
+ * The last two are the beat as a clock. `beatPhase` runs from 0 on a beat to
+ * 1 just before the next, predicted rather than reacted to, so with `invert`
+ * it is a pulse that falls across the beat and lands on time.
+ * `tempoConfidence` is how well the tracker's period fits; gate anything
+ * built on the phase or the tempo with it, since a phase on a wrong tempo is
+ * a steady rhythm in the wrong place.
  */
 export const AUDIO_FIELDS = [
   'sub',
@@ -47,6 +66,13 @@ export const AUDIO_FIELDS = [
   'swell',
   'weight',
   'tempo',
+  'keyHue',
+  'keyClarity',
+  'harmonicChange',
+  'recall',
+  'novelty',
+  'tempoConfidence',
+  'beatPhase',
 ] as const
 export type AudioField = (typeof AUDIO_FIELDS)[number]
 
@@ -63,6 +89,13 @@ export type Curve = (typeof CURVES)[number]
  * is a count rather than a magnitude, and the scene rounds and clamps it.
  * `voice` is how far each emitter stands for one sound of its own rather than
  * for the whole mix; which sound that is, is the scene's, not the preset's.
+ * `saturation` is how much of the dye's colour is kept, 0 for grey and 1 for
+ * the palette as it is, so a passage with no key to speak of can be drawn
+ * without one. `events` is how many short-lived emitters may be alive at
+ * once, one spawned per band hit and placed by where the hit landed; 0 is
+ * off. `eventLife` is how long one lasts in seconds, `eventForce` and
+ * `eventDye` what a full-strength one adds over its life, and
+ * `eventRadius` its size before the hit's width scales it.
  */
 export const FLUID_KNOBS = [
   'velocityDecay',
@@ -70,6 +103,7 @@ export const FLUID_KNOBS = [
   'vorticity',
   'viscosity',
   'intensity',
+  'saturation',
   'spread',
   'force',
   'dye',
@@ -81,6 +115,11 @@ export const FLUID_KNOBS = [
   'orbitSpeed',
   'emitters',
   'voice',
+  'events',
+  'eventLife',
+  'eventForce',
+  'eventDye',
+  'eventRadius',
 ] as const
 export type FluidKnob = (typeof FLUID_KNOBS)[number]
 

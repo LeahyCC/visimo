@@ -351,9 +351,9 @@ const NOVELTY_GAIN = 5
 // section when the recall to it is at least this.
 const CANDIDATE_NOVELTY = 0.4
 const MIN_SECTION_SECONDS = 6
-const CONFIRM_SECONDS = 5
+const CONFIRM_SECONDS = 6
 const SAME_SECTION_SIMILARITY = 0.965
-const RECALL_TO_REJOIN = 0.7
+const RECALL_TO_REJOIN = 0.6
 // A section's mean starts this long after it began, and a candidate's this
 // long after the candidate, so neither takes in the passage before it. The
 // section's mean also only takes samples while the novelty is low: what a
@@ -366,6 +366,12 @@ const CANDIDATE_MEAN_FROM_SECONDS = 1.5
 // and how much the chroma's shape weighs against a band level.
 const STRUCTURE_RATE_FULL = 3
 const STRUCTURE_CHROMA_WEIGHT = 1
+// The top two band levels weigh double. Every level is scaled by its own
+// recent peak, so a drop and a quiet passage share their low end; whether
+// the top of the spectrum is occupied is what tells them apart, and at
+// equal weight a drop matched the intro at 0.94, which is too close to a
+// return. Doubled it is 0.89, with the drops still matching at 1.00.
+const STRUCTURE_HIGH_WEIGHT = 2
 const RECALL_RAMP_MS = 1000
 const NOVELTY_RAMP_MS = 500
 const TEMPO_MIN_BPM = 60
@@ -757,7 +763,7 @@ class Mean {
  * seconds ago is `novelty`.
  *
  * A `section` boundary takes two steps, because the fast novelty also lifts
- * on a fill. High novelty is a candidate; five seconds on, the mean of the
+ * on a fill. High novelty is a candidate; six seconds on, the mean of the
  * new passage is set against the mean of the section it would end, and if
  * the two are nearly the same the candidate is dropped. A confirmed boundary
  * either starts a new section or, when the recall to an older one is high,
@@ -785,6 +791,8 @@ export class Structure {
   private readonly sectionMean = new Mean()
   private readonly candidateMean = new Mean()
   private candidateAt: number | null = null
+  /** The closest an ended section has come to the present since the candidate opened. */
+  private candidateMatch = { similarity: -1, section: 0 }
   private sinceSnapshot = Infinity
   private sinceCompare = Infinity
   private sinceBoundary = 0
@@ -816,7 +824,8 @@ export class Structure {
     }
 
     for (let band = 0; band < BAND_COUNT; band++) {
-      level(band, packet[band] ?? 0)
+      const weight = band >= BAND_COUNT - 2 ? STRUCTURE_HIGH_WEIGHT : 1
+      level(band, weight * (packet[band] ?? 0))
       now[BAND_COUNT + 1 + band] = clamp01((this.rates[band] ?? 0) / STRUCTURE_RATE_FULL)
     }
     level(BAND_COUNT, packet[F.energy] ?? 0)
@@ -912,6 +921,15 @@ export class Structure {
     ) {
       this.candidateAt = this.elapsed
       this.candidateMean.reset()
+      this.candidateMatch = { similarity: -1, section: 0 }
+    }
+
+    // While a candidate is open the present is still becoming the new
+    // passage, so the rejoin is judged on the closest it has come to an
+    // ended section over the whole window rather than on the last look.
+    if (this.candidateAt !== null) {
+      const match = this.best(this.now, this.section)
+      if (match.similarity > this.candidateMatch.similarity) this.candidateMatch = match
     }
 
     if (this.candidateAt === null || this.elapsed - this.candidateAt < CONFIRM_SECONDS) return
@@ -921,12 +939,12 @@ export class Structure {
     if (cosine(this.candidateMean.value, this.sectionMean.value) >= SAME_SECTION_SIMILARITY) return
 
     // A boundary. The section that ends is remembered as its mean, folded
-    // into what was remembered of it before if it has been here already;
-    // then the memories are judged with the present, which five seconds on
-    // has left the old passage behind, where the candidate's mean still
-    // carries the first seconds of the change.
+    // into what was remembered of it before if it has been here already.
+    // The memories were judged with the present as the window ran, rather
+    // than with the candidate's mean, which still carries the first seconds
+    // of the change.
     this.retire()
-    const match = this.best(this.now, this.section)
+    const match = this.candidateMatch
     const section =
       this.recallOf(match.similarity) >= RECALL_TO_REJOIN ? match.section : this.sections + 1
     this.sections = Math.max(this.sections, section)

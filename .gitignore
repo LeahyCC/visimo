@@ -3,6 +3,3 @@ dist/
 demo/dist/
 .env
 
-# Working notes for the extraction out of Musimo; not part of the package.
-HANDOFF.md
-HANDOFF-PROMPT.md

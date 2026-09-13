@@ -4,7 +4,7 @@
   "scene": "fluid",
   "sceneParams": {
     "velocityDecay": 0.1,
-    "dyeDecay": 0.42,
+    "dyeDecay": 0.3,
     "vorticity": 26,
     "viscosity": 0.06,
     "intensity": 1,
@@ -19,7 +19,7 @@
     "colourDrift": 0,
     "orbitSpeed": 0.1,
     "emitters": 3,
-    "voice": 0.45
+    "voice": 0.7
   },
   "postParams": {
     "feedback": { "amount": 0.3, "decay": 0.7, "zoom": 1.004, "rotate": 0.0006 },
@@ -35,11 +35,12 @@
     { "from": "lowEnd", "to": "vorticity", "gain": 24 },
     { "from": "lowEnd", "to": "viscosity", "gain": -0.04 },
     { "from": "energy", "to": "velocityDecay", "gain": 0.14 },
-    { "from": "energy", "to": "dyeDecay", "gain": 0.6 },
+    { "from": "energy", "to": "dyeDecay", "gain": 0.3 },
     { "from": "energy", "to": "spread", "gain": 0.16 },
     { "from": "beatPulse", "to": "intensity", "gain": 0.8 },
     { "from": "lowEnd", "to": "colourShift", "gain": 0.25, "curve": "square" },
     { "from": "beatPulse", "to": "bloom.intensity", "gain": 0.2 },
-    { "from": "keyHue", "to": "colourShift", "gain": 1 }
+    { "from": "keyHue", "to": "colourShift", "gain": 1 },
+    { "from": "energy", "to": "dye", "gain": 3 }
   ]
 }

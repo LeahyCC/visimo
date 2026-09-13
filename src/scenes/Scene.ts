@@ -3,8 +3,6 @@ import type { Tuning } from '../presets/knobs'
 export type SceneContext = {
   device: GPUDevice
   format: GPUTextureFormat
-  /** The 64-byte feature packet, uploaded once per frame by the renderer. */
-  features: GPUBuffer
   /** True on a software rasteriser; scenes should scale their work down. */
   software: boolean
 }

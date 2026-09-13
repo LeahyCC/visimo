@@ -6,10 +6,13 @@ import type { Tuning } from '../presets/knobs'
 import { resolveScene } from '../presets/resolve'
 import { DEFAULT_FLUID_SIZE, SOFTWARE_FLUID_SIZE } from './catalog'
 import {
-  EMITTERS,
+  BAND_GROUPS,
+  bandsOf,
+  emitterCount,
   FLUID_DEFAULTS,
   fluidFrame,
   fluidParams,
+  MAX_EMITTERS,
   PALETTE_SIZE,
   PALETTE_STOPS,
   paletteLut,
@@ -90,7 +93,7 @@ describe('fluid frame', () => {
     // one that could push them off screen.
     for (const time of [0, 1.7, 5.3, 11, 23.5]) {
       const built = frame({ time, energy: 1 }, 1 / 60, wide)
-      expect(built.splats).toHaveLength(EMITTERS)
+      expect(built.splats).toHaveLength(plume.sceneParams.emitters)
       for (const splat of built.splats) {
         expect(Math.abs(splat.x - 0.5)).toBeLessThanOrEqual(wide.x)
         expect(Math.abs(splat.y - 0.5)).toBeLessThanOrEqual(wide.y)
@@ -192,7 +195,7 @@ describe('sim uniform', () => {
     const built = frame()
     built.splats = []
     const out = writeSimUniform(built, 1024, square, new Float32Array(SIM_UNIFORM_FLOATS))
-    for (let index = 0; index < EMITTERS; index++)
+    for (let index = 0; index < MAX_EMITTERS; index++)
       expect(out[16 + index * 8 + 5] ?? 0).toBeGreaterThan(0)
   })
 
@@ -206,5 +209,120 @@ describe('sim uniform', () => {
       expect(out[base + 4]).toBeCloseTo(splat.force, 6)
       expect(out[base + 6]).toBeCloseTo(splat.dye, 6)
     })
+  })
+})
+
+describe('emitter count', () => {
+  const counted = (emitters: number, values: Partial<Record<keyof typeof F, number>> = {}) =>
+    fluidFrame(fluidParams({ emitters }), packet(values), 1 / 60, square)
+
+  it('rounds a knob that arrives between two whole emitters', () => {
+    expect(emitterCount(fluidParams({ emitters: 3.4 }))).toBe(3)
+    expect(emitterCount(fluidParams({ emitters: 3.6 }))).toBe(4)
+  })
+
+  // A mapping may drive this knob like any other, so both ends need holding:
+  // zero emitters is a dead stage and more than the array holds reads past it.
+  it('clamps a knob driven past either end to a slot that exists', () => {
+    expect(emitterCount(fluidParams({ emitters: -3 }))).toBe(1)
+    expect(emitterCount(fluidParams({ emitters: 99 }))).toBe(MAX_EMITTERS)
+  })
+
+  it('builds one splat per emitter asked for', () => {
+    for (const count of [1, 3, MAX_EMITTERS]) expect(counted(count).splats).toHaveLength(count)
+  })
+
+  it('spaces the orbit by the count rather than by a fixed three', () => {
+    // Five emitters on the same orbit sit at five places, so no two share one.
+    const places = counted(5, { time: 3 }).splats.map((splat) => `${splat.x},${splat.y}`)
+    expect(new Set(places).size).toBe(5)
+  })
+
+  it('tells the shader how many slots this frame filled', () => {
+    const out = writeSimUniform(counted(5), 512, square, new Float32Array(SIM_UNIFORM_FLOATS))
+    expect(out[10]).toBe(5)
+  })
+
+  it('leaves no dye in the slots past the count', () => {
+    const built = counted(2, { onset: 1, onsetStrength: 1 })
+    const out = writeSimUniform(built, 512, square, new Float32Array(SIM_UNIFORM_FLOATS))
+    for (let index = 2; index < MAX_EMITTERS; index++) {
+      expect(out[16 + index * 8 + 4]).toBe(0)
+      expect(out[16 + index * 8 + 6]).toBe(0)
+    }
+  })
+})
+
+describe('emitter bands', () => {
+  const voiced = (
+    emitters: number,
+    voice: number,
+    values: Partial<Record<keyof typeof F, number>> = {},
+  ) => fluidFrame(fluidParams({ emitters, voice }), packet(values), 1 / 60, square)
+
+  it('has a grouping for every count an emitter knob can reach', () => {
+    expect(BAND_GROUPS).toHaveLength(MAX_EMITTERS)
+    BAND_GROUPS.forEach((row, index) => expect(row).toHaveLength(index + 1))
+  })
+
+  // Every band heard once at any count is what makes the knob safe to drag:
+  // a gap would silence part of the music, an overlap would double it.
+  it('covers every band exactly once at every count', () => {
+    for (const row of BAND_GROUPS) {
+      const seen: number[] = []
+      for (const [from, to] of row) for (let band = from; band < to; band++) seen.push(band)
+      expect(seen).toEqual([0, 1, 2, 3, 4])
+    }
+  })
+
+  it('gives each emitter its own band when there are five', () => {
+    expect(bandsOf(5, 0)).toEqual([0, 1])
+    expect(bandsOf(5, 4)).toEqual([4, 5])
+    expect(bandsOf(1, 0)).toEqual([0, 5])
+  })
+
+  // The knob resting at zero is what keeps every preset written before bands
+  // existed looking the way it did, so this is the row that must not move.
+  it('leaves the splats exactly as they were when the knob is at zero', () => {
+    const values = { time: 4, energy: 0.8, bass: 0.9, onset: 1, onsetStrength: 1 }
+    const before = fluidFrame(fluidParams({ emitters: 3 }), packet(values), 1 / 60, square)
+    expect(voiced(3, 0, values).splats).toEqual(before.splats)
+  })
+
+  it('feeds an emitter whose band is playing and starves one whose is not', () => {
+    const built = voiced(5, 1, { sub: 1, treble: 0 })
+    expect(built.splats[0]?.dye ?? 0).toBeGreaterThan(0)
+    expect(built.splats[4]?.dye ?? 0).toBe(0)
+    expect(built.splats[4]?.force ?? 0).toBe(0)
+  })
+
+  // The point of the per-band detectors: a hit in one band is that band's
+  // event and reaches nothing else, even a band that is playing just as loud.
+  it('lands a hit on the emitter whose band fired and on no other', () => {
+    const built = voiced(5, 1, { sub: 1, treble: 1, subHit: 1 })
+    const quiet = voiced(5, 1, { sub: 1, treble: 1 })
+    expect(built.splats[0]?.force ?? 0).toBeGreaterThan(quiet.splats[0]?.force ?? 0)
+    expect(built.splats[4]?.force ?? 0).toBe(quiet.splats[4]?.force ?? 0)
+  })
+
+  it('still hears a band after its emitter has merged with a neighbour', () => {
+    // Two emitters: the first covers sub through lowMid, so a sub hit is its.
+    expect(bandsOf(2, 0)).toEqual([0, 3])
+    const built = voiced(2, 1, { sub: 1, subHit: 1 })
+    const quiet = voiced(2, 1, { sub: 1 })
+    expect(built.splats[0]?.force ?? 0).toBeGreaterThan(quiet.splats[0]?.force ?? 0)
+  })
+
+  it('sets each emitter apart by colour and by size', () => {
+    const built = voiced(5, 1, { time: 0 })
+    expect(new Set(built.splats.map((splat) => splat.colour)).size).toBe(5)
+    // Low bands are the fat ones, high bands the small ones.
+    expect(built.splats[0]?.radius ?? 0).toBeGreaterThan(built.splats[4]?.radius ?? 0)
+  })
+
+  it('never drives an emitter backwards on a negative reading', () => {
+    const built = voiced(5, 1, { sub: -4, subHit: -4 })
+    expect(built.splats[0]?.dye ?? -1).toBe(0)
+    expect(built.splats[0]?.force ?? -1).toBe(0)
   })
 })

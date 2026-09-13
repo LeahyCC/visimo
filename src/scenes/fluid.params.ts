@@ -5,19 +5,28 @@
  * left moving data between buffers.
  *
  * Which feature drives which of these numbers is the preset's business, not
- * this file's: the magnitudes arrive already modulated.
+ * this file's: the magnitudes arrive already modulated. The voice ladder below
+ * is not an exception to that. It says which emitter stands for which sound,
+ * which is this scene's own shape in the way the Lissajous orbit is, and what
+ * that is worth is still a knob the preset sets.
  */
-import { F } from '../audio/FeatureExtractor'
+import { BAND_COUNT, BAND_HIT, F } from '../audio/FeatureExtractor'
 import { FLUID_KNOBS } from '../presets/knobs'
 import type { FluidKnob, Tuning } from '../presets/knobs'
 import { DEFAULT_FLUID_SIZE, FLUID_SIZES, SOFTWARE_FLUID_SIZE } from './catalog'
 
-/** Emitters circling the grid. The WGSL array is this long. */
-export const EMITTERS = 3
+/**
+ * One emitter per band, and there are five bands. The WGSL array is this long
+ * and the uniform is always sized for all of them; how many a frame fills is
+ * the `emitters` knob. Raising this means adding a band in
+ * `audio/FeatureExtractor.ts` and raising `MAX_EMITTERS` and the array length
+ * in `shaders/fluid.common.wgsl` to match.
+ */
+export const MAX_EMITTERS = BAND_COUNT
 export const PALETTE_SIZE = 256
 
 /** Floats in the sim uniform; the Sim struct in fluid.common.wgsl matches. */
-export const SIM_UNIFORM_FLOATS = 16 + EMITTERS * 8
+export const SIM_UNIFORM_FLOATS = 16 + MAX_EMITTERS * 8
 
 /** One injection. Positions and radii are fractions of the grid. */
 export type Splat = {
@@ -92,6 +101,109 @@ const orbit = (phase: number) => ({
 /** The palette coordinate wraps, and a preset may hand over a negative one. */
 const wrap = (value: number) => ((value % 1) + 1) % 1
 
+/** Blend between two numbers. `at` 0 is the first, 1 is the second. */
+const mix = (from: number, to: number, at: number) => from + (to - from) * at
+
+/** What one emitter looks like when it stands for a band of its own. */
+type Voice = {
+  /** Where it sits in the palette, 0 to 1. Low bands are the blue end. */
+  tint: number
+  /** Multiplier on the emitter radius. Low bands are fatter. */
+  size: number
+  /** Multiplier on the orbit speed. High bands move quicker. */
+  pace: number
+}
+
+/**
+ * The character of each band, in the packet's band order. The tints walk the
+ * palette the way the ear walks the spectrum, deep blue for the sub up to
+ * magenta for the treble, so a plume's colour says which part of the music it
+ * is; the sizes and paces follow the same line, because a kick is a slow fat
+ * thing and a hat is a quick small one.
+ */
+const BAND_VOICES: readonly Voice[] = [
+  { tint: 0.0, size: 1.9, pace: 0.45 },
+  { tint: 0.16, size: 1.55, pace: 0.6 },
+  { tint: 0.38, size: 1.1, pace: 0.9 },
+  { tint: 0.6, size: 0.75, pace: 1.35 },
+  { tint: 0.82, size: 0.5, pace: 1.8 },
+]
+
+/**
+ * Which bands each emitter covers, as a half-open range, by how many emitters
+ * there are. Row `n` splits the five bands into `n` runs, so every band is
+ * heard at any count and no band is heard twice. At five it is one each, which
+ * is the case the scene is really for; below that the low bands merge first,
+ * because the ear separates the top of the spectrum more finely than the
+ * bottom and the treble is the part worth keeping on its own.
+ */
+export const BAND_GROUPS: readonly (readonly (readonly [number, number])[])[] = [
+  [[0, 5]],
+  [
+    [0, 3],
+    [3, 5],
+  ],
+  [
+    [0, 2],
+    [2, 3],
+    [3, 5],
+  ],
+  [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 5],
+  ],
+  [
+    [0, 1],
+    [1, 2],
+    [2, 3],
+    [3, 4],
+    [4, 5],
+  ],
+]
+
+/** The bands emitter `index` covers when there are `count` of them. */
+export const bandsOf = (count: number, index: number): readonly [number, number] =>
+  BAND_GROUPS[count - 1]?.[index] ?? [0, BAND_COUNT]
+
+/**
+ * What a group of bands is doing now: the loudest level among them, and the
+ * hardest hit among them. The loudest rather than the mean, because a group
+ * stands for "is any of this playing" and a mean would let one busy band be
+ * hidden by its quiet neighbours.
+ */
+function heard(features: Float32Array, [from, to]: readonly [number, number]) {
+  let level = 0
+  let hit = 0
+  for (let band = from; band < to; band++) {
+    level = Math.max(level, features[band] ?? 0)
+    hit = Math.max(hit, features[BAND_HIT + band] ?? 0)
+  }
+
+  return { level: Math.min(1, Math.max(0, level)), hit: Math.min(1, Math.max(0, hit)) }
+}
+
+/** How a group of bands looks: the average of its members' characters. */
+function look(group: readonly [number, number]): Voice {
+  const [from, to] = group
+  let tint = 0
+  let size = 0
+  let pace = 0
+  for (let band = from; band < to; band++) {
+    const voice = BAND_VOICES[band] ?? BAND_VOICES[0]
+    tint += voice?.tint ?? 0
+    size += voice?.size ?? 1
+    pace += voice?.pace ?? 1
+  }
+
+  const width = Math.max(1, to - from)
+  return { tint: tint / width, size: size / width, pace: pace / width }
+}
+
+/** An onset as the splats want it: nothing, or a floor plus what it was worth. */
+const gateOf = (strength: number) => (strength > 0 ? 0.3 + strength * 0.7 : 0)
+
 export type FluidParams = Record<FluidKnob, number>
 
 /**
@@ -128,7 +240,23 @@ export const FLUID_DEFAULTS: FluidParams = {
   colourDrift: 0.035,
   /** How fast the emitters ride their Lissajous orbit. */
   orbitSpeed: 0.19,
+  /** How many emitters ride it, 1 up to `MAX_EMITTERS`. Rounded on use. */
+  emitters: 3,
+  /**
+   * How far each emitter stands for its own sound rather than the whole mix.
+   * At 0 they all behave alike, which is what the scene did before the ladder
+   * existed; at 1 each one is only its band, in its own colour and size.
+   */
+  voice: 0,
 }
+
+/**
+ * The knob as a count. It is a float like every other knob, so a preset or a
+ * mapping may hand over 3.4 or a number off either end; the orbit spacing and
+ * the uniform both need a whole number of slots that exist.
+ */
+export const emitterCount = (params: FluidParams) =>
+  Math.min(MAX_EMITTERS, Math.max(1, Math.round(params.emitters)))
 
 /** The resolved knobs as this scene's own object, defaults for the rest. */
 export function fluidParams(tuning: Tuning): FluidParams {
@@ -148,6 +276,17 @@ export function fluidParams(tuning: Tuning): FluidParams {
  * an onset event, packet index 8 with its strength at 9, and the gate is read
  * from the packet here rather than mapped, because it is an event and not a
  * level; what the hit is worth is `hitForce` and `hitDye`.
+ *
+ * Each emitter also stands for one band, as far as the `voice` knob asks it
+ * to. Its band's level scales what that emitter trickles, and its band's own
+ * onset is what makes it hit, so a kick fires the sub emitter and leaves the
+ * treble one alone rather than the two sharing one trigger at different
+ * volumes. The rest of the voice is how it looks: its place in the palette
+ * and how fat and how fast it is.
+ *
+ * The knob at 0 puts every emitter back on the global onset and the shared
+ * numbers, which is what the scene did before any of this and what a preset
+ * written then still gets.
  */
 export function fluidFrame(
   params: FluidParams,
@@ -157,11 +296,21 @@ export function fluidFrame(
 ): FluidFrame {
   const step = Math.min(MAX_STEP, Math.max(0.001, dt))
   const time = features[F.time] ?? 0
-  const gate = (features[F.onset] ?? 0) > 0.5 ? 0.3 + (features[F.onsetStrength] ?? 0) * 0.7 : 0
+  const whole =
+    (features[F.onset] ?? 0) > 0.5 ? gateOf(Math.max(0, features[F.onsetStrength] ?? 0)) : 0
 
+  const count = emitterCount(params)
+  const blend = Math.min(1, Math.max(0, params.voice))
   const splats: Splat[] = []
-  for (let index = 0; index < EMITTERS; index++) {
-    const phase = time * params.orbitSpeed + (index * TWO_PI) / EMITTERS
+  for (let index = 0; index < count; index++) {
+    const group = bandsOf(count, index)
+    const band = heard(features, group)
+    const voice = look(group)
+    // At a blend of 0 every one of these collapses to the number it was
+    // before voices existed, which is what keeps the old look reachable.
+    const drive = mix(1, band.level, blend)
+    const gate = mix(whole, gateOf(band.hit), blend)
+    const phase = time * params.orbitSpeed * mix(1, voice.pace, blend) + (index * TWO_PI) / count
     const here = orbit(phase)
     const ahead = orbit(phase + 0.05)
     const run = Math.hypot(ahead.x - here.x, ahead.y - here.y) || 1
@@ -170,10 +319,12 @@ export function fluidFrame(
       y: 0.5 + here.y * params.spread * visible.y,
       dx: (ahead.x - here.x) / run,
       dy: (ahead.y - here.y) / run,
-      force: params.force * step + gate * params.hitForce,
-      radius: params.radius,
-      dye: params.dye * step + gate * params.hitDye,
-      colour: wrap(time * params.colourDrift + index / EMITTERS + params.colourShift),
+      force: (params.force * step + gate * params.hitForce) * drive,
+      radius: params.radius * mix(1, voice.size, blend),
+      dye: (params.dye * step + gate * params.hitDye) * drive,
+      colour: wrap(
+        time * params.colourDrift + mix(index / count, voice.tint, blend) + params.colourShift,
+      ),
     })
   }
 
@@ -233,7 +384,8 @@ export function paletteLut(size = PALETTE_SIZE): Uint8Array {
 /**
  * Fill the sim uniform. The layout is the Sim struct in fluid.common.wgsl:
  * grid, texel, two vec4s of settings, the cover scale, then one pair of
- * vec4s per emitter.
+ * vec4s per emitter slot. Every slot is written whether or not this frame
+ * uses it, so a count that drops leaves no stale splat behind.
  */
 export function writeSimUniform(
   frame: FluidFrame,
@@ -251,14 +403,16 @@ export function writeSimUniform(
   out[7] = frame.vorticity
   out[8] = frame.viscosity
   out[9] = frame.intensity
-  out[10] = 0
+  // The shader loops to this; the slots past it keep their zeros and cost
+  // nothing but the bytes.
+  out[10] = frame.splats.length
   out[11] = 0
   // Canvas coordinates times this land in the grid; it is the visible band.
   out[12] = visible.x * 2
   out[13] = visible.y * 2
   out[14] = 0
   out[15] = 0
-  for (let index = 0; index < EMITTERS; index++) {
+  for (let index = 0; index < MAX_EMITTERS; index++) {
     const splat = frame.splats[index]
     const base = 16 + index * 8
     out[base] = splat?.x ?? 0.5

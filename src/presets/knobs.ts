@@ -10,9 +10,22 @@
  */
 
 /**
- * What a mapping may read. Ten come straight from the packet; `lowEnd` is the
- * louder of sub and bass, which is what every scene wanted from the low end
- * before presets existed.
+ * What a mapping may read. All but `lowEnd` come straight from the packet;
+ * that one is the louder of sub and bass, which is what every scene wanted
+ * from the low end before presets existed.
+ *
+ * The five `Pulse` rows are each band's own onset, decayed so it lasts longer
+ * than the frame it fired on. The raw hits are not here for the same reason
+ * `onset` is not: they are events rather than levels, and a scene reads an
+ * event straight from the packet.
+ *
+ * The last four are the song rather than the frame, and they move over tens of
+ * seconds: `pace` is how busy the track is, `swell` whether this passage is
+ * lifting or dropping, `weight` whether it is bass-led or bright, `tempo` the
+ * BPM guess normalised. They are what makes a ballad and a drum and bass track
+ * look different without swapping the preset. Reach for `pace` rather than
+ * `tempo` when what you mean is "fast": the BPM guess is the weak part of the
+ * extractor and the README says by how much.
  */
 export const AUDIO_FIELDS = [
   'sub',
@@ -25,6 +38,15 @@ export const AUDIO_FIELDS = [
   'flux',
   'onsetStrength',
   'beatPulse',
+  'subPulse',
+  'bassPulse',
+  'lowMidPulse',
+  'highMidPulse',
+  'treblePulse',
+  'pace',
+  'swell',
+  'weight',
+  'tempo',
 ] as const
 export type AudioField = (typeof AUDIO_FIELDS)[number]
 
@@ -37,7 +59,10 @@ export type Curve = (typeof CURVES)[number]
 
 /**
  * The fluid's numbers. `force` and `dye` are what the emitters trickle every
- * second; `hitForce` and `hitDye` are what one onset adds on top.
+ * second; `hitForce` and `hitDye` are what one onset adds on top. `emitters`
+ * is a count rather than a magnitude, and the scene rounds and clamps it.
+ * `voice` is how far each emitter stands for one sound of its own rather than
+ * for the whole mix; which sound that is, is the scene's, not the preset's.
  */
 export const FLUID_KNOBS = [
   'velocityDecay',
@@ -54,6 +79,8 @@ export const FLUID_KNOBS = [
   'colourShift',
   'colourDrift',
   'orbitSpeed',
+  'emitters',
+  'voice',
 ] as const
 export type FluidKnob = (typeof FLUID_KNOBS)[number]
 

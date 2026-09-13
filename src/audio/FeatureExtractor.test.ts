@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  bandBins,
+  BAND_COUNT,
+  BAND_HIT,
+  BAND_NAMES,
+  BAND_PULSE,
+  bandFilter,
   dbToLinear,
   DEFAULT_BANDS,
   Envelope,
@@ -44,15 +48,48 @@ describe('dbToLinear', () => {
   })
 })
 
-describe('bandBins', () => {
-  it('covers the band at both fft sizes', () => {
-    expect(bandBins(60, 250, 2048, SAMPLE_RATE)).toEqual([3, 11])
-    expect(bandBins(60, 250, 4096, SAMPLE_RATE)).toEqual([5, 21])
+describe('bandFilter', () => {
+  const width = (fftSize: number) => SAMPLE_RATE / fftSize
+
+  // The whole point of weighting the edge bins: a band ends up exactly as wide
+  // as the Hz it asked for, instead of as wide as the nearest whole bins.
+  it('weighs exactly the width the band asked for, at any fft size', () => {
+    for (const fftSize of [2048, 4096]) {
+      for (const [low, high] of [
+        [20, 60],
+        [60, 250],
+        [250, 1000],
+        [4000, 16000],
+      ]) {
+        const filter = bandFilter(low ?? 0, high ?? 0, fftSize, SAMPLE_RATE)
+        expect(filter.total).toBeCloseTo(((high ?? 0) - (low ?? 0)) / width(fftSize), 5)
+      }
+    }
   })
 
-  it('never returns an empty or out-of-range span', () => {
-    expect(bandBins(20, 25, 2048, SAMPLE_RATE)).toEqual([1, 2])
-    expect(bandBins(20000, 30000, 2048, SAMPLE_RATE)).toEqual([853, 1024])
+  // Neighbours must share the bin they straddle, not both claim it and not
+  // both round it away, or the levels stop adding up to the spectrum.
+  it('splits the bin two neighbours straddle between them', () => {
+    const bass = bandFilter(60, 250, 2048, SAMPLE_RATE)
+    const lowMid = bandFilter(250, 1000, 2048, SAMPLE_RATE)
+    const shared = Math.round(250 / width(2048))
+    const inBass = bass.weights[shared - bass.start] ?? 0
+    const inLowMid = lowMid.weights[shared - lowMid.start] ?? 0
+    expect(inBass).toBeGreaterThan(0)
+    expect(inLowMid).toBeGreaterThan(0)
+    expect(inBass + inLowMid).toBeCloseTo(1, 5)
+  })
+
+  it('keeps weight in the narrowest band at the coarsest fft size', () => {
+    const filter = bandFilter(20, 60, 512, SAMPLE_RATE)
+    expect(filter.total).toBeGreaterThan(0)
+    expect(filter.end).toBeGreaterThan(filter.start)
+  })
+
+  it('never runs past the bins there are', () => {
+    const filter = bandFilter(20000, 30000, 2048, SAMPLE_RATE)
+    expect(filter.end).toBeLessThanOrEqual(1024)
+    expect(filter.total).toBeGreaterThan(0)
   })
 })
 
@@ -72,11 +109,23 @@ describe('FeatureExtractor', () => {
     new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize, nominalFrameRate: 60 })
 
   it('has the documented packet length and indices', () => {
-    expect(PACKET_LENGTH).toBe(16)
+    expect(PACKET_LENGTH).toBe(28)
     expect(F.treble).toBe(4)
-    expect(F.tempo).toBe(11)
-    expect(F.dt).toBe(13)
+    expect(F.tempoBpm).toBe(21)
+    expect(F.dt).toBe(23)
+    expect(F.tempo).toBe(27)
     expect(make().packet).toHaveLength(PACKET_LENGTH)
+  })
+
+  // The three blocks are read by offset from a band index, so they have to
+  // stay contiguous and in the same band order as the levels.
+  it('lays the bands out as level, hit and pulse in the same order', () => {
+    BAND_NAMES.forEach((name, band) => {
+      expect(F[name]).toBe(band)
+      expect(F[`${name}Hit` as const]).toBe(BAND_HIT + band)
+      expect(F[`${name}Pulse` as const]).toBe(BAND_PULSE + band)
+    })
+    expect(BAND_COUNT).toBe(DEFAULT_BANDS.length)
   })
 
   it('collapses a bass-only spectrum into the bass band', () => {
@@ -110,7 +159,13 @@ describe('FeatureExtractor', () => {
       onsets += packet[F.onset] ?? 0
     }
     expect(onsets).toBe(0)
-    for (let index = 0; index < 12; index++) expect(packet[index]).toBe(0)
+    for (let index = 0; index <= F.tempoBpm; index++) expect(packet[index]).toBe(0)
+    // The song-scale features rest in the middle, not at zero: silence is
+    // neither lifting nor dropping, and neither bass-led nor bright.
+    expect(packet[F.pace]).toBe(0)
+    expect(packet[F.tempo]).toBe(0)
+    expect(packet[F.swell]).toBe(0.5)
+    expect(packet[F.weight]).toBe(0.5)
     expect(packet[F.time]).toBeCloseTo(5, 1)
   })
 
@@ -135,7 +190,7 @@ describe('FeatureExtractor', () => {
     for (let frame = 0; frame < 720; frame++) {
       const packet = extractor.update(frame % 30 === 0 ? click : quiet, DT)
       if (packet[F.onset]) onsetFrames.push(frame)
-      tempo = packet[F.tempo] ?? 0
+      tempo = packet[F.tempoBpm] ?? 0
     }
     // The first click lands before the window has anything to compare with.
     const expected = Array.from({ length: 23 }, (_, i) => (i + 1) * 30)
@@ -160,7 +215,7 @@ describe('FeatureExtractor', () => {
     for (let frame = 0; frame < 70 * 12; frame++) {
       const beat = frame % 30 === 0
       const frameIn = beat ? ((frame / 30) % 2 === 0 ? strong : soft) : quiet
-      tempo = extractor.update(frameIn, 1 / 70)[F.tempo] ?? 0
+      tempo = extractor.update(frameIn, 1 / 70)[F.tempoBpm] ?? 0
     }
     expect(tempo).toBeGreaterThan(137)
     expect(tempo).toBeLessThan(143)
@@ -201,5 +256,287 @@ describe('FeatureExtractor', () => {
     const packet = extractor.update(spectrum(silence), 5)
     expect(packet[F.dt]).toBeCloseTo(0.1)
     expect(packet[F.time]).toBeCloseTo(0.1)
+  })
+})
+
+describe('per-band onsets', () => {
+  const make = () =>
+    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, nominalFrameRate: 60 })
+
+  /**
+   * Run `frames` frames, clicking each named band on its own period. A click
+   * is that band's range jumping to -20 dB for one frame over a quiet floor.
+   *
+   * Returns how many onsets each band called and what they came to.
+   *
+   * Worth knowing when reading the assertions: a detector grades a hit against
+   * its own recent peak, so a band left exactly silent has a threshold of zero
+   * and will call a full-strength onset on any rise at all. A dither does not
+   * help, because the threshold is relative and white noise has the same
+   * relative spread at any amplitude. So what is checked here is the invariant
+   * the band edges actually give: a band hears only bands it shares an edge
+   * bin with, and never more often than they were struck.
+   */
+  function run(frames: number, clicks: Partial<Record<(typeof BAND_NAMES)[number], number>>) {
+    const extractor = make()
+    const counts: Record<string, number> = {}
+    const force: Record<string, number> = {}
+    const ranges: Record<string, [number, number]> = {
+      sub: [20, 60],
+      bass: [60, 250],
+      lowMid: [250, 1000],
+      highMid: [1000, 4000],
+      treble: [4000, 16000],
+    }
+    for (const name of BAND_NAMES) {
+      counts[name] = 0
+      force[name] = 0
+    }
+
+    for (let frame = 0; frame < frames; frame++) {
+      const loud: [number, number][] = []
+      for (const [name, every] of Object.entries(clicks))
+        if (every && frame > 0 && frame % every === 0) {
+          const range = ranges[name]
+          if (range) loud.push(range)
+        }
+      const packet = extractor.update(
+        spectrum((hz) => (loud.some(([low, high]) => hz >= low && hz < high) ? -20 : -100)),
+        DT,
+      )
+      BAND_NAMES.forEach((name, band) => {
+        const hit = packet[BAND_HIT + band] ?? 0
+        if (hit > 0) {
+          counts[name] = (counts[name] ?? 0) + 1
+          force[name] = (force[name] ?? 0) + hit
+        }
+      })
+    }
+    return { counts, force }
+  }
+
+  it('fires only the band that was struck', () => {
+    const { counts } = run(360, { sub: 30 })
+    expect(counts.sub ?? 0).toBeGreaterThan(5)
+    for (const name of ['bass', 'lowMid', 'highMid', 'treble']) expect(counts[name] ?? 0).toBe(0)
+  })
+
+  // The whole point of the refactor: a kick and a hat on different periods are
+  // two different events, not one event arriving at two volumes.
+  it('counts two patterns at different rates without either reading the other', () => {
+    // Sub every 30 frames, treble every 10, over 360 frames.
+    const { counts } = run(360, { sub: 30, treble: 10 })
+    expect(counts.treble ?? 0).toBeGreaterThan((counts.sub ?? 0) * 2)
+    expect(counts.sub ?? 0).toBeGreaterThan(5)
+    // Neither of these shares an edge bin with sub or treble, so both are
+    // deaf to the whole run. That is the part that matters.
+    for (const name of ['bass', 'lowMid']) expect(counts[name] ?? 0).toBe(0)
+    // highMid does share one with treble: the bin centred at 4007.8 Hz
+    // straddles the 4 kHz line and 17% of it is highMid's, which is the
+    // fractional edge being right rather than leaking. It is 0.13% of
+    // highMid's weight, under any threshold a real floor would build, and it
+    // can never tick on a frame treble did not.
+    expect(counts.highMid ?? 0).toBeLessThanOrEqual(counts.treble ?? 0)
+  })
+
+  // Each detector keeps its own rolling window, so a band that is always busy
+  // raises only its own bar.
+  it('lets a quiet band keep firing while another is saturated', () => {
+    const { counts } = run(360, { lowMid: 2, treble: 30 })
+    expect(counts.treble ?? 0).toBeGreaterThan(5)
+  })
+
+  it('calls no onset in any band on silence', () => {
+    const extractor = make()
+    let packet: Float32Array = extractor.packet
+    for (let frame = 0; frame < 300; frame++) packet = extractor.update(spectrum(silence), DT)
+    for (let band = 0; band < BAND_COUNT; band++) {
+      expect(packet[BAND_HIT + band]).toBe(0)
+      expect(packet[BAND_PULSE + band]).toBe(0)
+    }
+  })
+
+  it('holds a band pulse up after its hit and lets it fall', () => {
+    const extractor = make()
+    const quiet = spectrum(only(20, 60, -100))
+    const hit = spectrum(only(20, 60, -20))
+    let packet: Float32Array = extractor.packet
+    for (let frame = 0; frame < 40; frame++) packet = extractor.update(quiet, DT)
+    packet = extractor.update(hit, DT)
+    expect(packet[F.subHit] ?? 0).toBeGreaterThan(0)
+    expect(packet[F.subPulse]).toBe(1)
+    packet = extractor.update(quiet, DT)
+    expect(packet[F.subPulse] ?? 0).toBeGreaterThan(0.8)
+    for (let frame = 0; frame < 60; frame++) packet = extractor.update(quiet, DT)
+    expect(packet[F.subPulse] ?? 1).toBeLessThan(0.01)
+  })
+})
+
+describe('band accuracy', () => {
+  const make = (fftSize = FFT_SIZE) =>
+    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize, nominalFrameRate: 60 })
+
+  const settle = (extractor: FeatureExtractor, frame: Float32Array, frames = 120) => {
+    let packet: Float32Array = extractor.packet
+    for (let at = 0; at < frames; at++) packet = extractor.update(frame, DT)
+    return packet
+  }
+
+  // Rounding to whole bins put the top of the sub band at 70 Hz, so a bass
+  // note at 65 read as sub. Weighting the straddling bin splits it instead.
+  it('splits a tone sitting on a band edge between both bands', () => {
+    const extractor = make()
+    // Straddling the 60 Hz line between sub and bass. It has to be this wide
+    // because at 2048 a bin is 23 Hz, so a narrower tone falls between bins.
+    const packet = settle(extractor, spectrum(only(40, 80, -20)))
+    expect(packet[F.sub] ?? 0).toBeGreaterThan(0.1)
+    expect(packet[F.bass] ?? 0).toBeGreaterThan(0.1)
+    expect(packet[F.lowMid] ?? 0).toBeLessThan(0.1)
+  })
+
+  it('keeps a tone well inside a band out of its neighbours', () => {
+    const packet = settle(make(), spectrum(only(400, 600, -20)))
+    expect(packet[F.lowMid] ?? 0).toBeGreaterThan(0.9)
+    expect(packet[F.bass] ?? 0).toBeLessThan(0.1)
+    expect(packet[F.highMid] ?? 0).toBeLessThan(0.1)
+  })
+
+  // A level is the root mean square, so it follows the power in a band and not
+  // how many bins that power is spread over. As a mean of magnitudes, the same
+  // power gathered into one bright partial read about sqrt(bins) lower, which
+  // in a 512-bin treble band is a factor of over twenty.
+  it('reads the same level whether a band is spread out or concentrated', () => {
+    const bins = 512
+    const spread = 0.01
+    const gathered = spread * Math.sqrt(bins)
+    const db = (amplitude: number) => 20 * Math.log10(amplitude)
+    const extractor = make()
+    settle(extractor, spectrum(only(4000, 16000, db(spread))))
+    // The same total power, now in a single narrow partial near 8 kHz.
+    const packet = settle(
+      extractor,
+      spectrum(only(8000, 8000 + SAMPLE_RATE / FFT_SIZE, db(gathered))),
+      60,
+    )
+    expect(packet[F.treble] ?? 0).toBeGreaterThan(0.5)
+  })
+})
+
+describe('onset flux against absolute level', () => {
+  const make = () =>
+    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, nominalFrameRate: 60 })
+
+  /** Click the sub band every 30 frames over a floor `db` below it. */
+  const hits = (loudDb: number, frames = 360) => {
+    const extractor = make()
+    const quiet = spectrum(only(20, 60, loudDb - 60))
+    const loud = spectrum(only(20, 60, loudDb))
+    let count = 0
+    for (let frame = 0; frame < frames; frame++) {
+      const packet = extractor.update(frame > 0 && frame % 30 === 0 ? loud : quiet, DT)
+      if ((packet[F.subHit] ?? 0) > 0) count++
+    }
+    return count
+  }
+
+  // The point of measuring the rise in log magnitude: the same musical hit is
+  // the same hit whether the passage around it is loud or quiet. On raw
+  // magnitude the rise scaled with the absolute level, so a detector's
+  // sensitivity drifted with the mix.
+  it('finds the same hits twenty dB apart', () => {
+    expect(hits(-20)).toBe(hits(-40))
+    expect(hits(-20)).toBeGreaterThan(5)
+  })
+})
+
+describe('the song rather than the frame', () => {
+  const make = () =>
+    new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, nominalFrameRate: 60 })
+
+  /** Click the whole spectrum every `every` frames, for `seconds`. */
+  function clicks(every: number, seconds: number, extractor = make()) {
+    const quiet = spectrum(flat(-100))
+    const loud = spectrum(flat(-20))
+    let packet: Float32Array = extractor.packet
+    const frames = Math.round(seconds / DT)
+    for (let frame = 0; frame < frames; frame++)
+      packet = extractor.update(frame > 0 && frame % every === 0 ? loud : quiet, DT)
+    return packet
+  }
+
+  // Onsets a second, scaled so 8 is full. A click every 10 frames at 60 fps is
+  // 6 a second, which is busy but not flat out.
+  it('settles pace near how busy the music actually is', () => {
+    const busy = clicks(10, 60)[F.pace] ?? 0
+    const sparse = clicks(60, 60)[F.pace] ?? 0
+    expect(busy).toBeGreaterThan(0.5)
+    expect(sparse).toBeLessThan(0.2)
+    expect(busy).toBeGreaterThan(sparse * 3)
+  })
+
+  // Slow on purpose: the point is a number that has made up its mind, not
+  // another thing that flickers.
+  it('barely moves pace on a single hit', () => {
+    const extractor = make()
+    const quiet = spectrum(flat(-100))
+    for (let frame = 0; frame < 120; frame++) extractor.update(quiet, DT)
+    const before = extractor.packet[F.pace] ?? 0
+    extractor.update(spectrum(flat(-20)), DT)
+    expect((extractor.packet[F.pace] ?? 0) - before).toBeLessThan(0.01)
+  })
+
+  it('holds swell at the middle while the music holds steady', () => {
+    const extractor = make()
+    const steady = spectrum(flat(-30))
+    let packet: Float32Array = extractor.packet
+    for (let frame = 0; frame < 3600; frame++) packet = extractor.update(steady, DT)
+    expect(packet[F.swell] ?? 0).toBeCloseTo(0.5, 1)
+  })
+
+  it('lifts swell when a passage rises over its own average and drops it back', () => {
+    const extractor = make()
+    const steady = spectrum(flat(-40))
+    for (let frame = 0; frame < 1800; frame++) extractor.update(steady, DT)
+    const before = extractor.packet[F.swell] ?? 0
+    // Ten seconds of a much louder passage: short follows, long lags.
+    let packet: Float32Array = extractor.packet
+    for (let frame = 0; frame < 600; frame++) packet = extractor.update(spectrum(flat(-20)), DT)
+    expect(packet[F.swell] ?? 0).toBeGreaterThan(before)
+    // And back down when it drops out.
+    for (let frame = 0; frame < 300; frame++) packet = extractor.update(spectrum(flat(-60)), DT)
+    expect(packet[F.swell] ?? 0).toBeLessThan(before)
+  })
+
+  it('reads weight high on a bass-led track and low on a bright one', () => {
+    const extractor = make()
+    let packet: Float32Array = extractor.packet
+    for (let frame = 0; frame < 1800; frame++)
+      packet = extractor.update(spectrum(only(60, 250, -20)), DT)
+    expect(packet[F.weight] ?? 0).toBeGreaterThan(0.9)
+
+    const bright = make()
+    for (let frame = 0; frame < 1800; frame++)
+      packet = bright.update(spectrum(only(4000, 16000, -20)), DT)
+    expect(packet[F.weight] ?? 1).toBeLessThan(0.1)
+  })
+
+  // The BPM guess steps when the autocorrelation changes its mind, and the
+  // README measures how often it is wrong. The ramp is the whole reason the
+  // normalised one is worth mapping: the scene drifts rather than lurching.
+  it('ramps tempo instead of stepping with the guess', () => {
+    const extractor = make()
+    let last = 0
+    let biggest = 0
+    const quiet = spectrum(flat(-100))
+    const loud = spectrum(flat(-20))
+    for (let frame = 0; frame < 3600; frame++) {
+      // 120 BPM for the first half, then twice as busy.
+      const every = frame < 1800 ? 30 : 15
+      const packet = extractor.update(frame > 0 && frame % every === 0 ? loud : quiet, DT)
+      const now = packet[F.tempo] ?? 0
+      biggest = Math.max(biggest, Math.abs(now - last))
+      last = now
+    }
+    expect(biggest).toBeLessThan(0.02)
   })
 })

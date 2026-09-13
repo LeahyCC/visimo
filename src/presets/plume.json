@@ -16,10 +16,16 @@
     "radius": 0.012,
     "colourShift": 0,
     "colourDrift": 0.035,
-    "orbitSpeed": 0.19
+    "orbitSpeed": 0.19,
+    "emitters": 5,
+    "voice": 0.8
   },
   "postParams": {},
   "audioMapping": [
+    { "from": "pace", "to": "vorticity", "gain": 14 },
+    { "from": "pace", "to": "orbitSpeed", "gain": 0.12 },
+    { "from": "swell", "to": "dyeDecay", "gain": -0.18 },
+    { "from": "weight", "to": "radius", "gain": 0.006 },
     { "from": "energy", "to": "velocityDecay", "gain": 0.22 },
     { "from": "energy", "to": "dyeDecay", "gain": 0.95 },
     { "from": "treble", "to": "vorticity", "gain": 38 },

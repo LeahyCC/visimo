@@ -58,6 +58,8 @@ export type FluidFrame = {
   viscosity: number
   /** Multiplier on the dye's colour, before the post stack sees it. */
   intensity: number
+  /** How much of the dye's colour is kept, 0 for grey. */
+  saturation: number
   splats: Splat[]
 }
 
@@ -90,13 +92,106 @@ export const pressureIterations = (software: boolean) => (software ? 8 : 24)
 /** Jacobi sweeps for the viscosity solve. */
 export const diffuseIterations = (software: boolean) => (software ? 1 : 2)
 
-// A Lissajous figure per emitter. The tangent of the path is taken by
-// difference rather than by hand, so the impulse pushes along the orbit
-// whatever the curve is changed to.
-const orbit = (phase: number) => ({
-  x: Math.cos(phase) * 0.72 + Math.sin(phase * 2.3) * 0.24,
-  y: Math.sin(phase * 0.9) * 0.7 + Math.cos(phase * 3.1) * 0.22,
-})
+type Point = { x: number; y: number }
+
+/**
+ * The figures the emitters can ride, each a closed curve inside the unit
+ * square. The tangent of a path is taken by difference rather than by hand,
+ * so the impulse pushes along the orbit whatever the curve is changed to.
+ * The first is the Lissajous figure the scene has always had; the others are
+ * what a section can swap it for.
+ */
+const FIGURES: readonly ((phase: number) => Point)[] = [
+  (phase) => ({
+    x: Math.cos(phase) * 0.72 + Math.sin(phase * 2.3) * 0.24,
+    y: Math.sin(phase * 0.9) * 0.7 + Math.cos(phase * 3.1) * 0.22,
+  }),
+  // A ring: every emitter the same distance out, circling.
+  (phase) => ({ x: Math.cos(phase) * 0.85, y: Math.sin(phase) * 0.85 }),
+  // A figure of eight, crossing the middle twice a turn.
+  (phase) => ({ x: Math.sin(phase) * 0.9, y: Math.sin(phase * 2) * 0.55 }),
+  // A three-lobed sweep, wide and shallow.
+  (phase) => ({ x: Math.cos(phase) * 0.8, y: Math.sin(phase * 3) * 0.45 }),
+  // A tall figure of eight, the other way up.
+  (phase) => ({ x: Math.sin(phase * 2) * 0.5, y: Math.sin(phase) * 0.85 }),
+  // A slow wide ellipse, low in the frame.
+  (phase) => ({ x: Math.cos(phase) * 0.9, y: Math.sin(phase) * 0.35 - 0.2 }),
+]
+
+/**
+ * How a section arranges the emitters: which figure they ride, how far out,
+ * how fast, how the figure is turned and how bunched they are along it.
+ * A song moves numbers all the time; this is the one thing that changes the
+ * composition, and it changes only when the structure says a new section
+ * has begun. A section that comes back gets its layout back with it.
+ */
+export type Layout = {
+  /** Index into `FIGURES`. */
+  figure: number
+  /** Multiplier on the preset's spread. */
+  spread: number
+  /** Multiplier on the orbit speed. */
+  speed: number
+  /** How far the figure is turned, as a fraction of a full turn. */
+  turn: number
+  /** How bunched the emitters are along the figure, 0 evenly spaced to 1 close. */
+  cluster: number
+}
+
+/**
+ * One layout per section, by the order the sections first appear in, cycling
+ * once a song has more sections than there are layouts. The first is the
+ * scene as it always was, so a track before its first boundary looks the way
+ * it did before layouts existed.
+ */
+export const LAYOUTS: readonly Layout[] = [
+  { figure: 0, spread: 1, speed: 1, turn: 0, cluster: 0 },
+  { figure: 1, spread: 1.2, speed: 0.75, turn: 0, cluster: 0 },
+  { figure: 2, spread: 0.8, speed: 1.3, turn: 0.125, cluster: 0.5 },
+  { figure: 3, spread: 1.05, speed: 1, turn: 0.25, cluster: 0.25 },
+  { figure: 4, spread: 0.9, speed: 1.1, turn: 0, cluster: 0.35 },
+  { figure: 5, spread: 1.1, speed: 0.6, turn: 0.5, cluster: 0 },
+]
+
+const FIRST_LAYOUT: Layout = { figure: 0, spread: 1, speed: 1, turn: 0, cluster: 0 }
+
+/** The layout for the `rank`th distinct section a scene has seen, 1 being the first. */
+export const layoutOf = (rank: number): Layout =>
+  LAYOUTS[(Math.max(1, Math.round(rank)) - 1) % LAYOUTS.length] ?? FIRST_LAYOUT
+
+/** Seconds a change of layout takes, so the emitters glide rather than jump. */
+export const LAYOUT_BLEND_SECONDS = 4
+
+/** How far into a layout change `since` seconds after it began: an ease in and out. */
+export function layoutMix(since: number): number {
+  const at = Math.min(1, Math.max(0, since / LAYOUT_BLEND_SECONDS))
+  return at * at * (3 - 2 * at)
+}
+
+/** A layout change under way: at `mix` 0 all `from`, at 1 all `to`. */
+export type LayoutBlend = { from: Layout; to: Layout; mix: number }
+
+/** No change under way: the first layout, settled. */
+export const STILL_LAYOUT: LayoutBlend = { from: FIRST_LAYOUT, to: FIRST_LAYOUT, mix: 1 }
+
+/** Where an emitter is on a layout's figure, and where it is about to be. */
+function ride(layout: Layout, phase: number, spacing: number): { here: Point; ahead: Point } {
+  const figure = FIGURES[layout.figure] ?? FIGURES[0]
+  const angle = layout.turn * TWO_PI
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const at = (p: number): Point => {
+    const raw = figure?.(p) ?? { x: 0, y: 0 }
+    return {
+      x: (raw.x * cos - raw.y * sin) * layout.spread,
+      y: (raw.x * sin + raw.y * cos) * layout.spread,
+    }
+  }
+  // Bunched emitters sit closer together along the figure; the spacing is
+  // never squeezed to nothing, so no two of them ever share a point.
+  const p = phase * layout.speed + spacing * (1 - 0.75 * layout.cluster)
+  return { here: at(p), ahead: at(p + 0.05) }
+}
 
 /** The palette coordinate wraps, and a preset may hand over a negative one. */
 const wrap = (value: number) => ((value % 1) + 1) % 1
@@ -116,17 +211,22 @@ type Voice = {
 
 /**
  * The character of each band, in the packet's band order. The tints walk the
- * palette the way the ear walks the spectrum, deep blue for the sub up to
- * magenta for the treble, so a plume's colour says which part of the music it
- * is; the sizes and paces follow the same line, because a kick is a slow fat
- * thing and a hat is a quick small one.
+ * palette the way the ear walks the spectrum, the sub at the start of the
+ * span and the treble at its end, so a plume's colour says which part of the
+ * music it is; the sizes and paces follow the same line, because a kick is a
+ * slow fat thing and a hat is a quick small one.
+ *
+ * The span is under half the palette on purpose. The song's key moves the
+ * whole set through `colourShift`, and that is the colour a viewer sees; the
+ * bands are shades within it. Spread over the whole palette the bands
+ * cancelled the key: every song showed every colour.
  */
 const BAND_VOICES: readonly Voice[] = [
   { tint: 0.0, size: 1.9, pace: 0.45 },
-  { tint: 0.16, size: 1.55, pace: 0.6 },
-  { tint: 0.38, size: 1.1, pace: 0.9 },
-  { tint: 0.6, size: 0.75, pace: 1.35 },
-  { tint: 0.82, size: 0.5, pace: 1.8 },
+  { tint: 0.11, size: 1.55, pace: 0.6 },
+  { tint: 0.23, size: 1.1, pace: 0.9 },
+  { tint: 0.34, size: 0.75, pace: 1.35 },
+  { tint: 0.46, size: 0.5, pace: 1.8 },
 ]
 
 /**
@@ -222,6 +322,8 @@ export const FLUID_DEFAULTS: FluidParams = {
   viscosity: 0.2,
   /** Multiplier on the dye's colour before the post stack sees it. */
   intensity: 1.15,
+  /** How much of the dye's colour is kept, 0 for grey. */
+  saturation: 1,
   /** How far out the emitters ride, as a fraction of the visible band. */
   spread: 0.42,
   /** Velocity the emitters trickle each second. */
@@ -287,12 +389,17 @@ export function fluidParams(tuning: Tuning): FluidParams {
  * The knob at 0 puts every emitter back on the global onset and the shared
  * numbers, which is what the scene did before any of this and what a preset
  * written then still gets.
+ *
+ * `layout` is where the emitters ride, chosen by the song's section and
+ * blended from the last one so a change glides; the scene keeps that state
+ * and hands it in, so this stays a function of its arguments.
  */
 export function fluidFrame(
   params: FluidParams,
   features: Float32Array,
   dt: number,
   visible: Extent,
+  layout: LayoutBlend = STILL_LAYOUT,
 ): FluidFrame {
   const step = Math.min(MAX_STEP, Math.max(0.001, dt))
   const time = features[F.time] ?? 0
@@ -310,13 +417,26 @@ export function fluidFrame(
     // before voices existed, which is what keeps the old look reachable.
     const drive = mix(1, band.level, blend)
     const gate = mix(whole, gateOf(band.hit), blend)
-    const phase = time * params.orbitSpeed * mix(1, voice.pace, blend) + (index * TWO_PI) / count
-    const here = orbit(phase)
-    const ahead = orbit(phase + 0.05)
+    const phase = time * params.orbitSpeed * mix(1, voice.pace, blend)
+    const spacing = (index * TWO_PI) / count
+    const from = ride(layout.from, phase, spacing)
+    const to = ride(layout.to, phase, spacing)
+    const here = {
+      x: mix(from.here.x, to.here.x, layout.mix),
+      y: mix(from.here.y, to.here.y, layout.mix),
+    }
+    const ahead = {
+      x: mix(from.ahead.x, to.ahead.x, layout.mix),
+      y: mix(from.ahead.y, to.ahead.y, layout.mix),
+    }
     const run = Math.hypot(ahead.x - here.x, ahead.y - here.y) || 1
+    // A wide layout on a loud passage can push a figure past the edge; the
+    // offset is held inside the visible band so nothing is injected off
+    // screen, whatever the spread and the layout add up to.
+    const inside = (offset: number) => Math.min(1, Math.max(-1, offset * params.spread))
     splats.push({
-      x: 0.5 + here.x * params.spread * visible.x,
-      y: 0.5 + here.y * params.spread * visible.y,
+      x: 0.5 + inside(here.x) * visible.x,
+      y: 0.5 + inside(here.y) * visible.y,
       dx: (ahead.x - here.x) / run,
       dy: (ahead.y - here.y) / run,
       force: (params.force * step + gate * params.hitForce) * drive,
@@ -335,6 +455,7 @@ export function fluidFrame(
     vorticity: params.vorticity,
     viscosity: params.viscosity,
     intensity: params.intensity,
+    saturation: Math.max(0, params.saturation),
     splats,
   }
 }
@@ -406,7 +527,7 @@ export function writeSimUniform(
   // The shader loops to this; the slots past it keep their zeros and cost
   // nothing but the bytes.
   out[10] = frame.splats.length
-  out[11] = 0
+  out[11] = frame.saturation
   // Canvas coordinates times this land in the grid; it is the visible band.
   out[12] = visible.x * 2
   out[13] = visible.y * 2

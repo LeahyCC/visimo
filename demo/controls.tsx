@@ -37,6 +37,7 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'vorticity': [0, 60],
   'viscosity': [0, 2],
   'intensity': [0, 4],
+  'saturation': [0, 1.5],
   'spread': [0, 1],
   'force': [0, 3],
   'dye': [0, 8],

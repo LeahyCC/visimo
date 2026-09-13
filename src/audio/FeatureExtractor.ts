@@ -114,16 +114,21 @@ export type FeatureOptions = {
   /** Must equal the analyser's fftSize; the frame has fftSize / 2 bins. */
   fftSize: number
   bands?: readonly BandSpec[]
-  /** Rolling window for the flux mean and deviation. */
+  /** Rolling window for the flux mean and deviation, in seconds. */
   fluxWindowSeconds?: number
   /** k in mean + k * sigma. */
   fluxThresholdSigma?: number
+  /**
+   * How far above its running mean the flux has to rise before a crossing of
+   * the threshold counts, in the units the flux is measured in. This is what
+   * keeps a sustained pad from firing: the deviation of a nearly flat signal
+   * is nearly nothing, so mean plus a few of it is a bar anything clears.
+   */
+  fluxFloor?: number
   /** Two onsets closer than this are one. */
   onsetRefractoryMs?: number
   /** beatPulse falls to 1/e in this long. */
   beatDecaySeconds?: number
-  /** Only used to size the rolling windows; the real step comes with each frame. */
-  nominalFrameRate?: number
 }
 
 const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value)
@@ -220,9 +225,30 @@ class PeakHold {
 // than being stretched to fill 0..1.
 const QUIET = 1e-3
 const PEAK_HALF_LIFE = 2
-// The shortest rolling window worth a threshold, and the warm-up before a
-// detector will call anything: too few samples and the deviation is noise.
-const MIN_FLUX_WINDOW = 8
+// The warm-up before a detector will call anything: too few samples and the
+// deviation is noise.
+const MIN_FLUX_SAMPLES = 8
+// The most frames a rolling window keeps. 1.5 s at 240 frames a second is
+// 360; beyond the capacity the oldest goes whatever its age.
+const FLUX_WINDOW_CAPACITY = 512
+// Flux is the rise over this much time rather than over one frame. Two
+// analyser reads a frame apart overlap by 45% at 60 frames a second and by
+// 92% at 144, so a per-frame rise shrank with the frame rate and the
+// detectors ended up firing on the jitter between reads. Measured over a
+// fixed span the same hit is the same number at any frame rate.
+const FLUX_LAG_SECONDS = 0.03
+// Past log spectra kept to find one that old: 16 covers the lag at 240 fps
+// and then some.
+const FLUX_HISTORY = 16
+// The rise above its running mean a flux has to make, in mean log rise per
+// bin, before a threshold crossing counts. Measured on a real track: a
+// sustained pad jitters by up to 0.19 in every band, a kick in the sub band
+// rises by one to three, a hat spread across the treble band by 0.3 to 0.6.
+const FLUX_FLOOR = 0.2
+// A band a couple of bins wide averages nothing out, so its jitter runs
+// higher than a wide band's; its floor is raised in proportion. Below four
+// bins the correction is sqrt(4 / bins), above it nothing.
+const FLUX_FLOOR_NARROW_BINS = 4
 // Flux is measured on log magnitude so that the same hit reads the same in a
 // loud passage as in a quiet one. The gain has to be this large because the
 // magnitudes are small: a bin at -40 dB is 0.01, and log1p of that is 0.00995,
@@ -233,9 +259,10 @@ const FLUX_COMPRESSION = 1000
 // over ten seconds; the tempo ramp over five, which is only there to stop the
 // guess stepping.
 const PACE_SECONDS = 30
-// Onsets a second that counts as fully busy. Sparse music runs about 1.5 and
-// drum and bass about 9, so this puts most tracks across the useful middle.
-const PACE_FULL = 8
+// Onsets a second, in any band, that counts as fully busy. A pad with a pulse
+// runs about 2, a full kit with hats about 6 and drum and bass past 12, so
+// this puts most tracks across the useful middle.
+const PACE_FULL = 12
 const SWELL_SHORT_MS = 2000
 const SWELL_LONG_MS = 30000
 const WEIGHT_MS = 10000
@@ -244,9 +271,12 @@ const MIN_DT = 0.001
 const MAX_DT = 0.1
 const TEMPO_MIN_BPM = 60
 const TEMPO_MAX_BPM = 200
-// About 4 s at 120 Hz and 8 s at 60. Replaying recorded tracks through longer
-// windows made the beat lose out to the bar more often, not less.
-const TEMPO_WINDOW_FRAMES = 480
+// The flux is resampled to this rate for the autocorrelation, so the window
+// and the lags are in seconds whatever the frame rate. Replaying recorded
+// tracks through longer windows made the beat lose out to the bar more often,
+// not less.
+const TEMPO_RATE = 100
+const TEMPO_WINDOW_SECONDS = 5
 const TEMPO_EVERY_SECONDS = 1
 const TEMPO_PREFERRED_BPM = 120
 // Width of the preference, in octaves: 60 and 240 score about half of 120.
@@ -283,52 +313,52 @@ export type Onset = {
  * than one of it.
  */
 export class OnsetDetector {
-  private readonly window: Float32Array
+  private readonly window = new Float32Array(FLUX_WINDOW_CAPACITY)
+  private readonly steps = new Float32Array(FLUX_WINDOW_CAPACITY)
+  /** Where the next sample goes; once the ring is full, also the oldest. */
   private at = 0
   private count = 0
+  /** Seconds the samples in the ring cover. */
+  private span = 0
   private sum = 0
   private sumSquares = 0
   private peak = 0
   private last = 0
   private since = Infinity
   private beat = 0
-  private frames = 0
 
   constructor(
-    windowFrames: number,
+    private readonly windowSeconds: number,
     private readonly sigma: number,
     private readonly refractory: number,
     private readonly beatDecay: number,
-  ) {
-    this.window = new Float32Array(Math.max(MIN_FLUX_WINDOW, windowFrames))
-  }
+    private readonly floor: number,
+  ) {}
 
   /**
    * `flux` is the raw half-wave rectified rise, already divided by how many
    * bins it was summed over so that a wide band and a narrow one are on the
    * same scale.
    */
-  step(rawFlux: number, dt: number): Onset {
-    // The first frame has nothing to differ from; its "flux" would be the
-    // whole spectrum and read as a hit.
-    const flux = this.frames === 0 ? 0 : rawFlux
-    this.frames++
-
+  step(flux: number, dt: number): Onset {
     // The threshold is measured against the window before this frame joins
     // it, so a hit cannot raise the bar it has to clear.
     const count = this.count
     const mean = count ? this.sum / count : 0
     const variance = count ? Math.max(0, this.sumSquares / count - mean * mean) : 0
     const threshold = mean + this.sigma * Math.sqrt(variance)
-    this.push(flux)
+    this.push(flux, dt)
     this.peak = Math.max(flux, this.peak * 0.5 ** (dt / PEAK_HALF_LIFE))
     this.since += dt
-    // Rising through the threshold is the onset. Waiting for the peak would
-    // cost a frame; the refractory time stops a long swell from counting
-    // twice.
+    // Rising through the threshold is the onset, provided the rise clears the
+    // floor as well: the threshold is relative to the window and the floor is
+    // not, and it is the floor that keeps a nearly flat signal quiet. Waiting
+    // for the peak would cost a frame; the refractory time stops a long swell
+    // from counting twice.
     const onset =
-      count >= MIN_FLUX_WINDOW &&
+      count >= MIN_FLUX_SAMPLES &&
       flux > threshold &&
+      flux - mean >= this.floor &&
       flux > QUIET * QUIET &&
       flux >= this.last &&
       this.since >= this.refractory
@@ -354,21 +384,37 @@ export class OnsetDetector {
   }
 
   /**
-   * The rolling window, as a ring. `at` is both the write cursor and, once the
-   * ring is full, the oldest sample, so what is evicted is what is about to be
-   * overwritten. The sums are kept incrementally rather than recomputed.
+   * The rolling window, as a ring of samples and the step each arrived with.
+   * The window is a span of time, not a count of frames: samples are dropped
+   * from the old end once the ring covers more than `windowSeconds`, so the
+   * threshold looks back the same distance at any frame rate. The sums are
+   * kept incrementally rather than recomputed.
    */
-  private push(flux: number) {
-    const window = this.window
-    if (this.count === window.length) {
-      const old = window[this.at] ?? 0
-      this.sum -= old
-      this.sumSquares -= old * old
-    } else this.count++
+  private push(flux: number, dt: number) {
+    const { window, steps } = this
+    if (this.count === window.length) this.evict()
     window[this.at] = flux
+    steps[this.at] = dt
+    this.at = (this.at + 1) % window.length
+    this.count++
+    this.span += dt
     this.sum += flux
     this.sumSquares += flux * flux
-    this.at = (this.at + 1) % window.length
+    while (this.count > 1 && this.span - this.oldestStep() >= this.windowSeconds) this.evict()
+  }
+
+  private oldestStep() {
+    const oldest = (this.at - this.count + this.window.length) % this.window.length
+    return this.steps[oldest] ?? 0
+  }
+
+  private evict() {
+    const oldest = (this.at - this.count + this.window.length) % this.window.length
+    const old = this.window[oldest] ?? 0
+    this.sum -= old
+    this.sumSquares -= old * old
+    this.span -= this.steps[oldest] ?? 0
+    this.count--
   }
 }
 
@@ -458,9 +504,16 @@ export class FeatureExtractor {
   private readonly filters: BandFilter[]
   private readonly span: BandFilter
   private readonly magnitudes: Float32Array
-  /** Log magnitudes of this frame and the last; flux is the rise between them. */
+  /** Log magnitudes of this frame; flux is the rise over the ones kept below. */
   private readonly logs: Float32Array
-  private readonly previousLogs: Float32Array
+  /**
+   * The last few frames of log magnitudes and when each was taken, so the
+   * flux can be read over a fixed span of time rather than over one frame.
+   */
+  private readonly history: Float32Array[]
+  private readonly historyAt = new Float64Array(FLUX_HISTORY)
+  private historyHead = 0
+  private historyCount = 0
   private readonly envelopes: Envelope[]
   private readonly peaks: PeakHold[]
   private readonly energyEnvelope = new Envelope(15, 300)
@@ -472,18 +525,18 @@ export class FeatureExtractor {
   private readonly bandFlux: Float32Array
   /** The song-scale features, one step a frame off what the rest works out. */
   private readonly song = new Song()
-  private readonly tempoWindow: Float32Array
+  private readonly tempoWindow = new Float32Array(TEMPO_RATE * TEMPO_WINDOW_SECONDS)
   private tempoAt = 0
   private tempoFilled = 0
+  /** Seconds since the flux was last resampled into the tempo window. */
+  private tempoClock = 0
   private sinceTempo = 0
   private tempo = 0
   private readonly tempoReadings = new Float32Array(TEMPO_MEDIAN_OF)
   private tempoReadingAt = 0
-  private averageDt: number
   private time = 0
 
   constructor(options: FeatureOptions) {
-    const rate = options.nominalFrameRate ?? 60
     this.bands = options.bands ?? DEFAULT_BANDS
     this.bins = options.fftSize / 2
     this.filters = this.bands.map((band) =>
@@ -492,24 +545,25 @@ export class FeatureExtractor {
     this.span = bandFilter(20, 16000, options.fftSize, options.sampleRate)
     this.magnitudes = new Float32Array(this.bins)
     this.logs = new Float32Array(this.bins)
-    this.previousLogs = new Float32Array(this.bins)
+    this.history = Array.from({ length: FLUX_HISTORY }, () => new Float32Array(this.bins))
     this.envelopes = this.bands.map((band) => new Envelope(band.attackMs, band.releaseMs))
     this.peaks = this.bands.map(() => new PeakHold(PEAK_HALF_LIFE, QUIET))
-    const detector = () =>
+    const floor = options.fluxFloor ?? FLUX_FLOOR
+    const detector = (bins: number) =>
       new OnsetDetector(
-        Math.round((options.fluxWindowSeconds ?? 1.5) * rate),
+        options.fluxWindowSeconds ?? 1.5,
         options.fluxThresholdSigma ?? 2.5,
         (options.onsetRefractoryMs ?? 80) / 1000,
         options.beatDecaySeconds ?? 0.18,
+        floor * Math.max(1, Math.sqrt(FLUX_FLOOR_NARROW_BINS / Math.max(bins, 1e-6))),
       )
-    // Every band is tuned the same. What makes them behave differently is that
-    // each one only ever sees its own flux, so each settles on its own
-    // threshold: a sustained pad in the mids cannot deafen the treble.
-    this.detectors = this.bands.map(detector)
-    this.detector = detector()
+    // Every band is tuned the same, apart from the narrow ones' floor. What
+    // makes them behave differently is that each one only ever sees its own
+    // flux, so each settles on its own threshold: a sustained pad in the mids
+    // cannot deafen the treble.
+    this.detectors = this.filters.map((filter) => detector(filter.total))
+    this.detector = detector(this.span.total)
     this.bandFlux = new Float32Array(this.bands.length)
-    this.tempoWindow = new Float32Array(TEMPO_WINDOW_FRAMES)
-    this.averageDt = 1 / rate
   }
 
   /**
@@ -519,16 +573,21 @@ export class FeatureExtractor {
    */
   update(spectrum: Float32Array, dtSeconds: number): Float32Array {
     const dt = Math.min(MAX_DT, Math.max(MIN_DT, dtSeconds))
-    const { magnitudes, logs, previousLogs, packet } = this
+    const now = this.time + dt
+    const { magnitudes, logs, packet } = this
     for (let bin = 0; bin < this.bins; bin++) {
       const magnitude = dbToLinear(spectrum[bin] ?? -Infinity)
       magnitudes[bin] = magnitude
       logs[bin] = Math.log1p(FLUX_COMPRESSION * magnitude)
     }
 
+    // The frame the flux is measured against: the newest one at least the lag
+    // old. Until there is one, the first few frames of a run, there is no
+    // flux, which is also what keeps the first frame from reading as a hit.
+    const previousLogs = this.reference(now) ?? logs
+
     // One pass per band does the level and the band's own flux together. The
-    // rise is readable here because the log history is not rolled until after
-    // the global loop below, so this costs a subtract per bin and no second
+    // rise is readable here for the cost of a subtract per bin and no second
     // sweep. Both are weighted by how much of each bin the band owns, and
     // divided by those weights, so a wide band and a narrow one are on the
     // same scale and the bins on an edge count only for their share.
@@ -568,17 +627,19 @@ export class FeatureExtractor {
       const rise = (logs[bin] ?? 0) - (previousLogs[bin] ?? 0)
       if (rise > 0) flux += weight * rise
     }
-    previousLogs.set(logs)
+    this.remember(logs, now)
     const rms = Math.sqrt(squares / total)
     packet[F.energy] = clamp01(this.energyEnvelope.step(rms, dt) / this.energyPeak.step(rms, dt))
 
     // Each band against its own history. A band that is always busy settles on
     // a high threshold and a quiet one on a low threshold, which is what lets
     // the hats keep firing through a passage the kick is sitting out.
+    let anyBand = false
     for (let band = 0; band < this.bands.length; band++) {
       const found = this.detectors[band]?.step(this.bandFlux[band] ?? 0, dt)
       packet[BAND_HIT + band] = found?.strength ?? 0
       packet[BAND_PULSE + band] = found?.pulse ?? 0
+      anyBand ||= found?.onset ?? false
     }
 
     const whole = this.detector.step(flux / total, dt)
@@ -588,27 +649,48 @@ export class FeatureExtractor {
     packet[F.onsetStrength] = whole.strength
     packet[F.beatPulse] = whole.pulse
 
-    this.averageDt += (dt - this.averageDt) * 0.05
     // Flux over its mean, compressed: a few huge hits would otherwise own
     // the autocorrelation and the beat between them would not register.
     this.trackTempo(Math.log1p(TEMPO_COMPRESSION * whole.flux), dt)
     packet[F.tempoBpm] = this.tempo
 
-    const song = this.song.step(whole.onset, rms, packet, this.tempo, dt)
+    // Pace counts a hit in any band, since a kick that lives in three sub
+    // bins barely moves the flux of the whole spectrum; the global detector
+    // is for broadband hits and the beat pulse the post stack reads.
+    const song = this.song.step(anyBand || whole.onset, rms, packet, this.tempo, dt)
     packet[F.pace] = song.pace
     packet[F.swell] = song.swell
     packet[F.weight] = song.weight
     packet[F.tempo] = song.tempo
 
-    this.time += dt
+    this.time = now
     packet[F.time] = this.time
     packet[F.dt] = dt
     return packet
   }
 
+  /** The newest remembered frame that is at least the flux lag old, if any. */
+  private reference(now: number): Float32Array | null {
+    for (let back = 0; back < this.historyCount; back++) {
+      const slot = (this.historyHead - 1 - back + FLUX_HISTORY) % FLUX_HISTORY
+      if (now - (this.historyAt[slot] ?? 0) >= FLUX_LAG_SECONDS) return this.history[slot] ?? null
+    }
+
+    return null
+  }
+
+  private remember(logs: Float32Array, now: number) {
+    this.history[this.historyHead]?.set(logs)
+    this.historyAt[this.historyHead] = now
+    this.historyHead = (this.historyHead + 1) % FLUX_HISTORY
+    this.historyCount = Math.min(FLUX_HISTORY, this.historyCount + 1)
+  }
+
   // Autocorrelation of the last few seconds of compressed flux, once a
-  // second, over the lags that mean 60 to 200 beats per minute. Correlations
-  // are normalised so long lags are not penalised for having fewer samples.
+  // second, over the lags that mean 60 to 200 beats per minute. The flux is
+  // resampled to a fixed rate on the way in, so the lags mean the same
+  // tempos whatever the frame rate. Correlations are normalised so long lags
+  // are not penalised for having fewer samples.
   // Each lag is scored with its multiples added in (a beat's half-bar and bar
   // agree with it) and weighted toward the tempos people tap (around 120),
   // because a bar-long pattern correlates as well as a beat-long one and
@@ -616,9 +698,15 @@ export class FeatureExtractor {
   // well it wins for the same reason.
   private trackTempo(flux: number, dt: number) {
     const window = this.tempoWindow
-    window[this.tempoAt] = flux
-    this.tempoAt = (this.tempoAt + 1) % window.length
-    this.tempoFilled = Math.min(window.length, this.tempoFilled + 1)
+    // Sample and hold: a frame longer than the resampling period fills the
+    // samples it spans with its own reading.
+    this.tempoClock += dt
+    while (this.tempoClock >= 1 / TEMPO_RATE) {
+      this.tempoClock -= 1 / TEMPO_RATE
+      window[this.tempoAt] = flux
+      this.tempoAt = (this.tempoAt + 1) % window.length
+      this.tempoFilled = Math.min(window.length, this.tempoFilled + 1)
+    }
     this.sinceTempo += dt
     if (this.sinceTempo < TEMPO_EVERY_SECONDS || this.tempoFilled < window.length) return
     this.sinceTempo = 0
@@ -633,8 +721,8 @@ export class FeatureExtractor {
       this.report(0)
       return
     }
-    const minLag = Math.max(1, Math.floor(60 / (TEMPO_MAX_BPM * this.averageDt)))
-    const maxLag = Math.min(length >> 1, Math.ceil(60 / (TEMPO_MIN_BPM * this.averageDt)))
+    const minLag = Math.max(1, Math.floor((60 * TEMPO_RATE) / TEMPO_MAX_BPM))
+    const maxLag = Math.min(length >> 1, Math.ceil((60 * TEMPO_RATE) / TEMPO_MIN_BPM))
     const correlation = new Float32Array(maxLag + 1)
     for (let lag = minLag; lag <= maxLag; lag++) {
       let sum = 0
@@ -645,7 +733,7 @@ export class FeatureExtractor {
       }
       correlation[lag] = sum / ((length - lag) * variance)
     }
-    const bpm = (lag: number) => 60 / (lag * this.averageDt)
+    const bpm = (lag: number) => (60 * TEMPO_RATE) / lag
     const preference = (lag: number) =>
       Math.exp(-0.5 * (Math.log2(bpm(lag) / TEMPO_PREFERRED_BPM) / TEMPO_PREFERENCE_OCTAVES) ** 2)
     let bestLag = 0
@@ -670,7 +758,14 @@ export class FeatureExtractor {
     }
     const half = Math.round(bestLag / 2)
     if (half >= minLag && (correlation[half] ?? 0) >= TEMPO_HALF_LAG_RATIO * raw) bestLag = half
-    this.report(bpm(bestLag))
+    // The peak is refined between samples with a parabola through its
+    // neighbours, since at 100 samples a second one lag is 2% of a tempo.
+    const left = correlation[bestLag - 1] ?? 0
+    const right = correlation[bestLag + 1] ?? 0
+    const centre = correlation[bestLag] ?? 0
+    const curve = left - 2 * centre + right
+    const offset = curve < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (left - right)) / curve)) : 0
+    this.report(bpm(bestLag + offset))
   }
 
   private report(reading: number) {

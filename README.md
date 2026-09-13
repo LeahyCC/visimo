@@ -105,7 +105,20 @@ npm run dev
 
 Drop a track on the left, tune on the right. The file becomes an object URL on an `<audio>` element and goes through `attachAudio`, the same path a host uses, so what you are tuning is the real thing rather than a mock.
 
-Every control is generated from the lists the package keeps: the scene knobs from `SCENE_KNOBS`, the post knobs from `POST_LANES`, the mapping vocabulary from `AUDIO_FIELDS` and `CURVES`. Add a knob to the package and it appears here with nothing to change, though a knob whose range is not obvious wants a row in `RANGES` in `demo/controls.tsx`. **copy preset** puts the whole thing on the clipboard as JSON that `parsePreset` accepts; drop it into `src/presets/` and add it to the list in `src/presets/index.ts`. H toggles the HUD.
+Vite does not pin the port, so a dev server left running from an earlier session keeps 5173 and the next one moves to 5174 without saying much. Read the URL it prints rather than assuming.
+
+Every control is generated from the lists the package keeps: the scene knobs from `SCENE_KNOBS`, the post knobs from `POST_LANES`, the mapping vocabulary from `AUDIO_FIELDS` and `CURVES`. Add a knob to the package and it appears here with nothing to change, though a knob whose range is not obvious wants a row in `RANGES` in `demo/controls.tsx`. **copy preset** puts the whole thing on the clipboard as JSON that `parsePreset` accepts; drop it into `src/presets/` and add it to the list in `src/presets/index.ts`. **reset** puts every number back to what the preset file holds, and is greyed out until something is touched, so it also answers whether the panel has drifted from the file. H toggles the HUD.
+
+What updates without a reload, measured by editing each file while the demo ran:
+
+| Edit                         | Live                                      |
+| ---------------------------- | ----------------------------------------- |
+| `demo/*.tsx`                 | yes, React Fast Refresh                   |
+| `src/shaders/*.wgsl`         | yes, the pipelines recompile              |
+| `src/scenes/fluid.params.ts` | yes, the next frame reads the new numbers |
+| `src/presets/*.json`         | only through a full page reload           |
+
+The shader row was checked rather than assumed: a hot update that recompiled nothing would look the same as one that did, so the sim shader was fed WGSL that cannot parse and the GPU raised the error straight away. The preset row is React Fast Refresh giving up, because a JSON change reaches `demo/main.tsx`, which is an entry rather than a component. A reload costs the dye already on screen, which is why the sliders rather than the file are the way to tune.
 
 ## How it works
 

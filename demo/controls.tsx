@@ -8,7 +8,7 @@ import { FLUID_SIZES, SCENE_IDS, SCENE_LABELS } from '../src/catalog'
 import type { SceneId } from '../src/catalog'
 import { mergePostParams, POST_KNOBS, POST_LANES } from '../src/post/params'
 import type { PostParams, PostStage } from '../src/post/params'
-import { PRESETS } from '../src/presets/index'
+import { findPreset, PRESETS } from '../src/presets/index'
 import { AUDIO_FIELDS, CURVES, SCENE_KNOBS } from '../src/presets/knobs'
 import type { AudioField, Curve } from '../src/presets/knobs'
 import type { Mapping, Preset } from '../src/presets/types'
@@ -46,6 +46,8 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'colourShift': [0, 1],
   'colourDrift': [0, 0.5],
   'orbitSpeed': [0, 2],
+  // Whole emitters, up to the slots the shader's splat array holds.
+  'emitters': [1, 8],
   'feedback.amount': [0, 1],
   'feedback.decay': [0, 1],
   'feedback.zoom': [0.9, 1.1],
@@ -59,6 +61,9 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'tonemap.shoulder': [0, 2],
   'grain.amount': [0, 0.5],
 }
+
+/** Knobs the slider must step in whole numbers, whatever the range implies. */
+const WHOLE = new Set(['emitters'])
 
 /** Four times the resting value, or 0 to 1 when it rests at zero. */
 function spanOf(name: string, value: number): readonly [number, number] {
@@ -89,6 +94,7 @@ const panel = {
 } as const
 
 const heading = { margin: '20px 0 8px', fontSize: 11, letterSpacing: 1, opacity: 0.6 } as const
+const small = { fontSize: 11, padding: '3px 6px', width: '100%' } as const
 const row = { display: 'grid', gridTemplateColumns: '110px 1fr 56px', gap: 8, alignItems: 'center' }
 const cell = { width: '100%', minWidth: 0 } as const
 
@@ -110,7 +116,7 @@ function Slider({
         type="range"
         min={min}
         max={max}
-        step={stepOf(max - min)}
+        step={WHOLE.has(name) ? 1 : stepOf(max - min)}
         value={value}
         style={cell}
         onChange={(event) => onChange(Number(event.target.value))}
@@ -136,6 +142,11 @@ export function Controls({
   onHud,
 }: Props) {
   const knobs = SCENE_KNOBS[preset.scene]
+  // Every edit below builds a new preset object, and an untouched one is still
+  // the very entry `PRESETS` holds, so identity is the whole check. It also
+  // answers the question worth asking mid-tune: have I drifted from the file?
+  const shipped = findPreset(preset.id)
+  const edited = shipped !== undefined && shipped !== preset
 
   const setKnob = (knob: string, value: number) =>
     onPreset({ ...preset, sceneParams: { ...preset.sceneParams, [knob]: value } })
@@ -179,7 +190,19 @@ export function Controls({
             </option>
           ))}
         </select>
-        <span />
+        <button
+          type="button"
+          style={small}
+          disabled={!edited}
+          title={
+            edited
+              ? `Put ${preset.name} back to the numbers in src/presets/`
+              : `${preset.name} is as it ships`
+          }
+          onClick={() => shipped && onPreset(shipped)}
+        >
+          reset
+        </button>
       </label>
 
       <label style={row}>

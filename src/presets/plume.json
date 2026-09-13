@@ -19,7 +19,12 @@
     "colourDrift": 0,
     "orbitSpeed": 0.19,
     "emitters": 5,
-    "voice": 0.85
+    "voice": 0.85,
+    "events": 24,
+    "eventLife": 0.8,
+    "eventForce": 0.5,
+    "eventDye": 2.5,
+    "eventRadius": 0.011
   },
   "postParams": {},
   "audioMapping": [

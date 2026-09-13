@@ -26,6 +26,7 @@ import simulation from '../shaders/fluid.sim.wgsl?raw'
 import { DEFAULT_FLUID_SIZE } from './catalog'
 import {
   diffuseIterations,
+  EventPool,
   fluidFrame,
   fluidParams,
   layoutMix,
@@ -117,6 +118,8 @@ export class Fluid implements Scene {
    * that comes back gets the layout it had.
    */
   private readonly seen: number[] = [1]
+  /** The short-lived emitters, one per band hit. */
+  private readonly pool = new EventPool()
 
   constructor(size = DEFAULT_FLUID_SIZE) {
     this.wanted = size
@@ -287,7 +290,9 @@ export class Fluid implements Scene {
       to: this.layout.to,
       mix: layoutMix(time - this.layout.changedAt),
     }
-    const frame = fluidFrame(fluidParams(tuning), features, dt, this.visible, blend)
+    const params = fluidParams(tuning)
+    this.pool.step(features, dt, params.events, params.eventLife)
+    const frame = fluidFrame(params, features, dt, this.visible, blend, this.pool.live())
     writeSimUniform(frame, size, this.visible, this.uniformData)
     gear.device.queue.writeBuffer(gear.uniform, 0, this.uniformData)
   }

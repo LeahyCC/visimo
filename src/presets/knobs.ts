@@ -82,7 +82,11 @@ export type Curve = (typeof CURVES)[number]
  * for the whole mix; which sound that is, is the scene's, not the preset's.
  * `saturation` is how much of the dye's colour is kept, 0 for grey and 1 for
  * the palette as it is, so a passage with no key to speak of can be drawn
- * without one.
+ * without one. `events` is how many short-lived emitters may be alive at
+ * once, one spawned per band hit and placed by where the hit landed; 0 is
+ * off. `eventLife` is how long one lasts in seconds, `eventForce` and
+ * `eventDye` what a full-strength one adds over its life, and
+ * `eventRadius` its size before the hit's width scales it.
  */
 export const FLUID_KNOBS = [
   'velocityDecay',
@@ -102,6 +106,11 @@ export const FLUID_KNOBS = [
   'orbitSpeed',
   'emitters',
   'voice',
+  'events',
+  'eventLife',
+  'eventForce',
+  'eventDye',
+  'eventRadius',
 ] as const
 export type FluidKnob = (typeof FLUID_KNOBS)[number]
 

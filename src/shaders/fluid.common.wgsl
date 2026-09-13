@@ -3,9 +3,9 @@
 // that draws it. `writeSimUniform` in scenes/fluid.params.ts fills this block.
 
 const TAU: f32 = 6.2831853;
-// One slot per band. How many of them a frame actually uses is `emitters`,
-// which rides in the uniform as `mix.z`.
-const MAX_EMITTERS: u32 = 5u;
+// One slot per band for the bed and thirty-two for the event pool. How many
+// of them a frame actually uses rides in the uniform as `mix.z`.
+const MAX_EMITTERS: u32 = 37u;
 
 struct Splat {
   place: vec4<f32>,  // x, y across the grid, then the unit push direction
@@ -18,7 +18,7 @@ struct Sim {
   step: vec4<f32>,   // dt, velocity decay, dye decay, vorticity
   mix: vec4<f32>,    // viscosity alpha, colour intensity, live emitters, saturation
   cover: vec4<f32>,  // canvas to grid scale, x and y, then 0, 0
-  splats: array<Splat, 5>,
+  splats: array<Splat, 37>,
 }
 
 @group(0) @binding(0) var<uniform> sim: Sim;

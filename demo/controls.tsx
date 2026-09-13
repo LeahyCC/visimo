@@ -37,6 +37,7 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'vorticity': [0, 60],
   'viscosity': [0, 2],
   'intensity': [0, 4],
+  'saturation': [0, 1.5],
   'spread': [0, 1],
   'force': [0, 3],
   'dye': [0, 8],
@@ -49,6 +50,11 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   // One emitter per band, and there are five bands.
   'emitters': [1, 5],
   'voice': [0, 1],
+  'events': [0, 32],
+  'eventLife': [0.1, 4],
+  'eventForce': [0, 3],
+  'eventDye': [0, 6],
+  'eventRadius': [0.001, 0.05],
   'feedback.amount': [0, 1],
   'feedback.decay': [0, 1],
   'feedback.zoom': [0.9, 1.1],
@@ -64,7 +70,7 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
 }
 
 /** Knobs the slider must step in whole numbers, whatever the range implies. */
-const WHOLE = new Set(['emitters'])
+const WHOLE = new Set(['emitters', 'events'])
 
 /** Four times the resting value, or 0 to 1 when it rests at zero. */
 function spanOf(name: string, value: number): readonly [number, number] {

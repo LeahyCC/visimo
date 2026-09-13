@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import {
+  BAND_HIT,
+  BAND_HIT_CENTRE,
+  BAND_HIT_WIDTH,
+  F,
+  PACKET_LENGTH,
+} from '../audio/FeatureExtractor'
 import { presetOrDefault } from '../presets/index'
 import type { Tuning } from '../presets/knobs'
 import { resolveScene } from '../presets/resolve'
@@ -9,18 +15,28 @@ import {
   BAND_GROUPS,
   bandsOf,
   emitterCount,
+  eventEnvelope,
+  EventPool,
   FLUID_DEFAULTS,
   fluidFrame,
   fluidParams,
+  LAYOUT_BLEND_SECONDS,
+  layoutMix,
+  layoutOf,
+  LAYOUTS,
+  MAX_BED_EMITTERS,
   MAX_EMITTERS,
+  MAX_EVENTS,
   PALETTE_SIZE,
   PALETTE_STOPS,
   paletteLut,
   SIM_UNIFORM_FLOATS,
   simSize,
+  STILL_LAYOUT,
   visibleExtent,
   writeSimUniform,
 } from './fluid.params'
+import type { LiveEvent } from './fluid.params'
 
 const packet = (values: Partial<Record<keyof typeof F, number>> = {}) => {
   const out = new Float32Array(PACKET_LENGTH)
@@ -154,6 +170,83 @@ describe('fluid frame', () => {
   })
 })
 
+describe('layouts', () => {
+  const at = (section: number, mix = 1, time = 7.3) => {
+    const to = layoutOf(section)
+    return fluidFrame(fluidParams(plume.sceneParams), packet({ time }), 1 / 60, square, {
+      from: layoutOf(1),
+      to,
+      mix,
+    })
+  }
+
+  it('starts at the first layout and cycles once the ranks run out', () => {
+    expect(layoutOf(1)).toBe(LAYOUTS[0])
+    expect(layoutOf(2)).toBe(LAYOUTS[1])
+    expect(layoutOf(LAYOUTS.length + 1)).toBe(LAYOUTS[0])
+    expect(layoutOf(0)).toBe(LAYOUTS[0])
+    expect(layoutOf(2.4)).toBe(LAYOUTS[1])
+  })
+
+  it('eases a change in over the blend time', () => {
+    expect(layoutMix(0)).toBe(0)
+    expect(layoutMix(LAYOUT_BLEND_SECONDS / 2)).toBeCloseTo(0.5, 6)
+    expect(layoutMix(LAYOUT_BLEND_SECONDS)).toBe(1)
+    expect(layoutMix(LAYOUT_BLEND_SECONDS * 3)).toBe(1)
+    expect(layoutMix(-1)).toBe(0)
+  })
+
+  it('changes where the emitters are, and glides there', () => {
+    const before = at(2, 0).splats
+    const after = at(2, 1).splats
+    const halfway = at(2, 0.5).splats
+    const still = fluidFrame(fluidParams(plume.sceneParams), packet({ time: 7.3 }), 1 / 60, square)
+    let moved = 0
+    before.forEach((splat, index) => {
+      // At mix 0 a change has not started: the same frame as no change.
+      expect(splat.x).toBeCloseTo(still.splats[index]?.x ?? -1, 6)
+      expect(splat.y).toBeCloseTo(still.splats[index]?.y ?? -1, 6)
+      const to = after[index]
+      const mid = halfway[index]
+      if (!to || !mid) throw new Error('missing splat')
+      if (Math.hypot(to.x - splat.x, to.y - splat.y) > 0.01) moved++
+      expect(mid.x).toBeCloseTo((splat.x + to.x) / 2, 6)
+      expect(mid.y).toBeCloseTo((splat.y + to.y) / 2, 6)
+    })
+    expect(moved).toBeGreaterThan(0)
+  })
+
+  it('keeps every emitter on screen in every layout at the loudest spread', () => {
+    const wide = visibleExtent(1920, 1080)
+    const features = packet({ time: 4.2, energy: 1, swell: 1 })
+    const tuning = resolveScene(plume.sceneParams, plume.audioMapping, features, {})
+    LAYOUTS.forEach((layout, index) => {
+      const built = fluidFrame(fluidParams(tuning), features, 1 / 60, wide, {
+        from: layout,
+        to: layout,
+        mix: 1,
+      })
+      for (const splat of built.splats) {
+        expect(Math.abs(splat.x - 0.5), `layout ${index}`).toBeLessThanOrEqual(wide.x)
+        expect(Math.abs(splat.y - 0.5), `layout ${index}`).toBeLessThanOrEqual(wide.y)
+      }
+    })
+  })
+
+  it('never pushes in no direction, whatever the figure', () => {
+    LAYOUTS.forEach((layout) => {
+      for (const time of [0, 1.1, 3.7, 20]) {
+        const built = fluidFrame(fluidParams(plume.sceneParams), packet({ time }), 1 / 60, square, {
+          from: layout,
+          to: layout,
+          mix: 1,
+        })
+        for (const splat of built.splats) expect(Math.hypot(splat.dx, splat.dy)).toBeCloseTo(1, 6)
+      }
+    })
+  })
+})
+
 describe('palette', () => {
   it('is one opaque row of the requested length', () => {
     const lut = paletteLut()
@@ -191,6 +284,11 @@ describe('sim uniform', () => {
     expect(out[13]).toBeCloseTo(visible.y * 2, 6)
   })
 
+  it('carries the saturation in the slot the shader reads it from', () => {
+    const out = writeSimUniform(frame(), 512, square, new Float32Array(SIM_UNIFORM_FLOATS))
+    expect(out[11]).toBeCloseTo(plume.sceneParams.saturation, 6)
+  })
+
   it('never writes a radius the shader would divide by zero', () => {
     const built = frame()
     built.splats = []
@@ -225,11 +323,11 @@ describe('emitter count', () => {
   // zero emitters is a dead stage and more than the array holds reads past it.
   it('clamps a knob driven past either end to a slot that exists', () => {
     expect(emitterCount(fluidParams({ emitters: -3 }))).toBe(1)
-    expect(emitterCount(fluidParams({ emitters: 99 }))).toBe(MAX_EMITTERS)
+    expect(emitterCount(fluidParams({ emitters: 99 }))).toBe(MAX_BED_EMITTERS)
   })
 
   it('builds one splat per emitter asked for', () => {
-    for (const count of [1, 3, MAX_EMITTERS]) expect(counted(count).splats).toHaveLength(count)
+    for (const count of [1, 3, MAX_BED_EMITTERS]) expect(counted(count).splats).toHaveLength(count)
   })
 
   it('spaces the orbit by the count rather than by a fixed three', () => {
@@ -261,7 +359,7 @@ describe('emitter bands', () => {
   ) => fluidFrame(fluidParams({ emitters, voice }), packet(values), 1 / 60, square)
 
   it('has a grouping for every count an emitter knob can reach', () => {
-    expect(BAND_GROUPS).toHaveLength(MAX_EMITTERS)
+    expect(BAND_GROUPS).toHaveLength(MAX_BED_EMITTERS)
     BAND_GROUPS.forEach((row, index) => expect(row).toHaveLength(index + 1))
   })
 
@@ -324,5 +422,128 @@ describe('emitter bands', () => {
     const built = voiced(5, 1, { sub: -4, subHit: -4 })
     expect(built.splats[0]?.dye ?? -1).toBe(0)
     expect(built.splats[0]?.force ?? -1).toBe(0)
+  })
+})
+
+describe('event pool', () => {
+  const hit = (band: number, centre: number, width = 0.05, strength = 1) => {
+    const out = packet({ time: 2 })
+    out[BAND_HIT + band] = strength
+    out[BAND_HIT_CENTRE + band] = centre
+    out[BAND_HIT_WIDTH + band] = width
+    return out
+  }
+  const withEvents = (events: number) => fluidParams({ ...plume.sceneParams, events })
+
+  it('spawns one event per band that hit and no more', () => {
+    const pool = new EventPool()
+    pool.step(hit(0, 0.1), 1 / 60, 32, 1)
+    expect(pool.live()).toHaveLength(1)
+    pool.step(packet(), 1 / 60, 32, 1)
+    expect(pool.live()).toHaveLength(1)
+    pool.step(hit(4, 0.9), 1 / 60, 32, 1)
+    expect(pool.live().map((event) => event.band)).toEqual([0, 4])
+  })
+
+  it('lets an event die after its life and no sooner', () => {
+    const pool = new EventPool()
+    pool.step(hit(1, 0.3), 1 / 60, 32, 0.5)
+    for (let frame = 0; frame < 24; frame++) pool.step(packet(), 1 / 60, 32, 0.5)
+    expect(pool.live()).toHaveLength(1)
+    for (let frame = 0; frame < 12; frame++) pool.step(packet(), 1 / 60, 32, 0.5)
+    expect(pool.live()).toHaveLength(0)
+  })
+
+  it('holds the cap by replacing the event nearest its end', () => {
+    const pool = new EventPool()
+    pool.step(hit(0, 0.1), 1 / 60, 2, 1)
+    pool.step(hit(1, 0.3), 1 / 60, 2, 1)
+    pool.step(hit(2, 0.5), 1 / 60, 2, 1)
+    const live = pool.live()
+    expect(live).toHaveLength(2)
+    // The first, oldest, gave way; the second and third stay.
+    expect(live.map((event) => event.band).sort()).toEqual([1, 2])
+  })
+
+  it('is off at zero and never holds more than the pool', () => {
+    const pool = new EventPool()
+    pool.step(hit(0, 0.1), 1 / 60, 0, 1)
+    expect(pool.live()).toHaveLength(0)
+    for (let frame = 0; frame < 80; frame++) pool.step(hit(frame % 5, 0.5), 1 / 60, 999, 10)
+    expect(pool.live().length).toBeLessThanOrEqual(MAX_EVENTS)
+  })
+
+  it('draws an event under its band and at the height of its pitch', () => {
+    const low: LiveEvent = { band: 0, centre: 0.1, width: 0.05, strength: 1, age: 0, life: 1 }
+    const high: LiveEvent = { band: 4, centre: 0.9, width: 0.05, strength: 1, age: 0, life: 1 }
+    const built = fluidFrame(withEvents(8), packet({ time: 2 }), 1 / 60, square, STILL_LAYOUT, [
+      low,
+      high,
+    ])
+    expect(built.splats).toHaveLength(plume.sceneParams.emitters + 2)
+    const [subBed, , , , trebleBed, lowSplat, highSplat] = built.splats
+    expect(lowSplat?.x).toBe(subBed?.x)
+    expect(highSplat?.x).toBe(trebleBed?.x)
+    // Grid y runs down the screen, so a low sound sits at a larger y.
+    expect(lowSplat?.y ?? 0).toBeGreaterThan(highSplat?.y ?? 1)
+    expect(lowSplat?.y ?? 0).toBeGreaterThan(0.5)
+    expect(highSplat?.y ?? 1).toBeLessThan(0.5)
+  })
+
+  it('makes a wide low hit fatter than a narrow high one', () => {
+    const kick: LiveEvent = { band: 0, centre: 0.1, width: 0.2, strength: 1, age: 0, life: 1 }
+    const hat: LiveEvent = { band: 4, centre: 0.9, width: 0.05, strength: 1, age: 0, life: 1 }
+    const built = fluidFrame(withEvents(8), packet({ time: 2 }), 1 / 60, square, STILL_LAYOUT, [
+      kick,
+      hat,
+    ])
+    const [, , , , , kickSplat, hatSplat] = built.splats
+    expect(kickSplat?.radius ?? 0).toBeGreaterThan((hatSplat?.radius ?? 0) * 2)
+  })
+
+  // The knob is what an event adds over its whole life, so summing the frames
+  // of a life comes to the knob whatever the frame rate.
+  it('adds the same dye over a life at any frame rate', () => {
+    const params = withEvents(8)
+    const total = (dt: number) => {
+      let sum = 0
+      for (let age = 0; age < 1; age += dt) {
+        const event: LiveEvent = { band: 2, centre: 0.5, width: 0.1, strength: 1, age, life: 1 }
+        const built = fluidFrame(params, packet({ time: 2 }), dt, square, STILL_LAYOUT, [event])
+        sum += built.splats[plume.sceneParams.emitters]?.dye ?? 0
+      }
+      return sum
+    }
+    expect(total(1 / 60) / params.eventDye).toBeCloseTo(1, 1)
+    expect(total(1 / 144) / params.eventDye).toBeCloseTo(1, 1)
+    expect(eventEnvelope(0, 1)).toBe(1)
+    expect(eventEnvelope(1, 1)).toBe(0)
+  })
+
+  it('draws no event past the cap and none when the knob is off', () => {
+    const events: LiveEvent[] = [0, 1, 2].map((band) => ({
+      band,
+      centre: 0.5,
+      width: 0.1,
+      strength: 1,
+      age: 0,
+      life: 1,
+    }))
+    const capped = fluidFrame(
+      withEvents(2),
+      packet({ time: 2 }),
+      1 / 60,
+      square,
+      STILL_LAYOUT,
+      events,
+    )
+    expect(capped.splats).toHaveLength(plume.sceneParams.emitters + 2)
+    const off = fluidFrame(withEvents(0), packet({ time: 2 }), 1 / 60, square, STILL_LAYOUT, events)
+    expect(off.splats).toHaveLength(plume.sceneParams.emitters)
+  })
+
+  it('sizes the uniform for the bed and the whole pool', () => {
+    expect(MAX_EMITTERS).toBe(MAX_BED_EMITTERS + MAX_EVENTS)
+    expect(SIM_UNIFORM_FLOATS).toBe(16 + MAX_EMITTERS * 8)
   })
 })

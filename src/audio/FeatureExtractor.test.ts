@@ -112,7 +112,7 @@ describe('FeatureExtractor', () => {
   const make = (fftSize = FFT_SIZE) => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize })
 
   it('has the documented packet length and indices', () => {
-    expect(PACKET_LENGTH).toBe(44)
+    expect(PACKET_LENGTH).toBe(46)
     expect(F.treble).toBe(4)
     expect(F.tempoBpm).toBe(21)
     expect(F.dt).toBe(23)
@@ -121,6 +121,9 @@ describe('FeatureExtractor', () => {
     expect(F.section).toBe(33)
     expect(F.subHitCentre).toBe(34)
     expect(F.trebleHitWidth).toBe(43)
+    // Rows are only ever added at the end, because the indices are public.
+    expect(F.tempoConfidence).toBe(44)
+    expect(F.beatPhase).toBe(45)
     expect(make().packet).toHaveLength(PACKET_LENGTH)
   })
 
@@ -177,6 +180,8 @@ describe('FeatureExtractor', () => {
     expect(packet[F.tempo]).toBe(0)
     expect(packet[F.swell]).toBe(0.5)
     expect(packet[F.weight]).toBe(0.5)
+    expect(packet[F.tempoConfidence]).toBe(0)
+    expect(packet[F.beatPhase]).toBe(0)
     expect(packet[F.time]).toBeCloseTo(5, 1)
   })
 
@@ -510,6 +515,26 @@ describe('the song rather than the frame', () => {
     expect(packet[F.swell] ?? 0).toBeLessThan(before)
   })
 
+  // Swell is measured in dB, so a passage six dB up reads as far above the
+  // middle as one six dB down reads below it. As a ratio, half the loudness
+  // was already the floor and one and a half times the ceiling, and a preset
+  // could thin a knob in a breakdown far more easily than lift it in a drop.
+  it('reads a rise and a fall of the same size as the same distance from steady', () => {
+    const swellAfter = (db: number) => {
+      const extractor = make()
+      for (let frame = 0; frame < 2400; frame++) extractor.update(spectrum(flat(-30)), DT)
+      // Three seconds: the short arm has followed, the long arm has barely moved.
+      let packet: Float32Array = extractor.packet
+      for (let frame = 0; frame < 180; frame++) packet = extractor.update(spectrum(flat(db)), DT)
+      return packet[F.swell] ?? 0
+    }
+
+    const up = swellAfter(-24) - 0.5
+    const down = 0.5 - swellAfter(-36)
+    expect(up).toBeGreaterThan(0.25)
+    expect(Math.abs(up - down)).toBeLessThan(0.08)
+  })
+
   it('reads weight high on a bass-led track and low on a bright one', () => {
     const extractor = make()
     let packet: Float32Array = extractor.packet
@@ -521,6 +546,33 @@ describe('the song rather than the frame', () => {
     for (let frame = 0; frame < 1800; frame++)
       packet = bright.update(spectrum(only(4000, 16000, -20)), DT)
     expect(packet[F.weight] ?? 1).toBeLessThan(0.1)
+  })
+
+  // Weight is the spectral centroid, so what it reads is the balance of the
+  // spectrum rather than which bands have anything in them. The old measure
+  // read the normalised levels, and two bands that both had content both
+  // normalised toward 1, so anything with a kick and a hat sat at 0.5.
+  it('reads weight from the balance rather than from occupancy', () => {
+    // Equal power per octave across the spectrum, then the same with the low
+    // end ten dB louder: both occupy every band, and only the second is
+    // bass-led. The old measure read both as 0.5.
+    const pink = (hz: number) => -20 - 10 * Math.log10(Math.max(hz, 20) / 20)
+    const weightOf = (level: (hz: number) => number) => {
+      const extractor = make()
+      let packet: Float32Array = extractor.packet
+      for (let frame = 0; frame < 600; frame++) packet = extractor.update(spectrum(level), DT)
+      return packet[F.weight] ?? 0
+    }
+
+    const balanced = weightOf(pink)
+    const heavy = weightOf((hz) => pink(hz) + (hz < 250 ? 10 : 0))
+    expect(heavy).toBeGreaterThan(balanced + 0.15)
+    // Equal power per octave reads a little bass-led, since the low group is
+    // fewer octaves wide than the high one; white noise, which puts most of
+    // its power above 4 kHz, reads bright.
+    expect(balanced).toBeGreaterThan(0.5)
+    expect(balanced).toBeLessThan(0.75)
+    expect(weightOf(flat(-30))).toBeLessThan(0.25)
   })
 
   // The BPM guess steps when the autocorrelation changes its mind, and the

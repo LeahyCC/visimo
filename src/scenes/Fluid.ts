@@ -18,6 +18,7 @@
  * format means one layout, and any three fields can go to any step. Curl is
  * read before divergence is written, so both live in the scratch field.
  */
+import { F } from '../audio/FeatureExtractor'
 import type { Tuning } from '../presets/knobs'
 import common from '../shaders/fluid.common.wgsl?raw'
 import render from '../shaders/fluid.render.wgsl?raw'
@@ -27,6 +28,8 @@ import {
   diffuseIterations,
   fluidFrame,
   fluidParams,
+  layoutMix,
+  layoutOf,
   PALETTE_SIZE,
   paletteLut,
   pressureIterations,
@@ -35,7 +38,7 @@ import {
   visibleExtent,
   writeSimUniform,
 } from './fluid.params'
-import type { Extent } from './fluid.params'
+import type { Extent, Layout } from './fluid.params'
 import type { Scene, SceneContext } from './Scene'
 
 const FIELD_FORMAT: GPUTextureFormat = 'rgba16float'
@@ -96,6 +99,24 @@ export class Fluid implements Scene {
   private pressure: Side = 0
   private visible: Extent = { x: 0.5, y: 0.5 }
   private readonly uniformData = new Float32Array(SIM_UNIFORM_FLOATS)
+  /**
+   * The layout the song's section chose, and the one before it, so a change
+   * can glide between them. This is the one piece of per-frame state the
+   * scene keeps for itself: it needs to know when the section changed.
+   */
+  private layout: { from: Layout; to: Layout; section: number; changedAt: number } = {
+    from: layoutOf(1),
+    to: layoutOf(1),
+    section: 1,
+    changedAt: 0,
+  }
+  /**
+   * Section ids in the order this scene first saw them. The extractor numbers
+   * sections as it finds them; the layouts go by that order, so the first
+   * distinct section gets the first layout whatever its id, and a section
+   * that comes back gets the layout it had.
+   */
+  private readonly seen: number[] = [1]
 
   constructor(size = DEFAULT_FLUID_SIZE) {
     this.wanted = size
@@ -254,7 +275,19 @@ export class Fluid implements Scene {
     if (!gear || !context) return
     if (this.sized?.size !== simSize(this.wanted, context.software)) this.allocate()
     const size = this.sized?.size ?? DEFAULT_FLUID_SIZE
-    const frame = fluidFrame(fluidParams(tuning), features, dt, this.visible)
+    const time = features[F.time] ?? 0
+    const section = Math.max(1, Math.round(features[F.section] ?? 1))
+    if (section !== this.layout.section) {
+      if (!this.seen.includes(section)) this.seen.push(section)
+      const rank = this.seen.indexOf(section) + 1
+      this.layout = { from: this.layout.to, to: layoutOf(rank), section, changedAt: time }
+    }
+    const blend = {
+      from: this.layout.from,
+      to: this.layout.to,
+      mix: layoutMix(time - this.layout.changedAt),
+    }
+    const frame = fluidFrame(fluidParams(tuning), features, dt, this.visible, blend)
     writeSimUniform(frame, size, this.visible, this.uniformData)
     gear.device.queue.writeBuffer(gear.uniform, 0, this.uniformData)
   }

@@ -80,6 +80,9 @@ export type Curve = (typeof CURVES)[number]
  * is a count rather than a magnitude, and the scene rounds and clamps it.
  * `voice` is how far each emitter stands for one sound of its own rather than
  * for the whole mix; which sound that is, is the scene's, not the preset's.
+ * `saturation` is how much of the dye's colour is kept, 0 for grey and 1 for
+ * the palette as it is, so a passage with no key to speak of can be drawn
+ * without one.
  */
 export const FLUID_KNOBS = [
   'velocityDecay',
@@ -87,6 +90,7 @@ export const FLUID_KNOBS = [
   'vorticity',
   'viscosity',
   'intensity',
+  'saturation',
   'spread',
   'force',
   'dye',

@@ -68,6 +68,19 @@ function spanOf(name: string, value: number): readonly [number, number] {
   return value < 0 ? [-reach, reach] : [0, reach]
 }
 
+/**
+ * A round step near a five-hundredth of the range: 1, 2 or 5 times a power of
+ * ten. A plain division gives steps like 0.12, and a slider refuses any value
+ * off its own grid, so the numbers a preset ends up holding would be 39.96
+ * rather than 40.
+ */
+function stepOf(span: number): number {
+  const rough = span / 500
+  const power = 10 ** Math.floor(Math.log10(rough))
+  const times = rough / power
+  return (times > 5 ? 10 : times > 2 ? 5 : times > 1 ? 2 : 1) * power
+}
+
 const panel = {
   overflowY: 'auto',
   padding: 16,
@@ -97,7 +110,7 @@ function Slider({
         type="range"
         min={min}
         max={max}
-        step={(max - min) / 500}
+        step={stepOf(max - min)}
         value={value}
         style={cell}
         onChange={(event) => onChange(Number(event.target.value))}
@@ -269,7 +282,7 @@ export function Controls({
           key={index}
           style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr 52px 1fr 22px',
+            gridTemplateColumns: '0.9fr 1.3fr 52px 0.9fr 22px',
             gap: 4,
             margin: '3px 0',
           }}

@@ -17,7 +17,10 @@
  * remount of the components that read it.
  */
 
-export const FFT_SIZE = 2048
+// 4096 rather than 2048: it halves the bin width to 11.7 Hz, which the low
+// bands need, since at 2048 the whole 20 to 60 Hz sub band was two bins. The
+// cost is an 85 ms window instead of 43, so transients smear a little.
+export const FFT_SIZE = 4096
 
 export type AudioGraph = {
   context: AudioContext

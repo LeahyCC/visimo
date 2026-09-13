@@ -46,8 +46,9 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'colourShift': [0, 1],
   'colourDrift': [0, 0.5],
   'orbitSpeed': [0, 2],
-  // Whole emitters, up to the slots the shader's splat array holds.
-  'emitters': [1, 8],
+  // One emitter per band, and there are five bands.
+  'emitters': [1, 5],
+  'voice': [0, 1],
   'feedback.amount': [0, 1],
   'feedback.decay': [0, 1],
   'feedback.zoom': [0.9, 1.1],

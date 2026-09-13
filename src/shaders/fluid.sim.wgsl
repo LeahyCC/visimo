@@ -86,7 +86,8 @@ fn forces(@builtin(global_invocation_id) gid: vec3<u32>) {
   velocity += vec2<f32>(toward.y, -toward.x) * spin * sim.step.w * sim.step.x;
 
   let uv = centre(id);
-  for (var i = 0u; i < EMITTERS; i = i + 1u) {
+  let live = liveEmitters();
+  for (var i = 0u; i < live; i = i + 1u) {
     let splat = sim.splats[i];
     velocity += splat.place.zw * splat.drive.x * splatFalloff(splat, uv);
   }
@@ -158,7 +159,8 @@ fn advect_dye(@builtin(global_invocation_id) gid: vec3<u32>) {
   var density = max(back.x, 0.0) * exp(-sim.step.z * sim.step.x);
   var hue = back.yz;
 
-  for (var i = 0u; i < EMITTERS; i = i + 1u) {
+  let live = liveEmitters();
+  for (var i = 0u; i < live; i = i + 1u) {
     let splat = sim.splats[i];
     let added = splat.drive.z * splatFalloff(splat, uv);
     density += added;

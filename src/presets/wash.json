@@ -16,7 +16,9 @@
     "radius": 0.02,
     "colourShift": 0.5,
     "colourDrift": 0.012,
-    "orbitSpeed": 0.1
+    "orbitSpeed": 0.1,
+    "emitters": 3,
+    "voice": 0.45
   },
   "postParams": {
     "feedback": { "amount": 0.3, "decay": 0.7, "zoom": 1.004, "rotate": 0.0006 },

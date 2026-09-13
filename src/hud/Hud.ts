@@ -1,11 +1,16 @@
 /**
- * A debug overlay drawn on a 2D canvas above the scene: the band envelopes,
- * energy, the flux trace against its onset threshold with onset marks, the
- * tempo guess, the preset drawing, and frame timing. Toggled with H; it ships
- * in the build so a problem on someone else's machine can be read off a
- * screenshot.
+ * A debug overlay drawn on a 2D canvas above the scene: the band envelopes
+ * with each band's own onsets, energy, the flux trace against its onset
+ * threshold with the global onset marks, the tempo guess, the preset drawing,
+ * and frame timing. Toggled with H; it ships in the build so a problem on
+ * someone else's machine can be read off a screenshot.
+ *
+ * The band rows are the reason this exists now. Each emitter answers one
+ * band's onsets, so the way to see whether that is working is to watch the
+ * rows tick independently: the treble row with the hats, the sub row with the
+ * kick. A row that never ticks is an emitter that will never fire.
  */
-import { F } from '../audio/FeatureExtractor'
+import { BAND_HIT, BAND_NAMES, BAND_PULSE, F } from '../audio/FeatureExtractor'
 
 export type HudStats = {
   fps: number
@@ -19,14 +24,22 @@ export type HudStats = {
   preset: string
 }
 
-const BARS = ['sub', 'bass', 'lowMid', 'highMid', 'treble', 'energy'] as const
 const HISTORY = 240
+/** One row per band, then energy; the geometry below is derived from this. */
+const ROWS = BAND_NAMES.length + 1
+const ROW_HEIGHT = 15
+const BARS_TOP = 12
+const TRACE_HEIGHT = 56
+/** The six lines of text under the trace, the last of which is the preset. */
+const FOOTER = 96
 
 export class Hud {
   private readonly context: CanvasRenderingContext2D | null
   private readonly flux = new Float32Array(HISTORY)
   private readonly threshold = new Float32Array(HISTORY)
   private readonly onsets = new Uint8Array(HISTORY)
+  /** One row of history per band, so a row can be ticked on its own. */
+  private readonly hits = new Uint8Array(HISTORY * BAND_NAMES.length)
   private at = 0
   private scale = 1
   visible = false
@@ -52,6 +65,8 @@ export class Hud {
     this.flux[this.at] = packet[F.flux] ?? 0
     this.threshold[this.at] = packet[F.fluxThreshold] ?? 0
     this.onsets[this.at] = packet[F.onset] ? 1 : 0
+    for (let band = 0; band < BAND_NAMES.length; band++)
+      this.hits[band * HISTORY + this.at] = (packet[BAND_HIT + band] ?? 0) > 0 ? 1 : 0
     this.at = (this.at + 1) % HISTORY
   }
 
@@ -66,27 +81,42 @@ export class Hud {
     const x = 10
     const y = 10
     const width = 310
+    // Flux and its threshold share a scale so the crossing is visible.
+    const top = y + BARS_TOP + ROWS * ROW_HEIGHT
+    const height = TRACE_HEIGHT
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'
-    // Tall enough for the four lines under the flux trace, the last of which
-    // is the preset.
-    ctx.fillRect(x, y, width, 240)
+    ctx.fillRect(x, y, width, top - y + height + FOOTER)
 
-    BARS.forEach((name, index) => {
-      const value = packet[index] ?? 0
-      const row = y + 12 + index * 15
+    // A band's row is its level as a bar, its pulse as a brighter overlay on
+    // the same bar, and a tick on the right for each of the last few frames it
+    // fired on. The ticks are what say the detectors are independent.
+    const rows = [...BAND_NAMES, 'energy'] as const
+    rows.forEach((name, index) => {
+      const band = index < BAND_NAMES.length ? index : -1
+      const value = (band < 0 ? packet[F.energy] : packet[band]) ?? 0
+      const row = y + BARS_TOP + index * ROW_HEIGHT
       ctx.fillStyle = '#cfd8d3'
       ctx.fillText(name, x + 8, row)
       ctx.fillStyle = 'rgba(255, 255, 255, 0.12)'
-      ctx.fillRect(x + 68, row - 5, 200, 10)
+      ctx.fillRect(x + 68, row - 5, 170, 10)
       ctx.fillStyle = `hsl(${200 - index * 30} 80% 60%)`
-      ctx.fillRect(x + 68, row - 5, 200 * value, 10)
+      ctx.fillRect(x + 68, row - 5, 170 * value, 10)
+      if (band >= 0) {
+        const pulse = packet[BAND_PULSE + band] ?? 0
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.65)'
+        ctx.fillRect(x + 68, row - 5, 170 * pulse, 3)
+        // The last 24 frames of this band's onsets, newest on the right.
+        ctx.fillStyle = 'rgba(255, 200, 80, 0.95)'
+        for (let back = 0; back < 24; back++) {
+          const at = (this.at - 1 - back + HISTORY * 2) % HISTORY
+          if (!this.hits[band * HISTORY + at]) continue
+          ctx.fillRect(x + 268 - back * 2, row - 5, 1, 10)
+        }
+      }
       ctx.fillStyle = '#cfd8d3'
       ctx.fillText(value.toFixed(2), x + 274, row)
     })
 
-    // Flux and its threshold share a scale so the crossing is visible.
-    const top = y + 104
-    const height = 56
     let max = 1
     for (let i = 0; i < HISTORY; i++) {
       max = Math.max(max, this.flux[i] ?? 0, this.threshold[i] ?? 0)
@@ -120,7 +150,7 @@ export class Hud {
     trace(this.flux, 'rgba(120, 220, 255, 0.95)')
 
     ctx.fillStyle = '#cfd8d3'
-    const tempo = packet[F.tempo] ?? 0
+    const tempo = packet[F.tempoBpm] ?? 0
     const beat = packet[F.beatPulse] ?? 0
     ctx.fillText(
       `flux ${(packet[F.flux] ?? 0).toFixed(2)}  thr ${(packet[F.fluxThreshold] ?? 0).toFixed(2)}  beat ${beat.toFixed(2)}  ${tempo ? `${Math.round(tempo)} bpm` : 'tempo ?'}`,
@@ -128,13 +158,23 @@ export class Hud {
       top + height + 12,
     )
 
+    // The song rather than the frame. These move over tens of seconds, so the
+    // way to tell whether one is worth mapping is to watch this line for a
+    // while before wiring it to a knob.
+    const slow = (at: number) => (packet[at] ?? 0).toFixed(2)
     ctx.fillText(
-      `${stats.fps.toFixed(0)} fps  ${stats.frameMs.toFixed(1)} ms  ${stats.scene}`,
+      `pace ${slow(F.pace)}  swell ${slow(F.swell)}  weight ${slow(F.weight)}  tempo ${slow(F.tempo)}`,
       x + 8,
       top + height + 26,
     )
-    ctx.fillText(stats.adapter.slice(0, 44), x + 8, top + height + 40)
-    ctx.fillText(`post ${stats.post}`, x + 8, top + height + 54)
-    ctx.fillText(`preset ${stats.preset}`, x + 8, top + height + 68)
+
+    ctx.fillText(
+      `${stats.fps.toFixed(0)} fps  ${stats.frameMs.toFixed(1)} ms  ${stats.scene}`,
+      x + 8,
+      top + height + 40,
+    )
+    ctx.fillText(stats.adapter.slice(0, 44), x + 8, top + height + 54)
+    ctx.fillText(`post ${stats.post}`, x + 8, top + height + 68)
+    ctx.fillText(`preset ${stats.preset}`, x + 8, top + height + 82)
   }
 }

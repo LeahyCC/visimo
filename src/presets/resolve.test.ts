@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { defaultPostParams } from '../post/params'
+import { AUDIO_FIELDS } from './knobs'
 import { bend, feature, resolvePost, resolveScene } from './resolve'
 import type { Mapping } from './types'
 
@@ -15,6 +16,17 @@ describe('feature', () => {
   it('reads the packet by name', () => {
     expect(feature(packet({ treble: 0.4 }), 'treble')).toBeCloseTo(0.4)
     expect(feature(packet({ beatPulse: 1 }), 'beatPulse')).toBe(1)
+  })
+
+  // The vocabulary and the packet are two lists that have to stay in step; a
+  // name in one and not the other is how a preset silently reads a zero.
+  it('reads every name the vocabulary offers out of the packet', () => {
+    for (const field of AUDIO_FIELDS) {
+      if (field === 'lowEnd') continue
+      const at = F[field]
+      expect(at).toBeLessThan(PACKET_LENGTH)
+      expect(feature(packet({ [field]: 0.7 }), field)).toBeCloseTo(0.7)
+    }
   })
 
   it('gives lowEnd the louder of sub and bass', () => {

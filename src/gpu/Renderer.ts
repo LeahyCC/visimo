@@ -35,7 +35,6 @@ const describe = (info: GpuInfo) =>
 
 class Renderer {
   private gpu: Gpu | null = null
-  private features: GPUBuffer | null = null
   private scene: Scene | null = null
   private post: PostStack | null = null
   private client: FeatureClient | null = null
@@ -86,10 +85,6 @@ class Renderer {
     if (!gpu) return 'unsupported'
     if (this.canvas) this.detach(this.canvas)
     this.gpu = gpu
-    this.features ??= gpu.device.createBuffer({
-      size: PACKET_LENGTH * 4,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    })
     if (!this.post) {
       this.post = new PostStack()
       this.post.init(gpu.device, gpu.format)
@@ -190,15 +185,13 @@ class Renderer {
   // built for that format.
   private buildScene() {
     const gpu = this.gpu
-    const features = this.features
-    if (!gpu || !features) return
+    if (!gpu) return
     this.scene?.dispose()
     this.scene = this.build()
 
     this.scene.init({
       device: gpu.device,
       format: SCENE_FORMAT,
-      features,
       software: gpu.info.software,
     })
 
@@ -245,8 +238,8 @@ class Renderer {
 
   private readonly tick = (now: number) => {
     this.frame = 0
-    const { canvas, context, gpu, scene, post, features } = this
-    if (!canvas || !context || !gpu || !scene || !post || !features || gpu.lost) return
+    const { canvas, context, gpu, scene, post } = this
+    if (!canvas || !context || !gpu || !scene || !post || gpu.lost) return
     const win = canvas.ownerDocument.defaultView ?? window
     this.frame = win.requestAnimationFrame(this.tick)
     const dt = Math.min(0.1, Math.max(0.001, (now - this.last) / 1000))
@@ -264,7 +257,6 @@ class Renderer {
     }
     this.packet[F.time] = this.time
     this.packet[F.dt] = dt
-    gpu.device.queue.writeBuffer(features, 0, this.packet)
 
     // The mapping is applied here, on the CPU, and nowhere else: the scene
     // and the stack both read numbers that have already been modulated.
@@ -319,7 +311,6 @@ class Renderer {
     this.scene = null
     this.post?.dispose()
     this.post = null
-    this.features = null
     this.client?.dispose()
     this.client = null
     this.gpu = null

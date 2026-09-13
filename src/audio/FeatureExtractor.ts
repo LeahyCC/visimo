@@ -350,12 +350,16 @@ const NOVELTY_GAIN = 5
 // novelty up across both and an edge would miss the second. A confirmed boundary joins an old
 // section when the recall to it is at least this.
 const CANDIDATE_NOVELTY = 0.4
-const MIN_SECTION_SECONDS = 8
+const MIN_SECTION_SECONDS = 6
 const CONFIRM_SECONDS = 5
 const SAME_SECTION_SIMILARITY = 0.965
 const RECALL_TO_REJOIN = 0.7
 // A section's mean starts this long after it began, and a candidate's this
-// long after the candidate, so neither takes in the passage before it.
+// long after the candidate, so neither takes in the passage before it. The
+// section's mean also only takes samples while the novelty is low: what a
+// section sounds like when it is not changing, so a riser running into a
+// drop cannot fold the drop into the riser's section before the drop has
+// had its own boundary.
 const SECTION_MEAN_FROM_SECONDS = 4
 const CANDIDATE_MEAN_FROM_SECONDS = 1.5
 // Hits a second in a band that count as fully busy in the structure vector,
@@ -743,11 +747,14 @@ class Mean {
 /**
  * The song's shape, remembered. A vector of what the last couple of seconds
  * sounded like (which bands, how busy each, which notes) is kept every two
- * seconds, and twice a second the
- * present is compared with every memory from before the current section
- * began. The best match is `recall`, so a steady passage does not recall its
- * own start and a returning one recalls the whole of its first time round;
- * how far the present has moved from ten seconds ago is `novelty`.
+ * seconds for the novelty, and every section that has ended is kept as one
+ * mean vector. Twice a second the present is compared with those section
+ * means; the best match is `recall`, so a steady passage does not recall its
+ * own start and a returning one recalls the whole of its first time round.
+ * Whole sections rather than the snapshots, because a single two-second
+ * snapshot of an intro's last bar matched a drop well enough to call the
+ * drop a return of the intro. How far the present has moved from ten
+ * seconds ago is `novelty`.
  *
  * A `section` boundary takes two steps, because the fast novelty also lifts
  * on a fill. High novelty is a candidate; five seconds on, the mean of the
@@ -770,7 +777,8 @@ export class Structure {
   private readonly rates = new Float32Array(BAND_COUNT)
   private readonly snapshots: Float32Array[] = []
   private readonly snapshotAt: number[] = []
-  private readonly snapshotSection: number[] = []
+  /** Every section that has ended, as one mean vector each, by id. */
+  private readonly past = new Map<number, Float32Array>()
   private readonly recallRamp = new Envelope(RECALL_RAMP_MS, RECALL_RAMP_MS)
   private readonly noveltyRamp = new Envelope(NOVELTY_RAMP_MS, NOVELTY_RAMP_MS)
   /** What this section has sounded like so far, and what a candidate has. */
@@ -818,7 +826,10 @@ export class Structure {
       level(2 * BAND_COUNT + 1 + k, STRUCTURE_CHROMA_WEIGHT * ((chroma[k] ?? 0) - 1 / 12))
 
     if (this.candidateAt === null) {
-      if (this.elapsed - this.sectionStartedAt >= SECTION_MEAN_FROM_SECONDS)
+      if (
+        this.elapsed - this.sectionStartedAt >= SECTION_MEAN_FROM_SECONDS &&
+        this.noveltyTarget < CANDIDATE_NOVELTY
+      )
         this.sectionMean.add(now)
     } else if (this.elapsed - this.candidateAt >= CANDIDATE_MEAN_FROM_SECONDS)
       this.candidateMean.add(now)
@@ -846,26 +857,27 @@ export class Structure {
     if (this.snapshots.length === SNAPSHOT_CAPACITY) {
       this.snapshots.shift()
       this.snapshotAt.shift()
-      this.snapshotSection.shift()
     }
     this.snapshots.push(new Float32Array(this.now))
     this.snapshotAt.push(this.elapsed)
-    this.snapshotSection.push(this.section)
   }
 
-  /** The best match among the memories, and which section it belongs to. */
-  private best(vector: Float32Array): { similarity: number; section: number } {
+  /**
+   * The best match among the sections that have ended, and which it is. A
+   * section is remembered only once it has ended, so a steady passage on its
+   * first time round recalls nothing, while a section that has come back
+   * recalls its own first time; at a boundary the section that is ending is
+   * left out, since it is the passage being left.
+   */
+  private best(vector: Float32Array, except?: number): { similarity: number; section: number } {
     let similarity = -1
     let section = this.section
-    for (let index = 0; index < this.snapshots.length; index++) {
-      const snapshot = this.snapshots[index]
-      // Only what came before this section is a memory; the section itself
-      // is the passage still going on.
-      if (!snapshot || (this.snapshotAt[index] ?? 0) >= this.sectionStartedAt) continue
-      const found = cosine(vector, snapshot)
+    for (const [id, mean] of this.past) {
+      if (id === except) continue
+      const found = cosine(vector, mean)
       if (found > similarity) {
         similarity = found
-        section = this.snapshotSection[index] ?? this.section
+        section = id
       }
     }
 
@@ -908,9 +920,13 @@ export class Structure {
     if (this.candidateMean.count === 0) return
     if (cosine(this.candidateMean.value, this.sectionMean.value) >= SAME_SECTION_SIMILARITY) return
 
-    // A boundary. Memories are judged with the new passage's mean rather
-    // than the present, since the mean has left the old passage behind.
-    const match = this.best(this.candidateMean.value)
+    // A boundary. The section that ends is remembered as its mean, folded
+    // into what was remembered of it before if it has been here already;
+    // then the memories are judged with the present, which five seconds on
+    // has left the old passage behind, where the candidate's mean still
+    // carries the first seconds of the change.
+    this.retire()
+    const match = this.best(this.now, this.section)
     const section =
       this.recallOf(match.similarity) >= RECALL_TO_REJOIN ? match.section : this.sections + 1
     this.sections = Math.max(this.sections, section)
@@ -918,8 +934,15 @@ export class Structure {
     this.sectionStartedAt = candidateAt
     this.sinceBoundary = this.elapsed - candidateAt
     this.sectionMean.copy(this.candidateMean)
-    for (let index = 0; index < this.snapshots.length; index++)
-      if ((this.snapshotAt[index] ?? 0) >= candidateAt) this.snapshotSection[index] = section
+  }
+
+  private retire() {
+    if (this.sectionMean.count === 0) return
+    const known = this.past.get(this.section)
+    if (known)
+      for (let k = 0; k < STRUCTURE_DIMS; k++)
+        known[k] = ((known[k] ?? 0) + (this.sectionMean.value[k] ?? 0)) / 2
+    else this.past.set(this.section, new Float32Array(this.sectionMean.value))
   }
 }
 

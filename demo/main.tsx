@@ -33,6 +33,13 @@ const dropzone = {
   backdropFilter: 'blur(6px)',
 } as const
 
+const choose = {
+  padding: '4px 10px',
+  border: '1px solid #ffffff40',
+  borderRadius: 6,
+  cursor: 'pointer',
+} as const
+
 function App() {
   const [preset, setPreset] = useState<Preset>(() => presetOrDefault(DEFAULT_PRESET_ID))
   const [scene, setScene] = useState<SceneId>(DEFAULT_SCENE)
@@ -89,15 +96,21 @@ function App() {
         )}
         <div style={dropzone}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span>{track || 'Drop a track here, or'}</span>
-            <input
-              type="file"
-              accept="audio/*,video/*"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                if (file) load(file)
-              }}
-            />
+            <span>{track || 'Drop a track here'}</span>
+            {/* The input's own button repeats the file name next to it, so it
+                is hidden and the label is the button. */}
+            <label style={choose}>
+              choose a file
+              <input
+                type="file"
+                accept="audio/*,video/*"
+                style={{ display: 'none' }}
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  if (file) load(file)
+                }}
+              />
+            </label>
           </div>
           <audio
             ref={audio}

@@ -31,6 +31,13 @@
  *   25     swell           0..1      energy now against energy over half a minute; 0.5 is steady
  *   26     weight          0..1      low against high over ten seconds; 1 is bass-led
  *   27     tempo           0..1      `tempoBpm` across 60 to 200, smoothed so it ramps
+ *   28     keyHue          0..1      the key's place on the circle of fifths, a relative
+ *                                    major and minor sharing one; ramps over seconds
+ *   29     keyClarity      0..1      how surely a key is heard: 0 on silence or drums alone
+ *   30     harmonicChange  0..1      how far the harmony has moved in the last two seconds
+ *   31     recall          0..1      how closely this passage matches one heard earlier
+ *   32     novelty         0..1      how different this passage is from ten seconds ago
+ *   33     section         1..       which section this is; a number comes back with its passage
  *
  * Each band detects its own onsets, against its own flux and its own adaptive
  * threshold, which is what lets one emitter answer the kick and another the
@@ -38,16 +45,25 @@
  * spectrum, kept because the post stack, the preset vocabulary and the debug
  * overlay all read them.
  *
- * The last four rows are the song rather than the frame. Everything above them
+ * Rows 24 to 27 are the song rather than the frame. Everything above them
  * answers "what is happening now"; those answer "what kind of track is this"
  * and "where in it are we". They are levels like any other, so a preset reads
  * them through the same mapping table.
+ *
+ * Rows 28 to 30 are the harmony: a chroma read from spectral peaks, folded
+ * into a key. They give the song a colour of its own and a way to notice a
+ * chord moving, which no amount of band energy could.
+ *
+ * Rows 31 to 33 are the structure: a memory of what the last few minutes
+ * sounded like, so a drop that comes back is known to be the same drop.
+ * `section` is an id rather than a level, read by a scene the way it reads
+ * an onset, and it is what lets a returning passage return to the same look.
  *
  * Nothing on the GPU binds this. Every consumer reads the Float32Array on the
  * CPU, so the layout is free of any vec4 alignment.
  */
 
-export const PACKET_LENGTH = 28
+export const PACKET_LENGTH = 34
 
 /** The five bands, in order. Band `i` is packet slot `i`. */
 export const BAND_NAMES = ['sub', 'bass', 'lowMid', 'highMid', 'treble'] as const
@@ -87,6 +103,12 @@ export const F = {
   swell: 25,
   weight: 26,
   tempo: 27,
+  keyHue: 28,
+  keyClarity: 29,
+  harmonicChange: 30,
+  recall: 31,
+  novelty: 32,
+  section: 33,
 } as const
 
 export type BandSpec = {
@@ -269,6 +291,79 @@ const WEIGHT_MS = 10000
 const TEMPO_RAMP_MS = 5000
 const MIN_DT = 0.001
 const MAX_DT = 0.1
+// Chroma is read from spectral peaks between these, each weighted by its
+// log magnitude. Peaks rather than every bin because drums fill every bin
+// and flatten a magnitude chroma: on a real track the peak-picked chroma
+// found the key and the magnitude one wavered between it and its relatives.
+const CHROMA_LOW_HZ = 100
+const CHROMA_HIGH_HZ = 5000
+// A peak below this log magnitude, about -60 dB, is noise.
+const CHROMA_FLOOR = Math.log1p(FLUX_COMPRESSION * QUIET)
+// Three views of the chroma: what is sounding now, the last couple of
+// seconds, and the passage. The change is the first against the second;
+// the key is read from the third.
+const CHROMA_SHORT_MS = 300
+const CHROMA_MID_MS = 2000
+const CHROMA_LONG_MS = 8000
+const KEY_EVERY_SECONDS = 0.5
+const KEY_RAMP_MS = 3000
+// Added to every bin before the medium chroma is normalised, so that once
+// the notes have faded it reads as flat rather than as the last note held
+// for ever. One peak weighs about one to five; a tonal passage sums to
+// dozens, so this only tells when there is next to nothing left.
+const CHROMA_FLAT_WEIGHT = 0.5
+// Krumhansl and Kessler's key profiles for C major and C minor, how much a
+// listener expects each pitch class; the other keys rotate them.
+const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+// A correlation with the best profile below the first reads as no key at
+// all, above the second as certain.
+const KEY_CLARITY_LOW = 0.4
+const KEY_CLARITY_HIGH = 0.9
+// The cosine distance between the short and the medium chroma, scaled so a
+// chord change reads near 1 and the drift within a chord stays low.
+const HARMONIC_CHANGE_GAIN = 3
+// The structure's view of "now" is this long, and it is remembered this
+// often, for this long. Ten minutes of snapshots every two seconds is 300
+// vectors of 23 floats, which is nothing.
+const STRUCTURE_NOW_MS = 2000
+const SNAPSHOT_SECONDS = 2
+const SNAPSHOT_CAPACITY = 300
+const COMPARE_SECONDS = 0.5
+// Nothing is remembered until the vector has had this long to settle, since
+// a memory of the cold start would read as a boundary against everything.
+const STRUCTURE_WARM_SECONDS = 4
+// Novelty compares now with this long ago.
+const NOVELTY_LAG_SECONDS = 10
+// Cosine similarities mapped onto recall. On a real track the drops matched
+// one another at 1.00 and a verse its own return at 0.98 to 0.99, while a
+// drop against the intro sat at 0.96 and against a verse at 0.94, so the
+// map is steep and sits just above those.
+const RECALL_LOW = 0.94
+const RECALL_HIGH = 0.99
+const NOVELTY_GAIN = 5
+// A boundary starts as a candidate, novelty at or past this once a section
+// has run this long, and is confirmed a few seconds later by the new
+// passage's mean against the ending section's: at least this similar and
+// it was a fill, not a section. The candidate is a level rather than a
+// rising edge, because a riser running straight into a drop keeps the
+// novelty up across both and an edge would miss the second. A confirmed boundary joins an old
+// section when the recall to it is at least this.
+const CANDIDATE_NOVELTY = 0.4
+const MIN_SECTION_SECONDS = 8
+const CONFIRM_SECONDS = 5
+const SAME_SECTION_SIMILARITY = 0.965
+const RECALL_TO_REJOIN = 0.7
+// A section's mean starts this long after it began, and a candidate's this
+// long after the candidate, so neither takes in the passage before it.
+const SECTION_MEAN_FROM_SECONDS = 4
+const CANDIDATE_MEAN_FROM_SECONDS = 1.5
+// Hits a second in a band that count as fully busy in the structure vector,
+// and how much the chroma's shape weighs against a band level.
+const STRUCTURE_RATE_FULL = 3
+const STRUCTURE_CHROMA_WEIGHT = 1
+const RECALL_RAMP_MS = 1000
+const NOVELTY_RAMP_MS = 500
 const TEMPO_MIN_BPM = 60
 const TEMPO_MAX_BPM = 200
 // The flux is resampled to this rate for the autocorrelation, so the window
@@ -418,6 +513,416 @@ export class OnsetDetector {
   }
 }
 
+export const PITCH_NAMES = [
+  'C',
+  'C#',
+  'D',
+  'D#',
+  'E',
+  'F',
+  'F#',
+  'G',
+  'G#',
+  'A',
+  'A#',
+  'B',
+] as const
+
+/** Which of the twelve a frequency is nearest, 0 for C. */
+export const pitchClass = (hz: number) =>
+  ((Math.round(12 * Math.log2(hz / 440)) % 12) + 12 + 9) % 12
+
+/**
+ * A key's place on the circle of fifths as a fraction of the way round, C at
+ * 0, G a twelfth on, F a twelfth back. Neighbours on the circle share most of
+ * their notes, so a modulation to the dominant is a small step of colour and
+ * a jump to a distant key a large one. A minor key sits where its relative
+ * major does, since the two are the same notes; that is also what keeps the
+ * profile's habit of flipping between relatives from moving the colour.
+ */
+export const keyHueOf = (tonic: number, major: boolean) =>
+  ((((major ? tonic : tonic + 3) % 12) * 7) % 12) / 12
+
+/** The relative major at that place on the circle, with its minor: "A / F#m". */
+export function keyLabel(hue: number): string {
+  const position = ((Math.round(hue * 12) % 12) + 12) % 12
+  // Seven fifths is a semitone, so seven steps undoes the multiply above.
+  const major = (position * 7) % 12
+  const minor = (major + 9) % 12
+  return `${PITCH_NAMES[major]} / ${PITCH_NAMES[minor]}m`
+}
+
+const pearson = (a: ArrayLike<number>, b: ArrayLike<number>) => {
+  let meanA = 0
+  let meanB = 0
+  for (let i = 0; i < 12; i++) {
+    meanA += (a[i] ?? 0) / 12
+    meanB += (b[i] ?? 0) / 12
+  }
+  let cross = 0
+  let squareA = 0
+  let squareB = 0
+  for (let i = 0; i < 12; i++) {
+    const da = (a[i] ?? 0) - meanA
+    const db = (b[i] ?? 0) - meanB
+    cross += da * db
+    squareA += da * da
+    squareB += db * db
+  }
+  const scale = Math.sqrt(squareA * squareB)
+  return scale > 0 ? cross / scale : 0
+}
+
+/** The key a chroma fits best, by correlation with the rotated profiles. */
+export function keyOf(chroma: ArrayLike<number>): { tonic: number; major: boolean; r: number } {
+  let best = { tonic: 0, major: true, r: -Infinity }
+  const rotated = new Float32Array(12)
+  for (const [profile, major] of [
+    [MAJOR_PROFILE, true],
+    [MINOR_PROFILE, false],
+  ] as const) {
+    for (let tonic = 0; tonic < 12; tonic++) {
+      for (let i = 0; i < 12; i++) rotated[(i + tonic) % 12] = profile[i] ?? 0
+      const r = pearson(chroma, rotated)
+      if (r > best.r) best = { tonic, major, r }
+    }
+  }
+
+  return best
+}
+
+export type HarmonyReading = {
+  keyHue: number
+  keyClarity: number
+  harmonicChange: number
+}
+
+/**
+ * The harmony of the passage: a chroma built from the spectral peaks of each
+ * frame, folded into a key and a measure of how far the harmony has moved.
+ *
+ * A twelve-bin chroma is kept at three speeds. What is sounding now against
+ * the last couple of seconds is the change: a chord that moves pulls the two
+ * apart for as long as the slower one takes to catch up. The key is read from
+ * the slowest, twice a second, and the hue it lands on is ramped as a unit
+ * vector so a key a full turn away is still the short way round.
+ */
+export class Harmony {
+  /** The medium chroma, normalised to sum to 1; flat when nothing sounds. */
+  readonly chroma = new Float32Array(12).fill(1 / 12)
+  private readonly frame = new Float32Array(12)
+  private readonly short = Array.from(
+    { length: 12 },
+    () => new Envelope(CHROMA_SHORT_MS, CHROMA_SHORT_MS),
+  )
+  private readonly mid = Array.from(
+    { length: 12 },
+    () => new Envelope(CHROMA_MID_MS, CHROMA_MID_MS),
+  )
+  private readonly long = Array.from(
+    { length: 12 },
+    () => new Envelope(CHROMA_LONG_MS, CHROMA_LONG_MS),
+  )
+  private readonly longChroma = new Float32Array(12)
+  private readonly hueX = new Envelope(KEY_RAMP_MS, KEY_RAMP_MS)
+  private readonly hueY = new Envelope(KEY_RAMP_MS, KEY_RAMP_MS)
+  private readonly clarity = new Envelope(KEY_RAMP_MS, KEY_RAMP_MS)
+  private sinceKey = Infinity
+  private target = { hue: 0, clarity: 0 }
+
+  /** One spectral peak of this frame, weighted by its log magnitude. */
+  add(hz: number, weight: number) {
+    const at = pitchClass(hz)
+    this.frame[at] = (this.frame[at] ?? 0) + weight
+  }
+
+  step(dt: number): HarmonyReading {
+    let shortSum = 0
+    let midSum = 0
+    let longSum = 0
+    for (let k = 0; k < 12; k++) {
+      const value = this.frame[k] ?? 0
+      this.frame[k] = 0
+      shortSum += this.short[k]?.step(value, dt) ?? 0
+      midSum += this.mid[k]?.step(value, dt) ?? 0
+      longSum += this.long[k]?.step(value, dt) ?? 0
+    }
+
+    // The change is a cosine distance, so it is about which notes are
+    // sounding and not how loudly.
+    let cross = 0
+    let squareShort = 0
+    let squareMid = 0
+    for (let k = 0; k < 12; k++) {
+      const a = this.short[k]?.value ?? 0
+      const b = this.mid[k]?.value ?? 0
+      cross += a * b
+      squareShort += a * a
+      squareMid += b * b
+    }
+    const scale = Math.sqrt(squareShort * squareMid)
+    const distance = scale > 1e-12 ? 1 - cross / scale : 0
+    const harmonicChange = clamp01(HARMONIC_CHANGE_GAIN * distance)
+    for (let k = 0; k < 12; k++)
+      this.chroma[k] =
+        ((this.mid[k]?.value ?? 0) + CHROMA_FLAT_WEIGHT) / (midSum + 12 * CHROMA_FLAT_WEIGHT)
+
+    this.sinceKey += dt
+    if (this.sinceKey >= KEY_EVERY_SECONDS) {
+      this.sinceKey = 0
+      if (longSum > 1e-6) {
+        for (let k = 0; k < 12; k++) this.longChroma[k] = this.long[k]?.value ?? 0
+        const key = keyOf(this.longChroma)
+        // How surely the key is heard: how well the profile fits, and whether
+        // anything tonal is sounding now at all. The second term is what
+        // lets the clarity fall the moment the notes stop, while the slow
+        // chroma the key is read from still remembers them.
+        const fit = clamp01((key.r - KEY_CLARITY_LOW) / (KEY_CLARITY_HIGH - KEY_CLARITY_LOW))
+        const presence = clamp01(shortSum / Math.max(longSum, 1e-6))
+        this.target = { hue: keyHueOf(key.tonic, key.major), clarity: fit * presence }
+      } else this.target = { hue: this.target.hue, clarity: 0 }
+    }
+
+    const angle = this.target.hue * 2 * Math.PI
+    const x = this.hueX.step(Math.cos(angle), dt)
+    const y = this.hueY.step(Math.sin(angle), dt)
+    const keyHue = x * x + y * y > 1e-9 ? (Math.atan2(y, x) / (2 * Math.PI) + 1) % 1 : 0
+    return { keyHue, keyClarity: this.clarity.step(this.target.clarity, dt), harmonicChange }
+  }
+}
+
+export type StructureReading = {
+  recall: number
+  novelty: number
+  section: number
+}
+
+const cosine = (a: Float32Array, b: Float32Array) => {
+  let cross = 0
+  let squareA = 0
+  let squareB = 0
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i] ?? 0
+    const y = b[i] ?? 0
+    cross += x * y
+    squareA += x * x
+    squareB += y * y
+  }
+  // Nothing against nothing is the same thing, so silence is not a change;
+  // nothing against something is as different as it gets.
+  if (squareA < 1e-12 && squareB < 1e-12) return 1
+  const scale = Math.sqrt(squareA * squareB)
+  return scale > 1e-12 ? cross / scale : 0
+}
+
+/** Band levels and energy, a hit rate per band, and the chroma's shape: 23 floats. */
+const STRUCTURE_DIMS = BAND_COUNT + 1 + BAND_COUNT + 12
+
+/** A running mean of vectors, one sample at a time. */
+class Mean {
+  readonly value = new Float32Array(STRUCTURE_DIMS)
+  count = 0
+
+  add(sample: Float32Array) {
+    this.count++
+    for (let k = 0; k < STRUCTURE_DIMS; k++)
+      this.value[k] = (this.value[k] ?? 0) + ((sample[k] ?? 0) - (this.value[k] ?? 0)) / this.count
+  }
+
+  reset() {
+    this.value.fill(0)
+    this.count = 0
+  }
+
+  copy(from: Mean) {
+    this.value.set(from.value)
+    this.count = from.count
+  }
+}
+
+/**
+ * The song's shape, remembered. A vector of what the last couple of seconds
+ * sounded like (which bands, how busy each, which notes) is kept every two
+ * seconds, and twice a second the
+ * present is compared with every memory from before the current section
+ * began. The best match is `recall`, so a steady passage does not recall its
+ * own start and a returning one recalls the whole of its first time round;
+ * how far the present has moved from ten seconds ago is `novelty`.
+ *
+ * A `section` boundary takes two steps, because the fast novelty also lifts
+ * on a fill. High novelty is a candidate; five seconds on, the mean of the
+ * new passage is set against the mean of the section it would end, and if
+ * the two are nearly the same the candidate is dropped. A confirmed boundary
+ * either starts a new section or, when the recall to an older one is high,
+ * rejoins it. On a real track that put all three drops in one section and
+ * the quiet passages together, with the first drop called four seconds
+ * late and a boundary or two more than a listener would count. Swell is
+ * deliberately not in the vector: it is loudness against the last half
+ * minute, so the same quiet passage reads differently after a drop and
+ * after silence, and a returning one failed to recall itself.
+ */
+export class Structure {
+  private readonly now = new Float32Array(STRUCTURE_DIMS)
+  private readonly nowEnvelopes = Array.from(
+    { length: STRUCTURE_DIMS },
+    () => new Envelope(STRUCTURE_NOW_MS, STRUCTURE_NOW_MS),
+  )
+  private readonly rates = new Float32Array(BAND_COUNT)
+  private readonly snapshots: Float32Array[] = []
+  private readonly snapshotAt: number[] = []
+  private readonly snapshotSection: number[] = []
+  private readonly recallRamp = new Envelope(RECALL_RAMP_MS, RECALL_RAMP_MS)
+  private readonly noveltyRamp = new Envelope(NOVELTY_RAMP_MS, NOVELTY_RAMP_MS)
+  /** What this section has sounded like so far, and what a candidate has. */
+  private readonly sectionMean = new Mean()
+  private readonly candidateMean = new Mean()
+  private candidateAt: number | null = null
+  private sinceSnapshot = Infinity
+  private sinceCompare = Infinity
+  private sinceBoundary = 0
+  private sectionStartedAt = 0
+  private elapsed = 0
+  private section = 1
+  private sections = 1
+  private recallTarget = 0
+  private noveltyTarget = 0
+
+  /**
+   * `packet` supplies the band levels, energy and hits; `chroma` is the
+   * normalised medium chroma the harmony keeps.
+   */
+  step(packet: Float32Array, chroma: Float32Array, dt: number): StructureReading {
+    this.elapsed += dt
+    this.sinceBoundary += dt
+    // Hits a second per band, each hit decaying over the vector's own time,
+    // then scaled so a busy band reads about 1.
+    const keep = Math.exp(-dt / (STRUCTURE_NOW_MS / 1000))
+    for (let band = 0; band < BAND_COUNT; band++) {
+      const hit = (packet[BAND_HIT + band] ?? 0) > 0 ? 1000 / STRUCTURE_NOW_MS : 0
+      this.rates[band] = (this.rates[band] ?? 0) * keep + hit
+    }
+
+    const now = this.now
+    const level = (at: number, value: number) => {
+      now[at] = this.nowEnvelopes[at]?.step(value, dt) ?? 0
+    }
+
+    for (let band = 0; band < BAND_COUNT; band++) {
+      level(band, packet[band] ?? 0)
+      now[BAND_COUNT + 1 + band] = clamp01((this.rates[band] ?? 0) / STRUCTURE_RATE_FULL)
+    }
+    level(BAND_COUNT, packet[F.energy] ?? 0)
+    // The chroma's shape, not its mass: flat contributes nothing, so a
+    // passage with no notes is not made to look like every other such.
+    for (let k = 0; k < 12; k++)
+      level(2 * BAND_COUNT + 1 + k, STRUCTURE_CHROMA_WEIGHT * ((chroma[k] ?? 0) - 1 / 12))
+
+    if (this.candidateAt === null) {
+      if (this.elapsed - this.sectionStartedAt >= SECTION_MEAN_FROM_SECONDS)
+        this.sectionMean.add(now)
+    } else if (this.elapsed - this.candidateAt >= CANDIDATE_MEAN_FROM_SECONDS)
+      this.candidateMean.add(now)
+
+    this.sinceCompare += dt
+    if (this.sinceCompare >= COMPARE_SECONDS) {
+      this.sinceCompare = 0
+      this.compare()
+    }
+
+    this.sinceSnapshot += dt
+    if (this.sinceSnapshot >= SNAPSHOT_SECONDS && this.elapsed >= STRUCTURE_WARM_SECONDS) {
+      this.sinceSnapshot = 0
+      this.remember()
+    }
+
+    return {
+      recall: this.recallRamp.step(this.recallTarget, dt),
+      novelty: this.noveltyRamp.step(this.noveltyTarget, dt),
+      section: this.section,
+    }
+  }
+
+  private remember() {
+    if (this.snapshots.length === SNAPSHOT_CAPACITY) {
+      this.snapshots.shift()
+      this.snapshotAt.shift()
+      this.snapshotSection.shift()
+    }
+    this.snapshots.push(new Float32Array(this.now))
+    this.snapshotAt.push(this.elapsed)
+    this.snapshotSection.push(this.section)
+  }
+
+  /** The best match among the memories, and which section it belongs to. */
+  private best(vector: Float32Array): { similarity: number; section: number } {
+    let similarity = -1
+    let section = this.section
+    for (let index = 0; index < this.snapshots.length; index++) {
+      const snapshot = this.snapshots[index]
+      // Only what came before this section is a memory; the section itself
+      // is the passage still going on.
+      if (!snapshot || (this.snapshotAt[index] ?? 0) >= this.sectionStartedAt) continue
+      const found = cosine(vector, snapshot)
+      if (found > similarity) {
+        similarity = found
+        section = this.snapshotSection[index] ?? this.section
+      }
+    }
+
+    return { similarity, section }
+  }
+
+  private recallOf(similarity: number) {
+    return similarity < 0 ? 0 : clamp01((similarity - RECALL_LOW) / (RECALL_HIGH - RECALL_LOW))
+  }
+
+  private compare() {
+    this.recallTarget = this.recallOf(this.best(this.now).similarity)
+
+    // The youngest snapshot at least the lag old, less half a snapshot's
+    // spacing so one is always in reach once the track is that long.
+    let past: Float32Array | null = null
+    let pastAge = Infinity
+    for (let index = 0; index < this.snapshots.length; index++) {
+      const age = this.elapsed - (this.snapshotAt[index] ?? 0)
+      if (age >= NOVELTY_LAG_SECONDS - SNAPSHOT_SECONDS / 2 && age < pastAge) {
+        pastAge = age
+        past = this.snapshots[index] ?? null
+      }
+    }
+    this.noveltyTarget = past ? clamp01(NOVELTY_GAIN * (1 - cosine(this.now, past))) : 0
+
+    if (
+      this.noveltyTarget >= CANDIDATE_NOVELTY &&
+      this.candidateAt === null &&
+      this.sinceBoundary >= MIN_SECTION_SECONDS &&
+      this.sectionMean.count > 0
+    ) {
+      this.candidateAt = this.elapsed
+      this.candidateMean.reset()
+    }
+
+    if (this.candidateAt === null || this.elapsed - this.candidateAt < CONFIRM_SECONDS) return
+    const candidateAt = this.candidateAt
+    this.candidateAt = null
+    if (this.candidateMean.count === 0) return
+    if (cosine(this.candidateMean.value, this.sectionMean.value) >= SAME_SECTION_SIMILARITY) return
+
+    // A boundary. Memories are judged with the new passage's mean rather
+    // than the present, since the mean has left the old passage behind.
+    const match = this.best(this.candidateMean.value)
+    const section =
+      this.recallOf(match.similarity) >= RECALL_TO_REJOIN ? match.section : this.sections + 1
+    this.sections = Math.max(this.sections, section)
+    this.section = section
+    this.sectionStartedAt = candidateAt
+    this.sinceBoundary = this.elapsed - candidateAt
+    this.sectionMean.copy(this.candidateMean)
+    for (let index = 0; index < this.snapshots.length; index++)
+      if ((this.snapshotAt[index] ?? 0) >= candidateAt) this.snapshotSection[index] = section
+  }
+}
+
 /** What kind of track this is, and where in it we are. */
 export type Character = {
   /** Onsets a second, decayed over half a minute and scaled. */
@@ -525,6 +1030,12 @@ export class FeatureExtractor {
   private readonly bandFlux: Float32Array
   /** The song-scale features, one step a frame off what the rest works out. */
   private readonly song = new Song()
+  private readonly harmony = new Harmony()
+  private readonly structure = new Structure()
+  private readonly binHz: number
+  /** The bins the chroma reads peaks between, inclusive. */
+  private readonly chromaLow: number
+  private readonly chromaHigh: number
   private readonly tempoWindow = new Float32Array(TEMPO_RATE * TEMPO_WINDOW_SECONDS)
   private tempoAt = 0
   private tempoFilled = 0
@@ -543,6 +1054,9 @@ export class FeatureExtractor {
       bandFilter(band.low, band.high, options.fftSize, options.sampleRate),
     )
     this.span = bandFilter(20, 16000, options.fftSize, options.sampleRate)
+    this.binHz = options.sampleRate / options.fftSize
+    this.chromaLow = Math.max(1, Math.ceil(CHROMA_LOW_HZ / this.binHz))
+    this.chromaHigh = Math.min(this.bins - 2, Math.floor(CHROMA_HIGH_HZ / this.binHz))
     this.magnitudes = new Float32Array(this.bins)
     this.logs = new Float32Array(this.bins)
     this.history = Array.from({ length: FLUX_HISTORY }, () => new Float32Array(this.bins))
@@ -629,6 +1143,20 @@ export class FeatureExtractor {
     }
     this.remember(logs, now)
     const rms = Math.sqrt(squares / total)
+
+    // The chroma, from the peaks of the log spectrum. A peak's frequency is
+    // refined between bins with a parabola through its neighbours, since a
+    // bin is wider than a semitone below about 200 Hz.
+    for (let bin = this.chromaLow; bin <= this.chromaHigh; bin++) {
+      const centre = logs[bin] ?? 0
+      if (centre < CHROMA_FLOOR) continue
+      const left = logs[bin - 1] ?? 0
+      const right = logs[bin + 1] ?? 0
+      if (centre <= left || centre < right) continue
+      const curve = left - 2 * centre + right
+      const offset = curve < 0 ? (0.5 * (left - right)) / curve : 0
+      this.harmony.add((bin + offset) * this.binHz, centre)
+    }
     packet[F.energy] = clamp01(this.energyEnvelope.step(rms, dt) / this.energyPeak.step(rms, dt))
 
     // Each band against its own history. A band that is always busy settles on
@@ -662,6 +1190,16 @@ export class FeatureExtractor {
     packet[F.swell] = song.swell
     packet[F.weight] = song.weight
     packet[F.tempo] = song.tempo
+
+    const harmony = this.harmony.step(dt)
+    packet[F.keyHue] = harmony.keyHue
+    packet[F.keyClarity] = harmony.keyClarity
+    packet[F.harmonicChange] = harmony.harmonicChange
+
+    const structure = this.structure.step(packet, this.harmony.chroma, dt)
+    packet[F.recall] = structure.recall
+    packet[F.novelty] = structure.novelty
+    packet[F.section] = structure.section
 
     this.time = now
     packet[F.time] = this.time

@@ -19,13 +19,25 @@
  * `onset` is not: they are events rather than levels, and a scene reads an
  * event straight from the packet.
  *
- * The last four are the song rather than the frame, and they move over tens of
- * seconds: `pace` is how busy the track is, `swell` whether this passage is
- * lifting or dropping, `weight` whether it is bass-led or bright, `tempo` the
- * BPM guess normalised. They are what makes a ballad and a drum and bass track
- * look different without swapping the preset. Reach for `pace` rather than
- * `tempo` when what you mean is "fast": the BPM guess is the weak part of the
- * extractor and the README says by how much.
+ * `pace`, `swell`, `weight` and `tempo` are the song rather than the frame,
+ * and they move over tens of seconds: `pace` is how busy the track is,
+ * `swell` whether this passage is lifting or dropping, `weight` whether it is
+ * bass-led or bright, `tempo` the BPM guess normalised. They are what makes a
+ * ballad and a drum and bass track look different without swapping the
+ * preset. Reach for `pace` rather than `tempo` when what you mean is "fast":
+ * the BPM guess is the weak part of the extractor and the README says by how
+ * much.
+ *
+ * Then the harmony. `keyHue` is where the key sits on the circle of fifths,
+ * 0 to 1 and wrapping, so a song has a colour of its own and a modulation
+ * moves it; `keyClarity` is how surely that key is heard, 0 on drums alone;
+ * `harmonicChange` lifts for a couple of seconds when a chord moves.
+ *
+ * The last two are the structure. `recall` is how closely this passage
+ * matches one heard earlier in the track, so a chorus coming back reads as
+ * a return; `novelty` lifts for a few seconds when a new passage begins.
+ * The section id itself is not here, for the reason the hits are not: a
+ * scene reads it straight from the packet and chooses a layout with it.
  */
 export const AUDIO_FIELDS = [
   'sub',
@@ -47,6 +59,11 @@ export const AUDIO_FIELDS = [
   'swell',
   'weight',
   'tempo',
+  'keyHue',
+  'keyClarity',
+  'harmonicChange',
+  'recall',
+  'novelty',
 ] as const
 export type AudioField = (typeof AUDIO_FIELDS)[number]
 

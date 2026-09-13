@@ -33,11 +33,18 @@
  * moves it; `keyClarity` is how surely that key is heard, 0 on drums alone;
  * `harmonicChange` lifts for a couple of seconds when a chord moves.
  *
- * The last two are the structure. `recall` is how closely this passage
- * matches one heard earlier in the track, so a chorus coming back reads as
- * a return; `novelty` lifts for a few seconds when a new passage begins.
- * The section id itself is not here, for the reason the hits are not: a
- * scene reads it straight from the packet and chooses a layout with it.
+ * Then the structure. `recall` is how closely this passage matches one heard
+ * earlier in the track, so a chorus coming back reads as a return;
+ * `novelty` lifts for a few seconds when a new passage begins. The section
+ * id itself is not here, for the reason the hits are not: a scene reads it
+ * straight from the packet and chooses a layout with it.
+ *
+ * The last two are the beat as a clock. `beatPhase` runs from 0 on a beat to
+ * 1 just before the next, predicted rather than reacted to, so with `invert`
+ * it is a pulse that falls across the beat and lands on time.
+ * `tempoConfidence` is how well the tracker's period fits; gate anything
+ * built on the phase or the tempo with it, since a phase on a wrong tempo is
+ * a steady rhythm in the wrong place.
  */
 export const AUDIO_FIELDS = [
   'sub',
@@ -64,6 +71,8 @@ export const AUDIO_FIELDS = [
   'harmonicChange',
   'recall',
   'novelty',
+  'tempoConfidence',
+  'beatPhase',
 ] as const
 export type AudioField = (typeof AUDIO_FIELDS)[number]
 

@@ -43,6 +43,7 @@ export function resolveScene(
   features: Float32Array,
   out: Record<string, number>,
 ): Tuning {
+  for (const key of Object.keys(out)) if (!(key in base)) delete out[key]
   for (const [key, value] of Object.entries(base)) out[key] = value
   for (const row of mapping) {
     const current = out[row.to]

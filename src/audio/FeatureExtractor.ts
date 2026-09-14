@@ -3,7 +3,7 @@
  * visualizer. Pure TypeScript, no DOM: the input is the Float32Array that
  * `AnalyserNode.getFloatFrequencyData` fills (dB per bin, -Infinity for
  * silence) plus the seconds since the previous frame, and the output is a
- * fixed-layout Float32Array the renderer uploads as one uniform buffer.
+ * fixed-layout Float32Array consumed on the CPU by the renderer and scenes.
  *
  * Packet layout. Read by name through `F`, never by a literal index.
  *

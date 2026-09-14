@@ -5,6 +5,7 @@ import { SCENE_IDS } from '../scenes/catalog'
 import { DEFAULT_PRESET_ID, findPreset, firstPresetOf, PRESETS, stepPreset } from './index'
 import { FLUID_KNOBS, SCENE_KNOBS } from './knobs'
 import { parsePreset } from './parse'
+import prism from './prism.json'
 import type { Preset } from './types'
 
 const fluidParams = (): Record<string, number> =>
@@ -20,9 +21,21 @@ const good = () => ({
 })
 
 describe('parsePreset', () => {
+  it('accepts kaleidoscope knobs and rejects fluid knobs on that scene', () => {
+    expect(parsePreset(prism, 'prism').scene).toBe('kaleidoscope')
+    expect(() =>
+      parsePreset({ ...prism, sceneParams: { ...prism.sceneParams, vorticity: 1 } }, 'bad'),
+    ).toThrow(/vorticity/)
+
+    expect(() =>
+      parsePreset({ ...prism, audioMapping: [{ from: 'bass', to: 'dye', gain: 1 }] }, 'bad'),
+    ).toThrow(/neither a knob/)
+  })
+
   it('reads a whole preset', () => {
     const preset = parsePreset(good(), 'test.json')
     expect(preset.scene).toBe('fluid')
+    if (preset.scene !== 'fluid') throw new Error('Expected fluid')
     expect(preset.sceneParams.vorticity).toBe(1)
     expect(preset.audioMapping).toEqual([
       { from: 'treble', to: 'vorticity', gain: 2, curve: 'linear' },
@@ -125,10 +138,9 @@ describe('parsePreset', () => {
 })
 
 describe('the presets', () => {
-  it('are two per scene, every one parsed', () => {
-    expect(PRESETS).toHaveLength(2 * SCENE_IDS.length)
+  it('provide at least one parsed preset per scene', () => {
     for (const scene of SCENE_IDS)
-      expect(PRESETS.filter((preset) => preset.scene === scene)).toHaveLength(2)
+      expect(PRESETS.filter((preset) => preset.scene === scene).length).toBeGreaterThan(0)
   })
 
   it('give every knob of their own scene a finite number', () => {

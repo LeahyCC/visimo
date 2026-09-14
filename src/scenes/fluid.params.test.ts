@@ -48,7 +48,11 @@ const square = { x: 0.5, y: 0.5 }
 
 // The shipped fluid preset, resolved the way the renderer resolves it, so
 // these read the behaviour the stage actually has rather than a bare default.
-const plume = presetOrDefault('plume')
+const plume = (() => {
+  const preset = presetOrDefault('plume')
+  if (preset.scene !== 'fluid') throw new Error('Plume must use Fluid')
+  return preset
+})()
 
 const frame = (
   values: Partial<Record<keyof typeof F, number>> = {},

@@ -62,6 +62,13 @@ describe('bend', () => {
 describe('resolveScene', () => {
   const base = { vorticity: 1, viscosity: 0 }
 
+  it('drops the previous scene knobs from the reused output', () => {
+    const out: Record<string, number> = {}
+    resolveScene(base, [], packet({}), out)
+    resolveScene({ symmetry: 6 }, [], packet({}), out)
+    expect(out).toEqual({ symmetry: 6 })
+  })
+
   it('is the resting value where nothing drives a knob', () => {
     const out = resolveScene(base, [], packet({ energy: 1 }), {})
     expect(out).toEqual({ vorticity: 1, viscosity: 0 })

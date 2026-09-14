@@ -42,42 +42,57 @@ export function acquireGpu(): Promise<Gpu | null> {
 }
 
 async function request(): Promise<Gpu | null> {
-  if (!hasWebGpu()) return null
-  try {
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' })
-    if (!adapter) return null
-    const device = await adapter.requestDevice()
-    const info = adapter.info
-    const gpu: Gpu = {
-      device,
-      format: navigator.gpu.getPreferredCanvasFormat(),
-      info: {
-        vendor: info.vendor,
-        architecture: info.architecture,
-        device: info.device,
-        description: info.description,
-        software: /swiftshader|llvmpipe|software/i.test(
-          `${info.architecture} ${info.description} ${info.device}`,
-        ),
-      },
-      lost: false,
-    }
-    device.addEventListener('uncapturederror', (event) => {
-      console.error('WebGPU error:', event.error.message)
-    })
-
-    void device.lost.then((reason) => {
-      gpu.lost = true
-      if (current === gpu) current = null
-      if (reason.reason !== 'destroyed') console.warn('WebGPU device lost:', reason.message)
-      for (const listener of lostListeners) listener()
-    })
-    current = gpu
-    return gpu
-  } catch (error) {
-    console.warn('WebGPU unavailable:', error)
+  if (!hasWebGpu()) {
+    console.warn('WebGPU unavailable: this browser has not exposed the WebGPU API.')
     return null
   }
+
+  // A browser GPU process can still be restarting after device loss. Give it
+  // a bounded recovery window and let it choose another adapter if needed.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, attempt * 300))
+    try {
+      const adapter = await navigator.gpu.requestAdapter(
+        attempt === 0 ? { powerPreference: 'high-performance' } : {},
+      )
+      if (!adapter) continue
+      const device = await adapter.requestDevice()
+      const info = adapter.info
+      const gpu: Gpu = {
+        device,
+        format: navigator.gpu.getPreferredCanvasFormat(),
+        info: {
+          vendor: info.vendor,
+          architecture: info.architecture,
+          device: info.device,
+          description: info.description,
+          software: /swiftshader|llvmpipe|software/i.test(
+            `${info.architecture} ${info.description} ${info.device}`,
+          ),
+        },
+        lost: false,
+      }
+      device.addEventListener('uncapturederror', (event) => {
+        console.error('WebGPU error:', event.error.message)
+      })
+
+      void device.lost.then((reason) => {
+        gpu.lost = true
+        if (current === gpu) current = null
+        if (reason.reason !== 'destroyed') console.warn('WebGPU device lost:', reason.message)
+        for (const listener of lostListeners) listener()
+      })
+      current = gpu
+      return gpu
+    } catch (error) {
+      console.warn('WebGPU initialization failed:', error)
+    }
+  }
+  console.warn(
+    'WebGPU unavailable: the browser did not provide a usable device after three attempts.',
+  )
+
+  return null
 }
 
 /** Configure a canvas for this device; the context is per canvas, the device is not. */

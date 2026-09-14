@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   root: 'demo',
   plugins: [react()],
+  server: { port: 5174, strictPort: true },
   // Unit tests are for pure TypeScript and run in Node. Anything that needs a
   // GPU has to be driven in a real browser by hand.
   test: { root: '.', include: ['src/**/*.test.ts'], environment: 'node' },

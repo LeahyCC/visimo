@@ -1,0 +1,38 @@
+{
+  "id": "prism",
+  "name": "Prism",
+  "scene": "kaleidoscope",
+  "sceneParams": {
+    "symmetry": 6,
+    "zoom": 0.85,
+    "zoomAmount": 0.8,
+    "zoomSpeed": 0.22,
+    "bandReaction": 1,
+    "depth": 0.55,
+    "rotationSpeed": 0.025,
+    "travelSpeed": 0.035,
+    "morphSpeed": 0.055,
+    "complexity": 7,
+    "warp": 0.35,
+    "thickness": 0.42,
+    "bassLift": 0,
+    "sparkle": 0.1,
+    "intensity": 1,
+    "saturation": 1.1,
+    "colourShift": 0,
+    "colourDrift": 0.009
+  },
+  "postParams": {
+    "feedback": { "enabled": false },
+    "bloom": { "threshold": 0.8, "intensity": 0.15 },
+    "chromatic": { "enabled": false },
+    "grain": { "enabled": false }
+  },
+  "audioMapping": [
+    { "from": "pace", "to": "travelSpeed", "gain": 0.035 },
+    { "from": "swell", "to": "depth", "gain": 0.15 },
+    { "from": "harmonicChange", "to": "warp", "gain": 0.2 },
+    { "from": "keyHue", "to": "colourShift", "gain": 1 },
+    { "from": "energy", "to": "intensity", "gain": 0.1 }
+  ]
+}

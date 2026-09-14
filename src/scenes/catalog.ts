@@ -3,15 +3,15 @@
  * does. Plain values with no GPU, WGSL or React imports, so the top bar can
  * read them without pulling the visualizer tree into the main bundle.
  *
- * One scene for now. The list stays a list because more are coming, and the
- * top bar hides the select while there is only one thing in it.
+ * Keep this list free of scene implementations so pickers stay lightweight.
  */
 
-export const SCENE_IDS = ['fluid'] as const
+export const SCENE_IDS = ['fluid', 'kaleidoscope'] as const
 export type SceneId = (typeof SCENE_IDS)[number]
 
 export const SCENE_LABELS: Record<SceneId, string> = {
   fluid: 'Fluid',
+  kaleidoscope: 'Kaleidoscope',
 }
 
 export const DEFAULT_SCENE: SceneId = 'fluid'

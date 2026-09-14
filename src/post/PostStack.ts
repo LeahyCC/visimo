@@ -165,6 +165,13 @@ export class PostStack {
     return this.sized?.history[this.current].view ?? null
   }
 
+  /** Discard the old scene's trails without reallocating its textures. */
+  resetHistory() {
+    this.historyReady = false
+  }
+
+  private historyReady = false
+
   /** Run the stack over what the scene drew and write `view`. */
   render(encoder: GPUCommandEncoder, view: GPUTextureView, features: Float32Array) {
     const gear = this.gear
@@ -174,7 +181,7 @@ export class PostStack {
     writePostUniform(this.settings, features, sized.width, sized.height, this.uniformData)
     gear.device.queue.writeBuffer(gear.uniform, 0, this.uniformData)
 
-    if (stageEnabled(this.settings, 'feedback')) {
+    if (this.historyReady && stageEnabled(this.settings, 'feedback')) {
       const into = sized.history[this.current].view
       draw(encoder, gear.feedback, sized.feedback[this.current], into, 'load')
     }
@@ -193,6 +200,7 @@ export class PostStack {
     draw(encoder, gear.composite, sized.composite[this.current], view, 'clear')
     // The frame just drawn becomes next frame's history.
     this.current = other
+    this.historyReady = true
   }
 
   /** Rebuild every texture for a new canvas size. The trails restart. */
@@ -299,6 +307,7 @@ export class PostStack {
   }
 
   private release() {
+    this.historyReady = false
     const sized = this.sized
     if (!sized) return
     for (const target of sized.history) target.texture.destroy()

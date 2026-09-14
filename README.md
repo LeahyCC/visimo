@@ -1,8 +1,8 @@
 # visimo
 
-A WebGPU music visualizer, as a package. Give it an `<audio>` element and a canvas gets a fluid simulation driven by what the music is doing: bands, onsets, the key, the shape of the song, resolved through a JSON preset onto the scene's own numbers and a post stack.
+A music visualizer package with fluid and kaleidoscope scenes. Give it an `<audio>` element; bands, onsets, key and song structure drive scene parameters and a post stack through JSON presets.
 
-WebGPU only. Where there is no adapter it says so and the host shows whatever it showed before.
+WebGPU is preferred. Kaleidoscope also runs through WebGL2 when no WebGPU device is available. Fluid and its Plume/Wash presets require WebGPU. If neither available backend supports the chosen scene, the host receives `onUnsupported`.
 
 It was built inside [Musimo](https://github.com/LeahyCC/musimo) and pulled out so scenes and presets could be worked on against a bench rather than a music library. Musimo consumes it as a git dependency and is still the main user.
 
@@ -79,7 +79,7 @@ const Stage = lazy(() => import('visimo').then((m) => ({ default: m.VisualizerSt
 
 Both canvases are `position: absolute; inset: 0`, so **give them a positioned parent**. They carry no stylesheet; `className` and `hudClassName` are there if you want to restyle them.
 
-`onUnsupported` fires when the device cannot be had at all, or is lost and cannot be recovered. Check `hasWebGpu()` up front if you want to avoid loading the chunk on a machine that cannot use it, and copy the check rather than importing it, or the capability test pulls the WebGPU chunk into your main bundle.
+`onUnsupported` fires when the chosen scene cannot start or recover on an available backend. `hasWebGpu()` only checks whether the WebGPU API exists; it neither guarantees an adapter nor detects the WebGL2 fallback. Do not use it to block loading Kaleidoscope. The optional `onBackend` callback reports `webgpu` or `webgl2` after attachment.
 
 ### The `data-*` attributes are public API
 
@@ -94,7 +94,7 @@ The scene canvas carries, on attach and then throttled to 500 ms:
 | `data-post`     | the post stages running, or `off`             |
 | `data-preset`   | the preset id                                 |
 
-They exist for tests and screenshots and Musimo's e2e suite asserts on all six. Breaking one breaks a consumer silently, so treat them as the interface they are.
+They exist for tests and screenshots and Musimo's e2e suite asserts on all six. Breaking one breaks a consumer silently, so treat them as the interface they are. Kaleidoscope's `data-detail` includes its internal render dimensions, allowing a canvas/scene size mismatch to be diagnosed.
 
 ## The demo
 
@@ -103,11 +103,13 @@ npm install
 npm run dev
 ```
 
-Drop a track on the left, tune on the right. The file becomes an object URL on an `<audio>` element and goes through `attachAudio`, the same path a host uses, so what you are tuning is the real thing rather than a mock.
+The demo opens Prism. Drop a track on the left and tune on the right. Files become object URLs on the same `<audio>` element and use `attachAudio`, as they do in a host app. Play/Pause buttons and labelled seek/volume controls replace the native media widget after repeated in-app browser crashes during testing. Fluid, Plume and Wash choices are disabled when WebGL2 is active.
 
-Vite does not pin the port, so a dev server left running from an earlier session keeps 5173 and the next one moves to 5174 without saying much. Read the URL it prints rather than assuming.
+Vite is pinned to `http://127.0.0.1:5174/` with `strictPort: true`; it fails if that port is occupied instead of silently moving. Keep the server process running. A cached page can remain open after the server exits while its feature worker and hot-reload connection fail. During diagnosis, port 5174 had no listener and the stale page was trying a hot-reload connection on 5173. A persistent background Vite process restored the correct endpoint.
 
-Every control is generated from the lists the package keeps: the scene knobs from `SCENE_KNOBS`, the post knobs from `POST_LANES`, the mapping vocabulary from `AUDIO_FIELDS` and `CURVES`. Add a knob to the package and it appears here with nothing to change, though a knob whose range is not obvious wants a row in `RANGES` in `demo/controls.tsx`. **copy preset** puts the whole thing on the clipboard as JSON that `parsePreset` accepts; drop it into `src/presets/` and add it to the list in `src/presets/index.ts`. **reset** puts every number back to what the preset file holds, and is greyed out until something is touched, so it also answers whether the panel has drifted from the file. H toggles the HUD.
+If graphics cannot start, **Retry graphics** mounts a fresh stage while retaining the audio element and its track. After failed WebGPU recovery, the stage replaces its scene canvas once so WebGL2 can acquire a fresh context. A canvas previously used for WebGPU cannot switch context type in place. The console logs unavailable APIs and initialization failures.
+
+Every control is generated from the lists the package keeps: the scene knobs from `SCENE_KNOBS`, the post knobs from `POST_LANES`, the mapping vocabulary from `AUDIO_FIELDS` and `CURVES`. Add a knob to the package and it appears here with nothing to change, though a knob whose range is not obvious wants a row in `RANGES` in `demo/controls.tsx`. **copy preset** puts the whole thing on the clipboard as JSON that `parsePreset` accepts; drop it into `src/presets/` and add it to the list in `src/presets/index.ts`. **reset** puts every number back to what the preset file holds, and is greyed out until something is touched, so it also answers whether the panel has drifted from the file. H toggles the HUD. F opens full view and Esc returns. Choosing a preset selects its scene; choosing a scene selects its first preset. The grid control appears only for Fluid.
 
 What updates without a reload, measured by editing each file while the demo ran:
 
@@ -118,7 +120,7 @@ What updates without a reload, measured by editing each file while the demo ran:
 | `src/scenes/fluid.params.ts` | yes, the next frame reads the new numbers |
 | `src/presets/*.json`         | only through a full page reload           |
 
-The shader row was checked rather than assumed: a hot update that recompiled nothing would look the same as one that did, so the sim shader was fed WGSL that cannot parse and the GPU raised the error straight away. The preset row is React Fast Refresh giving up, because a JSON change reaches `demo/main.tsx`, which is an entry rather than a component. A reload costs the dye already on screen, which is why the sliders rather than the file are the way to tune.
+The shader row was checked rather than assumed: a hot update that recompiled nothing would look the same as one that did, so the sim shader was fed WGSL that cannot parse and the GPU raised the error straight away. The demo now keeps its component in `demo/App.tsx` and creates the React root only in `demo/main.tsx`. This avoids duplicate roots when a dependency changes. Hot replacement disposes the old renderer, releases its scene, post stack and audio worker, removes its GPU-loss listener and cancels pending attachment. Ordinary stage unmounts still retain scene state. GPU module changes can restart scene resources, so use the sliders for uninterrupted tuning and reload when changing preset files.
 
 ## How it works
 
@@ -130,7 +132,7 @@ The source is attached only once the context is running. A context built outside
 
 ### Feature extraction
 
-`src/audio/FeatureExtractor.ts` turns each analyser frame (dB per bin, plus the seconds since the last one) into a 46-float packet. It is pure TypeScript, and it runs in a worker (`features.worker.ts`, protocol in `features.protocol.ts`) so neither the renderer nor the analysis can stall the other. The spectrum buffer is transferred to the worker and handed back with each packet, so nothing is allocated per frame on the main thread.
+`src/audio/FeatureExtractor.ts` turns each analyser frame (dB per bin, plus the seconds since the last one) into a 46-float packet. It is pure TypeScript and normally runs in a worker (`features.worker.ts`, protocol in `features.protocol.ts`). If worker creation, loading, message decoding or sending fails, `FeatureClient` switches to the same extractor on the main thread, rebuilding the transferred spectrum buffer and ignoring stale replies. Analysis continues, with its CPU cost now on the rendering thread. The spectrum buffer is transferred to the worker and handed back with each packet. The client accumulates the time of render ticks skipped while the worker is busy. The renderer retains continuous levels between replies but consumes each packet's hit events only once, so slower replies cannot duplicate splats.
 
 In order:
 
@@ -200,14 +202,14 @@ Nothing is remembered until the vector has had four seconds to settle, and once 
 
 ### The renderer
 
-`src/gpu/Device.ts` asks for a high-performance adapter and a device once, keeps them as a module singleton, logs `uncapturederror`, and clears the singleton when the browser reports the device lost so the next request starts fresh. An adapter whose info names SwiftShader or another software rasteriser is flagged and the scene scales itself down: the small grid, fewer sweeps.
+`src/gpu/Device.ts` shares one device and any pending acquisition across callers. Acquisition makes up to three attempts: first with the high-performance preference, then with the browser default after waits of 300 ms and 600 ms. Request exceptions and uncaptured GPU errors are logged. Device loss clears the singleton so recovery can request another device. Recognised software adapters use reduced scene budgets.
 
 `src/gpu/Renderer.ts` is the one renderer. A stage hands it a canvas on mount and takes it back on unmount, which matters because a host may portal the stage into another document (Musimo's popout does) and the subtree then remounts on every move:
 
 ```
 module singleton, survives remounts        per mount, made again each time
 ----------------------------------        -------------------------------
-GPUDevice, feature uniform buffer         canvas elements (scene + HUD)
+GPUDevice, CPU feature packet             canvas elements (scene + HUD)
 pipelines, the fluid's field textures      GPUCanvasContext, configure()
 the post stack and its parameters          ResizeObserver, visibility hook
 the preset and its resolved numbers        requestAnimationFrame handle
@@ -215,17 +217,35 @@ the feature worker and its client
 frame clock, HUD history
 ```
 
-The post stack's offscreen textures belong to neither column: the singleton owns them and rebuilds them whenever the canvas size changes, which a move always does.
+The post stack's offscreen textures belong to neither column: the singleton owns them and rebuilds them whenever the canvas size changes. The renderer always forwards the current dimensions to its scene, even if the canvas size is unchanged. This matters when a fresh scene mounts on an existing canvas; otherwise its internal dimensions can remain 1×1.
 
-`attach` configures the context, sizes the canvas to its CSS box times `devicePixelRatio`, and starts a loop on the canvas's own window, so a popped-out window keeps drawing while the tab behind it is hidden. On device loss the renderer drops the scene, the stack and their buffers and tries once to come back on the same canvas; if that fails it calls `onUnsupported`.
+`attach` configures the context, sizes the canvas to its CSS box times `devicePixelRatio`, and starts a loop on the canvas's own window, so a popped-out window keeps drawing while the tab behind it is hidden. On device loss the renderer drops the scene, post stack and feature client, then reattaches the same canvas through the bounded acquisition retries. Startup, recovery and frame errors are logged and reach the fallback. A failed frame cancels the next animation callback instead of submitting repeatedly. `VisualizerStage` ignores inactive callbacks and replaces its scene canvas once after failed recovery, allowing a different graphics backend. If graphics remain unavailable, Retry graphics retains audio playback.
 
-Each frame: read the analyser through the feature client, stamp time and dt into the packet, upload it as one 64-byte uniform, resolve the preset's mapping into the scene's numbers and the stack's, run the scene's compute and render passes into the stack's texture, run the stack onto the canvas, then draw the HUD if it is on. Nothing per frame touches React.
+Each frame: read the analyser through the feature client, stamp time and dt into the CPU packet, resolve the preset's mapping into the scene's numbers and the stack's, run the scene's passes into the stack's texture, run the stack onto the canvas, then draw the HUD if it is on. Each scene uploads its own resolved parameters. Nothing per frame touches React.
 
 ### Scenes
 
-One for now, behind the `Scene` interface in `src/scenes/Scene.ts`: `init`, `resize`, `update`, `render`, `dispose`, and a `detail` line naming what it is doing. Switching disposes the old scene and builds the new one on the same device; the device, the feature buffer and the post stack carry on.
+Fluid and Kaleidoscope share the `Scene` interface in `src/scenes/Scene.ts`: `init`, `resize`, `update`, `render`, `dispose`, and a `detail` line naming what it is doing. Switching disposes the old scene, discards its feedback history and builds the new one on the same device. The audio worker and post stack carry on.
 
 No scene decides what drives what. `update` takes the packet and a set of already resolved numbers, and every magnitude comes from the second of those; the packet is read only for the clock and for events such as an onset.
+
+#### Kaleidoscope
+
+The demo defaults to **Prism / Kaleidoscope**. **full view (F)** fills the browser while music continues. **Esc** returns to controls; **H** toggles the HUD. The default track is Ecstasy Of Soul. A local, Git-ignored `demo/public/audio/Ecstasy Of Soul.flac` is tried first, with `Ecstasy Of Soul.m4a` as fallback. The original M4A is unchanged. FLAC playback avoided the media crashes seen during testing. To create that local copy, run `ffmpeg -i "Ecstasy Of Soul.m4a" "Ecstasy Of Soul.flac"` in the audio directory, or choose another track.
+
+`src/scenes/Kaleidoscope.ts` draws the 3D fractal in `src/shaders/kaleidoscope.wgsl`. The WebGL2 path uses `KaleidoscopeWebGL.ts` and the matching `kaleidoscope.glsl`, with the same CPU band processing, mappings and motion. Rays march through mirrored box and sphere folds. Surface normals, coloured materials and highlights give the nested forms depth. The distance estimate uses reduced steps and a fixed budget; it is not a proven conservative bound for every warped configuration.
+
+The same five band envelopes and individual hits used by Plume control successive recursion scales, from coarse sub and bass structure to finer mid and treble detail. Each band controls its material contribution and influences its assigned folds. Those folds share one field, so their geometric effects can interact. Low-band hit envelopes linger longer; treble accents release faster. Hit width is carried in the uniform but has no visual effect. Silent bands contribute no material, and a silent packet renders black. `bandReaction` sets overall response strength; slower preset mappings handle key, pace and harmony.
+
+`zoom` sets base magnification. `zoomAmount` and `zoomSpeed` control the continuous inward/outward sweep, which changes camera distance and field of view. Setting amount to zero removes the sweep; zero speed holds its current phase. `symmetry` sets rotational repeats with mirrored half-wedges. `complexity` ranges from 3 to 10 and produces `complexity + 2` fold iterations. Software adapters cap complexity at 5, giving at most 7 iterations. The march stops after at most 72 steps, or 44 on software adapters.
+
+`depth` changes the twist through the volume; `warp`, `thickness` and `bassLift` adjust fold geometry. `sparkle` adjusts treble highlights. Rotation, travel and morph speeds preserve their phase when changed. Intensity and palette controls apply after material shading. Parameter limits also apply after audio mapping.
+
+Material detail is filtered against an estimated pixel footprint. Hardware rendering takes four spatial samples below 900 pixels on the shorter side, two from 900 to 1439, and one at 1440 or above. Software rendering takes one sample. Both paths upload the same 160-byte uniform block. Prism uses bloom and tonemapping; feedback, grain and chromatic splitting are off. WebGL post-processing uses float HDR targets where supported, otherwise RGBA8, which clips bright values before tonemapping. Software WebGL limits the scene to approximately 480×270 pixels in area and a maximum dimension of 960, while the HUD stays at display resolution. This keeps CPU rendering usable at lower fidelity and performance than GPU rendering.
+
+Native GPU checks rendered all five isolated bands, exact black silence, a quieter mix and both tested zoom values (0.4 and 1.9). Five shader-only timing samples measured 6.09–6.68 ms at 1920×1080 and 12.39–13.57 ms at 3840×2160 on the development GPU. These exclude the post stack and browser, and do not establish sustained frame rates or performance on other GPUs. A 12-second, 960×540, 30 fps preview of the track's 45–57 second segment reused the repository's FFT, feature extractor, motion, mappings and full post stack. Native GPU validation and complete video decoding passed.
+
+The external Chromium browser was verified using a real NVIDIA Blackwell WebGPU adapter at 1412×1020, with a visible fractal and positive music-band readings. All 197 tests, typecheck, lint, formatting and production build pass. Its scene initially reported 1×1 despite a full-size canvas; forwarding dimensions to every new scene corrected that mismatch. A brief HUD reading is not a sustained performance benchmark. Separately, the in-app browser's software WebGL2 path passed reload/playback, seek, zoom 0.4 and 3, reset, full-view round trip and pause-to-black checks. Fresh-canvas recovery has regression coverage, but device loss was not exercised end to end. Fine-detail shimmer, whole-track tuning and Colin's acceptance against the references remain open. See [the research and plan](docs/kaleidoscope-research-plan.md).
 
 #### Fluid
 
@@ -397,7 +417,7 @@ npm test
 
 The unit tests are pure TypeScript and run in Node: the feature extractor against synthetic spectra (band collapse at both FFT sizes, envelope timing, every click in a click train detected with none between and the tempo found, jitter not read as onsets, the packet's three band blocks in the same order, each band's weights summing to the width in bins it asked for and neighbours splitting the bin they straddle, a tone across an edge landing in both bands and one well inside landing in neither neighbour, a band reading the same level whether its power is spread or gathered into one bin, the same hits found twenty dB apart, pace settling near how busy the music is and barely moving on one hit, swell holding the middle through a steady passage and lifting over a loud one, weight reading high on a bass-led spectrum and low on a bright one, tempo ramping rather than stepping when the guess changes, and for the per-band detectors: only the band that was struck firing, two patterns at different rates counted separately with neither reading the other, a quiet band still firing while another is saturated, no band firing on silence, and a band's pulse holding up after its hit and then falling), the worker protocol handing buffers back, the camera maths, the post stack's parameters (a patch leaving its input alone, the stack's switch overriding the stages under it, each stage that is off writing values that make its term vanish, the bloom level sizes, nothing the shaders divide by reaching zero), the fluid's parameters (the grid chosen and capped on a rasteriser, the visible extent for a canvas of any shape including one with no area, every emitter inside the band at the loudest spread, the emitter count rounded, clamped at both ends and leaving no dye in the slots past it, every band covered exactly once at every emitter count and the voice knob at zero leaving the splats exactly as they were, a hit reaching only the emitter whose band fired and still reaching it after that band has merged with a neighbour, nothing driving an emitter backwards on a negative reading, an onset injecting several times the trickle, the trickle halving when the step halves, the palette wrapping with no seam), the parser against every way a preset can be wrong, and the resolver against every curve, sign and collision in the mapping table. The tempo tracker has its own file of tests on bare envelopes (a click train read to within half a beat per minute at a tempo no whole number of frames means, the same tempo at 60, 144 and a jittering frame rate, a first reading inside five seconds, a kick and snare in different bands read at the beat rather than the bar, the phase landing on the hit and sweeping the whole beat between, the phase carrying on through silence, and nothing called on noise), and `synthetic.test.ts` renders drum patterns to samples and reads them back through a stand-in for the analyser: four to the floor read to within a beat at two frame rates, the phase landing on the kick, a two-step read at a level of its metre and never the dotted figure, and over a drop, a breakdown and the drop's return, novelty at both boundaries, swell lifting, and the tempo's confidence collapsing and recovering.
 
-Anything that needs a GPU is checked by hand in the demo. A headless browser has no WebGPU adapter and a WebGPU canvas screenshots black, so there is nothing to automate there.
+Rendering needs backend-specific checks. Native GPU tests cover the WGSL scene; live browser checks cover integration and WebGL2 fallback. Neither establishes that every browser exposes a WebGPU adapter. The native timing figures below exclude browser overhead.
 
 ### Measured
 

@@ -123,11 +123,35 @@ export const FLUID_KNOBS = [
 ] as const
 export type FluidKnob = (typeof FLUID_KNOBS)[number]
 
-export type SceneKnob = FluidKnob
+/** Mirrored fractal geometry, motion in seconds, and the colour of its enamel. */
+export const KALEIDOSCOPE_KNOBS = [
+  'symmetry',
+  'zoom',
+  'zoomAmount',
+  'zoomSpeed',
+  'bandReaction',
+  'depth',
+  'rotationSpeed',
+  'travelSpeed',
+  'morphSpeed',
+  'complexity',
+  'warp',
+  'thickness',
+  'bassLift',
+  'sparkle',
+  'intensity',
+  'saturation',
+  'colourShift',
+  'colourDrift',
+] as const
+export type KaleidoscopeKnob = (typeof KALEIDOSCOPE_KNOBS)[number]
+
+export type SceneKnob = FluidKnob | KaleidoscopeKnob
 
 /** Every knob a scene offers, by scene id. The parser checks against this. */
 export const SCENE_KNOBS = {
   fluid: FLUID_KNOBS,
+  kaleidoscope: KALEIDOSCOPE_KNOBS,
 } as const satisfies Record<string, readonly SceneKnob[]>
 
 /**

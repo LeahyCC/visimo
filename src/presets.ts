@@ -13,6 +13,6 @@ export {
 } from './presets/index'
 export { parsePreset } from './presets/parse'
 export type { Preset, Mapping } from './presets/types'
-export type { AudioField, Curve, FluidKnob, Tuning } from './presets/knobs'
+export type { AudioField, Curve, FluidKnob, KaleidoscopeKnob, Tuning } from './presets/knobs'
 export { POST_LANES, POST_KNOBS } from './post/params'
 export type { PostParams } from './post/params'

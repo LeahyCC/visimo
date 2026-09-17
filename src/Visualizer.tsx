@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { renderer } from './gpu/Renderer'
 import type { Preset } from './presets/types'
@@ -12,6 +12,7 @@ type Props = {
   fluidSize: number
   /** The device could not be had, or was lost for good: show artwork instead. */
   onUnsupported: () => void
+  onBackend?: (backend: 'webgpu' | 'webgl2') => void
   /** Goes on the scene canvas, for a host that wants to restyle it. */
   className?: string
   /** Goes on the HUD canvas. */
@@ -34,26 +35,50 @@ export default function VisualizerStage({
   scene,
   fluidSize,
   onUnsupported,
+  onBackend,
   className,
   hudClassName,
 }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const overlay = useRef<HTMLCanvasElement>(null)
+  const [generation, setGeneration] = useState(0)
+  const retried = useRef(false)
   const failed = useRef(onUnsupported)
   failed.current = onUnsupported
+  const ready = useRef(onBackend)
+  ready.current = onBackend
 
   useEffect(() => {
     const element = canvas.current
     const hudElement = overlay.current
     if (!element || !hudElement) return
+    let active = true
+    const fail = () => {
+      if (!active) return
+      // A canvas keeps its context type even after device loss. Replacing it
+      // once lets recovery select WebGL when WebGPU stops offering an adapter.
+      if (element.dataset.backend === 'webgpu' && !retried.current) {
+        retried.current = true
+        setGeneration((value) => value + 1)
+      } else failed.current()
+    }
     void renderer
-      .attach(element, hudElement, () => failed.current())
+      .attach(element, hudElement, fail)
       .then((result) => {
-        if (result === 'unsupported') failed.current()
+        if (result === 'unsupported') fail()
+        if (active && result === 'ok')
+          ready.current?.(element.dataset.backend === 'webgl2' ? 'webgl2' : 'webgpu')
+      })
+      .catch((error: unknown) => {
+        console.error('Visualizer startup failed:', error)
+        fail()
       })
 
-    return () => renderer.detach(element)
-  }, [])
+    return () => {
+      active = false
+      renderer.detach(element)
+    }
+  }, [generation])
 
   useEffect(() => renderer.setHud(hud), [hud])
   // The preset first, so the scene it names is the one that gets built.
@@ -63,7 +88,13 @@ export default function VisualizerStage({
 
   return (
     <>
-      <canvas ref={canvas} className={className} style={SCENE} aria-hidden="true" />
+      <canvas
+        key={generation}
+        ref={canvas}
+        className={className}
+        style={SCENE}
+        aria-hidden="true"
+      />
       <canvas ref={overlay} className={hudClassName} style={HUD} hidden aria-hidden="true" />
     </>
   )

@@ -10,19 +10,25 @@
  * which is this scene's own shape in the way the Lissajous orbit is, and what
  * that is worth is still a knob the preset sets.
  */
-import { BAND_COUNT, BAND_HIT, F } from '../audio/FeatureExtractor'
+import { BAND_COUNT, BAND_HIT, BAND_HIT_CENTRE, BAND_HIT_WIDTH, F } from '../audio/FeatureExtractor'
 import { FLUID_KNOBS } from '../presets/knobs'
 import type { FluidKnob, Tuning } from '../presets/knobs'
 import { DEFAULT_FLUID_SIZE, FLUID_SIZES, SOFTWARE_FLUID_SIZE } from './catalog'
 
 /**
- * One emitter per band, and there are five bands. The WGSL array is this long
- * and the uniform is always sized for all of them; how many a frame fills is
- * the `emitters` knob. Raising this means adding a band in
- * `audio/FeatureExtractor.ts` and raising `MAX_EMITTERS` and the array length
- * in `shaders/fluid.common.wgsl` to match.
+ * The bed: one emitter per band, and there are five bands. How many of them
+ * a frame fills is the `emitters` knob.
  */
-export const MAX_EMITTERS = BAND_COUNT
+export const MAX_BED_EMITTERS = BAND_COUNT
+/** The pool of short-lived event emitters behind the bed. */
+export const MAX_EVENTS = 32
+/**
+ * Every splat slot the shader has: the bed and then the events. The WGSL
+ * array is this long and the uniform is always sized for all of them.
+ * Raising either count means raising `MAX_EMITTERS` and the array length in
+ * `shaders/fluid.common.wgsl` to match; nothing enforces it.
+ */
+export const MAX_EMITTERS = MAX_BED_EMITTERS + MAX_EVENTS
 export const PALETTE_SIZE = 256
 
 /** Floats in the sim uniform; the Sim struct in fluid.common.wgsl matches. */
@@ -58,6 +64,8 @@ export type FluidFrame = {
   viscosity: number
   /** Multiplier on the dye's colour, before the post stack sees it. */
   intensity: number
+  /** How much of the dye's colour is kept, 0 for grey. */
+  saturation: number
   splats: Splat[]
 }
 
@@ -90,13 +98,106 @@ export const pressureIterations = (software: boolean) => (software ? 8 : 24)
 /** Jacobi sweeps for the viscosity solve. */
 export const diffuseIterations = (software: boolean) => (software ? 1 : 2)
 
-// A Lissajous figure per emitter. The tangent of the path is taken by
-// difference rather than by hand, so the impulse pushes along the orbit
-// whatever the curve is changed to.
-const orbit = (phase: number) => ({
-  x: Math.cos(phase) * 0.72 + Math.sin(phase * 2.3) * 0.24,
-  y: Math.sin(phase * 0.9) * 0.7 + Math.cos(phase * 3.1) * 0.22,
-})
+type Point = { x: number; y: number }
+
+/**
+ * The figures the emitters can ride, each a closed curve inside the unit
+ * square. The tangent of a path is taken by difference rather than by hand,
+ * so the impulse pushes along the orbit whatever the curve is changed to.
+ * The first is the Lissajous figure the scene has always had; the others are
+ * what a section can swap it for.
+ */
+const FIGURES: readonly ((phase: number) => Point)[] = [
+  (phase) => ({
+    x: Math.cos(phase) * 0.72 + Math.sin(phase * 2.3) * 0.24,
+    y: Math.sin(phase * 0.9) * 0.7 + Math.cos(phase * 3.1) * 0.22,
+  }),
+  // A ring: every emitter the same distance out, circling.
+  (phase) => ({ x: Math.cos(phase) * 0.85, y: Math.sin(phase) * 0.85 }),
+  // A figure of eight, crossing the middle twice a turn.
+  (phase) => ({ x: Math.sin(phase) * 0.9, y: Math.sin(phase * 2) * 0.55 }),
+  // A three-lobed sweep, wide and shallow.
+  (phase) => ({ x: Math.cos(phase) * 0.8, y: Math.sin(phase * 3) * 0.45 }),
+  // A tall figure of eight, the other way up.
+  (phase) => ({ x: Math.sin(phase * 2) * 0.5, y: Math.sin(phase) * 0.85 }),
+  // A slow wide ellipse, low in the frame.
+  (phase) => ({ x: Math.cos(phase) * 0.9, y: Math.sin(phase) * 0.35 - 0.2 }),
+]
+
+/**
+ * How a section arranges the emitters: which figure they ride, how far out,
+ * how fast, how the figure is turned and how bunched they are along it.
+ * A song moves numbers all the time; this is the one thing that changes the
+ * composition, and it changes only when the structure says a new section
+ * has begun. A section that comes back gets its layout back with it.
+ */
+export type Layout = {
+  /** Index into `FIGURES`. */
+  figure: number
+  /** Multiplier on the preset's spread. */
+  spread: number
+  /** Multiplier on the orbit speed. */
+  speed: number
+  /** How far the figure is turned, as a fraction of a full turn. */
+  turn: number
+  /** How bunched the emitters are along the figure, 0 evenly spaced to 1 close. */
+  cluster: number
+}
+
+/**
+ * One layout per section, by the order the sections first appear in, cycling
+ * once a song has more sections than there are layouts. The first is the
+ * scene as it always was, so a track before its first boundary looks the way
+ * it did before layouts existed.
+ */
+export const LAYOUTS: readonly Layout[] = [
+  { figure: 0, spread: 1, speed: 1, turn: 0, cluster: 0 },
+  { figure: 1, spread: 1.2, speed: 0.75, turn: 0, cluster: 0 },
+  { figure: 2, spread: 0.8, speed: 1.3, turn: 0.125, cluster: 0.5 },
+  { figure: 3, spread: 1.05, speed: 1, turn: 0.25, cluster: 0.25 },
+  { figure: 4, spread: 0.9, speed: 1.1, turn: 0, cluster: 0.35 },
+  { figure: 5, spread: 1.1, speed: 0.6, turn: 0.5, cluster: 0 },
+]
+
+const FIRST_LAYOUT: Layout = { figure: 0, spread: 1, speed: 1, turn: 0, cluster: 0 }
+
+/** The layout for the `rank`th distinct section a scene has seen, 1 being the first. */
+export const layoutOf = (rank: number): Layout =>
+  LAYOUTS[(Math.max(1, Math.round(rank)) - 1) % LAYOUTS.length] ?? FIRST_LAYOUT
+
+/** Seconds a change of layout takes, so the emitters glide rather than jump. */
+export const LAYOUT_BLEND_SECONDS = 4
+
+/** How far into a layout change `since` seconds after it began: an ease in and out. */
+export function layoutMix(since: number): number {
+  const at = Math.min(1, Math.max(0, since / LAYOUT_BLEND_SECONDS))
+  return at * at * (3 - 2 * at)
+}
+
+/** A layout change under way: at `mix` 0 all `from`, at 1 all `to`. */
+export type LayoutBlend = { from: Layout; to: Layout; mix: number }
+
+/** No change under way: the first layout, settled. */
+export const STILL_LAYOUT: LayoutBlend = { from: FIRST_LAYOUT, to: FIRST_LAYOUT, mix: 1 }
+
+/** Where an emitter is on a layout's figure, and where it is about to be. */
+function ride(layout: Layout, phase: number, spacing: number): { here: Point; ahead: Point } {
+  const figure = FIGURES[layout.figure] ?? FIGURES[0]
+  const angle = layout.turn * TWO_PI
+  const cos = Math.cos(angle)
+  const sin = Math.sin(angle)
+  const at = (p: number): Point => {
+    const raw = figure?.(p) ?? { x: 0, y: 0 }
+    return {
+      x: (raw.x * cos - raw.y * sin) * layout.spread,
+      y: (raw.x * sin + raw.y * cos) * layout.spread,
+    }
+  }
+  // Bunched emitters sit closer together along the figure; the spacing is
+  // never squeezed to nothing, so no two of them ever share a point.
+  const p = phase * layout.speed + spacing * (1 - 0.75 * layout.cluster)
+  return { here: at(p), ahead: at(p + 0.05) }
+}
 
 /** The palette coordinate wraps, and a preset may hand over a negative one. */
 const wrap = (value: number) => ((value % 1) + 1) % 1
@@ -116,17 +217,22 @@ type Voice = {
 
 /**
  * The character of each band, in the packet's band order. The tints walk the
- * palette the way the ear walks the spectrum, deep blue for the sub up to
- * magenta for the treble, so a plume's colour says which part of the music it
- * is; the sizes and paces follow the same line, because a kick is a slow fat
- * thing and a hat is a quick small one.
+ * palette the way the ear walks the spectrum, the sub at the start of the
+ * span and the treble at its end, so a plume's colour says which part of the
+ * music it is; the sizes and paces follow the same line, because a kick is a
+ * slow fat thing and a hat is a quick small one.
+ *
+ * The span is under half the palette on purpose. The song's key moves the
+ * whole set through `colourShift`, and that is the colour a viewer sees; the
+ * bands are shades within it. Spread over the whole palette the bands
+ * cancelled the key: every song showed every colour.
  */
 const BAND_VOICES: readonly Voice[] = [
   { tint: 0.0, size: 1.9, pace: 0.45 },
-  { tint: 0.16, size: 1.55, pace: 0.6 },
-  { tint: 0.38, size: 1.1, pace: 0.9 },
-  { tint: 0.6, size: 0.75, pace: 1.35 },
-  { tint: 0.82, size: 0.5, pace: 1.8 },
+  { tint: 0.11, size: 1.55, pace: 0.6 },
+  { tint: 0.23, size: 1.1, pace: 0.9 },
+  { tint: 0.34, size: 0.75, pace: 1.35 },
+  { tint: 0.46, size: 0.5, pace: 1.8 },
 ]
 
 /**
@@ -222,6 +328,8 @@ export const FLUID_DEFAULTS: FluidParams = {
   viscosity: 0.2,
   /** Multiplier on the dye's colour before the post stack sees it. */
   intensity: 1.15,
+  /** How much of the dye's colour is kept, 0 for grey. */
+  saturation: 1,
   /** How far out the emitters ride, as a fraction of the visible band. */
   spread: 0.42,
   /** Velocity the emitters trickle each second. */
@@ -248,6 +356,16 @@ export const FLUID_DEFAULTS: FluidParams = {
    * existed; at 1 each one is only its band, in its own colour and size.
    */
   voice: 0,
+  /** How many event emitters may be alive at once, up to `MAX_EVENTS`; 0 is off. */
+  events: 0,
+  /** Seconds one lives. */
+  eventLife: 0.8,
+  /** Velocity a full-strength event adds over its life, in grid widths per second. */
+  eventForce: 0.4,
+  /** Dye a full-strength event adds over its life. */
+  eventDye: 1.5,
+  /** Gaussian radius of an event before its band and width scale it, in grid widths. */
+  eventRadius: 0.008,
 }
 
 /**
@@ -256,7 +374,114 @@ export const FLUID_DEFAULTS: FluidParams = {
  * the uniform both need a whole number of slots that exist.
  */
 export const emitterCount = (params: FluidParams) =>
-  Math.min(MAX_EMITTERS, Math.max(1, Math.round(params.emitters)))
+  Math.min(MAX_BED_EMITTERS, Math.max(1, Math.round(params.emitters)))
+
+/** The `events` knob as a count of slots, 0 up to `MAX_EVENTS`. */
+export const eventCap = (params: FluidParams) =>
+  Math.min(MAX_EVENTS, Math.max(0, Math.round(params.events)))
+
+/** One hit, alive for a while. `age` runs from 0 to `life`. */
+export type LiveEvent = {
+  band: number
+  /** Where the hit landed across the spectrum, 0 at 20 Hz to 1 at 16 kHz. */
+  centre: number
+  /** How wide it was, as a fraction of that span. */
+  width: number
+  strength: number
+  age: number
+  life: number
+}
+
+/**
+ * The pool of event emitters. Every band hit spawns one, into an empty slot
+ * or over the one nearest its end when the cap is full, and each lives for
+ * `life` seconds. The scene keeps one of these and hands its live events to
+ * `fluidFrame`, so the frame stays a function of its arguments.
+ */
+export class EventPool {
+  private readonly slots: (LiveEvent | null)[] = Array.from({ length: MAX_EVENTS }, () => null)
+
+  /** Age every event, drop the dead, and spawn one per band that hit this frame. */
+  step(features: Float32Array, dt: number, cap: number, life: number) {
+    for (let index = 0; index < this.slots.length; index++) {
+      const event = this.slots[index]
+      if (!event) continue
+      event.age += dt
+      if (event.age >= event.life) this.slots[index] = null
+    }
+    const limit = Math.min(MAX_EVENTS, Math.max(0, Math.round(cap)))
+    if (limit === 0) {
+      this.slots.fill(null)
+      return
+    }
+
+    for (let band = 0; band < BAND_COUNT; band++) {
+      const strength = features[BAND_HIT + band] ?? 0
+      if (strength <= 0) continue
+      this.spawn(
+        {
+          band,
+          centre: Math.min(1, Math.max(0, features[BAND_HIT_CENTRE + band] ?? 0.5)),
+          width: Math.min(1, Math.max(0, features[BAND_HIT_WIDTH + band] ?? 0)),
+          strength: Math.min(1, strength),
+          age: 0,
+          life: Math.max(0.05, life),
+        },
+        limit,
+      )
+    }
+  }
+
+  /** The events alive now, in slot order. */
+  live(): LiveEvent[] {
+    const out: LiveEvent[] = []
+    for (const event of this.slots) if (event) out.push(event)
+    return out
+  }
+
+  // An empty slot within the cap if there is one, else the event nearest its
+  // end gives way: a busy passage keeps the newest sounds on screen.
+  private spawn(event: LiveEvent, limit: number) {
+    let count = 0
+    let oldest = -1
+    let oldestLeft = Infinity
+    for (let index = 0; index < limit; index++) {
+      const held = this.slots[index]
+      if (!held) {
+        this.slots[index] = event
+        return
+      }
+      count++
+      const left = held.life - held.age
+      if (left < oldestLeft) {
+        oldestLeft = left
+        oldest = index
+      }
+    }
+    if (count >= limit && oldest >= 0) this.slots[oldest] = event
+  }
+}
+
+/** Which bed emitter covers a band, when there are `count` of them. */
+export function emitterOf(count: number, band: number): number {
+  for (let index = 0; index < count; index++) {
+    const [from, to] = bandsOf(count, index)
+    if (band >= from && band < to) return index
+  }
+
+  return 0
+}
+
+/**
+ * How an event's remaining life scales what it adds, and what that curve
+ * sums to over a whole life as a fraction of it. Steep at the start and
+ * gone at the end, so a hit reads as a hit and not a glow.
+ */
+export const eventEnvelope = (age: number, life: number) => {
+  const left = 1 - Math.min(1, Math.max(0, age / life))
+  return left * left
+}
+const EVENT_ENVELOPE_AREA = 1 / 3
 
 /** The resolved knobs as this scene's own object, defaults for the rest. */
 export function fluidParams(tuning: Tuning): FluidParams {
@@ -287,12 +512,21 @@ export function fluidParams(tuning: Tuning): FluidParams {
  * The knob at 0 puts every emitter back on the global onset and the shared
  * numbers, which is what the scene did before any of this and what a preset
  * written then still gets.
+ *
+ * `layout` is where the emitters ride, chosen by the song's section and
+ * blended from the last one so a change glides; the scene keeps that state
+ * and hands it in, so this stays a function of its arguments. `events` are
+ * the pool's live hits, and each becomes a splat of its own behind the bed:
+ * under its band's emitter, at the height its pitch puts it (low sounds at
+ * the bottom), sized by its band and its width, fading over its life.
  */
 export function fluidFrame(
   params: FluidParams,
   features: Float32Array,
   dt: number,
   visible: Extent,
+  layout: LayoutBlend = STILL_LAYOUT,
+  events: readonly LiveEvent[] = [],
 ): FluidFrame {
   const step = Math.min(MAX_STEP, Math.max(0.001, dt))
   const time = features[F.time] ?? 0
@@ -310,13 +544,26 @@ export function fluidFrame(
     // before voices existed, which is what keeps the old look reachable.
     const drive = mix(1, band.level, blend)
     const gate = mix(whole, gateOf(band.hit), blend)
-    const phase = time * params.orbitSpeed * mix(1, voice.pace, blend) + (index * TWO_PI) / count
-    const here = orbit(phase)
-    const ahead = orbit(phase + 0.05)
+    const phase = time * params.orbitSpeed * mix(1, voice.pace, blend)
+    const spacing = (index * TWO_PI) / count
+    const from = ride(layout.from, phase, spacing)
+    const to = ride(layout.to, phase, spacing)
+    const here = {
+      x: mix(from.here.x, to.here.x, layout.mix),
+      y: mix(from.here.y, to.here.y, layout.mix),
+    }
+    const ahead = {
+      x: mix(from.ahead.x, to.ahead.x, layout.mix),
+      y: mix(from.ahead.y, to.ahead.y, layout.mix),
+    }
     const run = Math.hypot(ahead.x - here.x, ahead.y - here.y) || 1
+    // A wide layout on a loud passage can push a figure past the edge; the
+    // offset is held inside the visible band so nothing is injected off
+    // screen, whatever the spread and the layout add up to.
+    const inside = (offset: number) => Math.min(1, Math.max(-1, offset * params.spread))
     splats.push({
-      x: 0.5 + here.x * params.spread * visible.x,
-      y: 0.5 + here.y * params.spread * visible.y,
+      x: 0.5 + inside(here.x) * visible.x,
+      y: 0.5 + inside(here.y) * visible.y,
       dx: (ahead.x - here.x) / run,
       dy: (ahead.y - here.y) / run,
       force: (params.force * step + gate * params.hitForce) * drive,
@@ -328,6 +575,30 @@ export function fluidFrame(
     })
   }
 
+  // The events. What one adds over its whole life is the knob, whatever the
+  // life and the frame rate: each frame gets the envelope's share of it.
+  const cap = eventCap(params)
+  for (const event of events.slice(0, cap)) {
+    const bed = splats[emitterOf(count, event.band)]
+    if (!bed) continue
+    const voice = BAND_VOICES[event.band] ?? BAND_VOICES[0]
+    const share = (eventEnvelope(event.age, event.life) * step) / (event.life * EVENT_ENVELOPE_AREA)
+    const worth = event.strength * share
+    // Height by pitch: the bottom of the visible band is 20 Hz and the top is
+    // 16 kHz, kept a little in from the edges.
+    const height = (0.5 - event.centre) * 1.6
+    splats.push({
+      x: bed.x,
+      y: 0.5 + Math.min(1, Math.max(-1, height)) * visible.y,
+      dx: bed.dx,
+      dy: bed.dy,
+      force: params.eventForce * worth,
+      radius: params.eventRadius * (voice?.size ?? 1) * (0.7 + 3 * event.width),
+      dye: params.eventDye * worth,
+      colour: wrap(time * params.colourDrift + (voice?.tint ?? 0) + params.colourShift),
+    })
+  }
+
   return {
     dt: step,
     velocityDecay: params.velocityDecay,
@@ -335,6 +606,7 @@ export function fluidFrame(
     vorticity: params.vorticity,
     viscosity: params.viscosity,
     intensity: params.intensity,
+    saturation: Math.max(0, params.saturation),
     splats,
   }
 }
@@ -406,7 +678,7 @@ export function writeSimUniform(
   // The shader loops to this; the slots past it keep their zeros and cost
   // nothing but the bytes.
   out[10] = frame.splats.length
-  out[11] = 0
+  out[11] = frame.saturation
   // Canvas coordinates times this land in the grid; it is the visible band.
   out[12] = visible.x * 2
   out[13] = visible.y * 2

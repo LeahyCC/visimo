@@ -9,6 +9,7 @@
  */
 import { parsePreset } from './parse'
 import plume from './plume.json'
+import prism from './prism.json'
 import type { Preset } from './types'
 import wash from './wash.json'
 
@@ -16,6 +17,7 @@ import wash from './wash.json'
 export const PRESETS: readonly Preset[] = [
   parsePreset(plume, 'presets/plume.json'),
   parsePreset(wash, 'presets/wash.json'),
+  parsePreset(prism, 'presets/prism.json'),
 ]
 
 /** The fluid as PR #58 tuned it, which is what the stage shows by default. */

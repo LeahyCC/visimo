@@ -23,6 +23,9 @@ import type { Preset } from '../presets/types'
 import { DEFAULT_FLUID_SIZE, DEFAULT_SCENE } from '../scenes/catalog'
 import type { SceneId } from '../scenes/catalog'
 import { Fluid } from '../scenes/Fluid'
+import { Kaleidoscope } from '../scenes/Kaleidoscope'
+import { KaleidoscopeMotion } from '../scenes/kaleidoscope.params'
+import { KaleidoscopeWebGL } from '../scenes/KaleidoscopeWebGL'
 import type { Scene } from '../scenes/Scene'
 import { acquireGpu, configureCanvas, onGpuLost } from './Device'
 import type { Gpu, GpuInfo } from './Device'
@@ -35,11 +38,16 @@ const describe = (info: GpuInfo) =>
 
 class Renderer {
   private gpu: Gpu | null = null
+  private compatibility: KaleidoscopeWebGL | null = null
+  private readonly compatibilityMotion = new KaleidoscopeMotion()
+  private unwatchContext: (() => void) | null = null
   private scene: Scene | null = null
   private post: PostStack | null = null
   private client: FeatureClient | null = null
   private canvas: HTMLCanvasElement | null = null
   private attaching: HTMLCanvasElement | null = null
+  // Effect remounts can reuse a canvas while its previous acquisition is pending.
+  private attachment = 0
   private context: GPUCanvasContext | null = null
   private hud: Hud | null = null
   private hudVisible = false
@@ -62,10 +70,13 @@ class Renderer {
   private readonly live: PostParams = defaultPostParams()
   private frameMs = 16.7
   private reported = 0
+  private disposed = false
+  private failed = false
+  private readonly unwatchGpu: () => void
 
   constructor() {
     this.base = mergePostParams(this.preset.postParams, {})
-    onGpuLost(() => this.recover())
+    this.unwatchGpu = onGpuLost(() => this.recover())
   }
 
   /**
@@ -78,30 +89,47 @@ class Renderer {
     hudCanvas: HTMLCanvasElement,
     onFailure: () => void,
   ): Promise<AttachResult> {
+    if (this.disposed) return 'cancelled'
+    const attachment = ++this.attachment
     this.attaching = canvas
     const gpu = await acquireGpu()
-    if (this.attaching !== canvas) return 'cancelled'
+    if (this.disposed || this.attachment !== attachment) return 'cancelled'
     this.attaching = null
-    if (!gpu) return 'unsupported'
+    if (!gpu && this.sceneId !== 'kaleidoscope') return 'unsupported'
+    // Context types cannot change on an existing canvas. The stage replaces
+    // a former WebGPU canvas before retrying through WebGL.
+    if (!gpu && canvas.dataset.backend === 'webgpu') return 'unsupported'
     if (this.canvas) this.detach(this.canvas)
-    this.gpu = gpu
-    if (!this.post) {
-      this.post = new PostStack()
-      this.post.init(gpu.device, gpu.format)
+    if (gpu) {
+      this.gpu = gpu
+      if (!this.post) {
+        this.post = new PostStack()
+        this.post.init(gpu.device, gpu.format)
+      }
+      this.post.useParams(this.live)
+      if (!this.scene) this.buildScene()
+      const context = configureCanvas(gpu, canvas)
+      if (!context) return 'unsupported'
+      this.context = context
+      canvas.dataset.adapter = describe(gpu.info)
+      canvas.dataset.backend = 'webgpu'
+    } else {
+      this.compatibility = new KaleidoscopeWebGL(canvas, this.compatibilityMotion)
+      canvas.dataset.adapter = this.compatibility.adapter
+      canvas.dataset.backend = 'webgl2'
+      const lost = (event: Event) => {
+        event.preventDefault()
+        onFailure()
+      }
+      canvas.addEventListener('webglcontextlost', lost)
+      this.unwatchContext = () => canvas.removeEventListener('webglcontextlost', lost)
     }
-    this.post.useParams(this.live)
-
-    if (!this.scene) this.buildScene()
-
-    const context = configureCanvas(gpu, canvas)
-    if (!context) return 'unsupported'
     this.canvas = canvas
-    this.context = context
     this.hudCanvas = hudCanvas
     this.hud = new Hud(hudCanvas)
     this.hud.setVisible(this.hudVisible)
     this.onFailure = onFailure
-    canvas.dataset.adapter = describe(gpu.info)
+    this.failed = false
     const win = canvas.ownerDocument.defaultView ?? window
     this.resize()
     this.observer = new win.ResizeObserver(() => this.resize())
@@ -119,7 +147,10 @@ class Renderer {
 
   /** Stop drawing on this canvas. The device and the scene's state stay. */
   detach(canvas: HTMLCanvasElement) {
-    if (this.attaching === canvas) this.attaching = null
+    if (this.attaching === canvas) {
+      this.attaching = null
+      this.attachment++
+    }
     if (this.canvas !== canvas) return
     this.stop()
     this.observer?.disconnect()
@@ -128,10 +159,31 @@ class Renderer {
     this.unwatchVisibility = null
     this.context?.unconfigure()
     this.context = null
+    this.unwatchContext?.()
+    this.unwatchContext = null
+    this.compatibility?.dispose()
+    this.compatibility = null
     this.canvas = null
     this.hud = null
     this.hudCanvas = null
     this.onFailure = null
+  }
+
+  /** Hot replacement must release the old singleton, including pending mounts. */
+  dispose() {
+    if (this.disposed) return
+    this.disposed = true
+    this.attachment++
+    this.attaching = null
+    this.unwatchGpu()
+    if (this.canvas) this.detach(this.canvas)
+    this.scene?.dispose()
+    this.scene = null
+    this.post?.dispose()
+    this.post = null
+    this.client?.dispose()
+    this.client = null
+    this.gpu = null
   }
 
   setHud(visible: boolean) {
@@ -151,7 +203,7 @@ class Renderer {
 
   /** What the stack is actually drawing with: the preset, modulated. */
   get postParams(): PostParams | null {
-    return this.post?.params ?? null
+    return this.compatibility ? this.live : (this.post?.params ?? null)
   }
 
   /**
@@ -177,6 +229,10 @@ class Renderer {
   setScene(id: SceneId) {
     if (id === this.sceneId) return
     this.sceneId = id
+    if (this.compatibility && id !== 'kaleidoscope') {
+      this.onFailure?.()
+      return
+    }
     if (this.gpu) this.buildScene()
   }
 
@@ -187,6 +243,7 @@ class Renderer {
     const gpu = this.gpu
     if (!gpu) return
     this.scene?.dispose()
+    this.post?.resetHistory()
     this.scene = this.build()
 
     this.scene.init({
@@ -198,14 +255,14 @@ class Renderer {
     if (this.canvas) this.scene.resize(this.canvas.width, this.canvas.height)
   }
 
-  // One scene for now. The switch stays here rather than being inlined above,
-  // because this is the one place a new scene has to be named.
+  // Construction stays here so scenes share the device and post stack.
   private build(): Scene {
+    if (this.sceneId === 'kaleidoscope') return new Kaleidoscope()
     return new Fluid(this.fluidSize)
   }
 
   private start() {
-    if (this.frame || !this.canvas) return
+    if (this.failed || this.frame || !this.canvas) return
     const win = this.canvas.ownerDocument.defaultView ?? window
     // Each window has its own clock. A popout's starts near zero, so any
     // timestamp kept from the tab would be in its future.
@@ -225,21 +282,39 @@ class Renderer {
     const canvas = this.canvas
     if (!canvas) return
     const win = canvas.ownerDocument.defaultView ?? window
-    const scale = win.devicePixelRatio || 1
+    const displayRatio = win.devicePixelRatio || 1
+    const scale =
+      this.compatibility?.pixelRatio(canvas.clientWidth, canvas.clientHeight, displayRatio) ??
+      displayRatio
     const width = Math.max(1, Math.round(canvas.clientWidth * scale))
     const height = Math.max(1, Math.round(canvas.clientHeight * scale))
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width
       canvas.height = height
-      this.scene?.resize(width, height)
     }
-    this.hud?.resize(canvas.clientWidth, canvas.clientHeight, scale)
+    // A replacement scene still needs its size when HMR or recovery keeps
+    // the canvas and its existing drawing-buffer dimensions.
+    this.scene?.resize(width, height)
+    this.hud?.resize(canvas.clientWidth, canvas.clientHeight, displayRatio)
   }
 
   private readonly tick = (now: number) => {
+    if (this.failed) return
+    try {
+      this.drawFrame(now)
+    } catch (error: unknown) {
+      // A failed frame must not keep submitting work while React shows fallback.
+      this.failed = true
+      this.stop()
+      console.error('Visualizer frame failed:', error)
+      this.onFailure?.()
+    }
+  }
+
+  private drawFrame(now: number) {
     this.frame = 0
-    const { canvas, context, gpu, scene, post } = this
-    if (!canvas || !context || !gpu || !scene || !post || gpu.lost) return
+    const { canvas, context, gpu, scene, post, compatibility } = this
+    if (!canvas || (!compatibility && (!context || !gpu || !scene || !post || gpu.lost))) return
     const win = canvas.ownerDocument.defaultView ?? window
     this.frame = win.requestAnimationFrame(this.tick)
     const dt = Math.min(0.1, Math.max(0.001, (now - this.last) / 1000))
@@ -253,7 +328,7 @@ class Renderer {
     if (!this.client && graph?.attached) this.client = new FeatureClient(graph.analyser)
     if (this.client) {
       this.client.pump(dt)
-      this.packet.set(this.client.packet)
+      this.client.readInto(this.packet)
     }
     this.packet[F.time] = this.time
     this.packet[F.dt] = dt
@@ -269,24 +344,28 @@ class Renderer {
     )
     resolvePost(this.base, preset.audioMapping, this.packet, this.live)
 
-    scene.update(this.packet, dt, tuning)
-    const encoder = gpu.device.createCommandEncoder()
-    // The scene draws into the stack's texture and the stack writes the
-    // canvas. With every stage off the composite is a straight copy, so the
-    // path is the same either way and the scene has one pipeline.
-    const offscreen = post.target(canvas.width, canvas.height)
-    if (!offscreen) return
-    scene.render(encoder, offscreen)
-    post.render(encoder, context.getCurrentTexture().createView(), this.packet)
-    gpu.device.queue.submit([encoder.finish()])
+    if (compatibility) {
+      compatibility.render(this.packet, dt, tuning, this.live)
+    } else if (gpu && context && scene && post) {
+      scene.update(this.packet, dt, tuning)
+      const encoder = gpu.device.createCommandEncoder()
+      // The scene draws into the stack's texture and the stack writes the
+      // canvas. With every stage off the composite is a straight copy, so the
+      // path is the same either way and the scene has one pipeline.
+      const offscreen = post.target(canvas.width, canvas.height)
+      if (!offscreen) return
+      scene.render(encoder, offscreen)
+      post.render(encoder, context.getCurrentTexture().createView(), this.packet)
+      gpu.device.queue.submit([encoder.finish()])
+    }
 
     this.hud?.record(this.packet)
     this.hud?.draw(this.packet, {
       fps: 1000 / this.frameMs,
       frameMs: this.frameMs,
-      scene: scene.detail,
-      adapter: describe(gpu.info),
-      post: postSummary(post.params),
+      scene: compatibility?.detail ?? scene?.detail ?? '',
+      adapter: compatibility?.adapter ?? (gpu ? describe(gpu.info) : ''),
+      post: postSummary(this.live),
       preset: preset.name,
     })
     // Timing on the element, so a screenshot or a test can read it.
@@ -294,8 +373,8 @@ class Renderer {
       this.reported = now
       canvas.dataset.frameMs = this.frameMs.toFixed(1)
       canvas.dataset.scene = this.sceneId
-      canvas.dataset.detail = scene.detail
-      canvas.dataset.post = postSummary(post.params)
+      canvas.dataset.detail = compatibility?.detail ?? scene?.detail ?? ''
+      canvas.dataset.post = postSummary(this.live)
       canvas.dataset.preset = preset.id
     }
   }
@@ -303,6 +382,7 @@ class Renderer {
   // The browser took the device away. Drop everything that depended on it
   // and try once to come back on the same canvas.
   private recover() {
+    if (this.disposed) return
     const canvas = this.canvas
     const hudCanvas = this.hudCanvas
     const onFailure = this.onFailure
@@ -315,13 +395,20 @@ class Renderer {
     this.client = null
     this.gpu = null
     if (!canvas || !hudCanvas || !onFailure) return
-    void this.attach(canvas, hudCanvas, onFailure).then((result) => {
-      if (result === 'unsupported') onFailure()
-    })
+    void this.attach(canvas, hudCanvas, onFailure)
+      .then((result) => {
+        if (result === 'unsupported') onFailure()
+      })
+      .catch((error: unknown) => {
+        console.error('WebGPU recovery failed:', error)
+        if (!this.disposed) onFailure()
+      })
   }
 }
 
 export const renderer = new Renderer()
+
+if (import.meta.hot) import.meta.hot.dispose(() => renderer.dispose())
 
 /** What the development handle below offers; nothing in the app uses it. */
 export type VisualizerDevHandle = {

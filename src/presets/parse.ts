@@ -12,7 +12,7 @@
 import { defaultPostParams, isPostKnob, POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostParams, PostStage } from '../post/params'
 import { isSceneId, SCENE_IDS } from '../scenes/catalog'
-import { AUDIO_FIELDS, CURVES, FLUID_KNOBS } from './knobs'
+import { AUDIO_FIELDS, CURVES, FLUID_KNOBS, KALEIDOSCOPE_KNOBS } from './knobs'
 import type { AudioField, Curve } from './knobs'
 import type { Mapping, Preset } from './types'
 
@@ -182,6 +182,16 @@ export function parsePreset(value: unknown, source: string): Preset {
   const scene = readString(value.scene, source, 'scene')
   if (!isSceneId(scene)) fail(source, 'scene', `is not a scene; they are ${list(SCENE_IDS)}`)
   const postParams = readPost(value.postParams, source, 'postParams')
+
+  if (scene === 'kaleidoscope')
+    return {
+      id,
+      name,
+      scene,
+      postParams,
+      sceneParams: readKnobs(KALEIDOSCOPE_KNOBS, value.sceneParams, source, 'sceneParams'),
+      audioMapping: readMapping(KALEIDOSCOPE_KNOBS, value.audioMapping, source, 'audioMapping'),
+    }
 
   return {
     id,

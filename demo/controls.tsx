@@ -11,7 +11,9 @@ import type { PostParams, PostStage } from '../src/post/params'
 import { findPreset, PRESETS } from '../src/presets/index'
 import { AUDIO_FIELDS, CURVES, SCENE_KNOBS } from '../src/presets/knobs'
 import type { AudioField, Curve } from '../src/presets/knobs'
+import { parsePreset } from '../src/presets/parse'
 import type { Mapping, Preset } from '../src/presets/types'
+import { KALEIDOSCOPE_RANGES } from '../src/scenes/kaleidoscope.params'
 
 type Target = Preset['audioMapping'][number]['to']
 
@@ -24,6 +26,7 @@ type Props = {
   onFluidSize: (size: number) => void
   hud: boolean
   onHud: (on: boolean) => void
+  webGpuAvailable?: boolean
 }
 
 /**
@@ -37,6 +40,7 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'vorticity': [0, 60],
   'viscosity': [0, 2],
   'intensity': [0, 4],
+  'saturation': [0, 1.5],
   'spread': [0, 1],
   'force': [0, 3],
   'dye': [0, 8],
@@ -49,6 +53,11 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   // One emitter per band, and there are five bands.
   'emitters': [1, 5],
   'voice': [0, 1],
+  'events': [0, 32],
+  'eventLife': [0.1, 4],
+  'eventForce': [0, 3],
+  'eventDye': [0, 6],
+  'eventRadius': [0.001, 0.05],
   'feedback.amount': [0, 1],
   'feedback.decay': [0, 1],
   'feedback.zoom': [0.9, 1.1],
@@ -64,7 +73,7 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
 }
 
 /** Knobs the slider must step in whole numbers, whatever the range implies. */
-const WHOLE = new Set(['emitters'])
+const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity'])
 
 /** Four times the resting value, or 0 to 1 when it rests at zero. */
 function spanOf(name: string, value: number): readonly [number, number] {
@@ -103,12 +112,14 @@ function Slider({
   name,
   value,
   onChange,
+  range,
 }: {
   name: string
   value: number
   onChange: (value: number) => void
+  range?: readonly [number, number]
 }) {
-  const [min, max] = spanOf(name, value)
+  const [min, max] = range ?? spanOf(name, value)
 
   return (
     <label style={{ ...row, margin: '2px 0' }}>
@@ -117,7 +128,7 @@ function Slider({
         type="range"
         min={min}
         max={max}
-        step={WHOLE.has(name) ? 1 : stepOf(max - min)}
+        step={WHOLE.has(name) ? 1 : name.endsWith('Speed') ? 0.001 : stepOf(max - min)}
         value={value}
         style={cell}
         onChange={(event) => onChange(Number(event.target.value))}
@@ -141,8 +152,11 @@ export function Controls({
   onFluidSize,
   hud,
   onHud,
+  webGpuAvailable = true,
 }: Props) {
   const knobs = SCENE_KNOBS[preset.scene]
+  const ranges: Readonly<Partial<Record<string, readonly [number, number]>>> =
+    preset.scene === 'kaleidoscope' ? KALEIDOSCOPE_RANGES : RANGES
   // Every edit below builds a new preset object, and an untouched one is still
   // the very entry `PRESETS` holds, so identity is the whole check. It also
   // answers the question worth asking mid-tune: have I drifted from the file?
@@ -150,7 +164,9 @@ export function Controls({
   const edited = shipped !== undefined && shipped !== preset
 
   const setKnob = (knob: string, value: number) =>
-    onPreset({ ...preset, sceneParams: { ...preset.sceneParams, [knob]: value } })
+    onPreset(
+      parsePreset({ ...preset, sceneParams: { ...preset.sceneParams, [knob]: value } }, 'demo'),
+    )
 
   // The stack is nested, so it is cloned through `mergePostParams` and the
   // lane writes into the copy; the preset the renderer holds is never mutated.
@@ -161,7 +177,7 @@ export function Controls({
   }
 
   const setMapping = (rows: readonly Mapping<string>[]) =>
-    onPreset({ ...preset, audioMapping: rows as Preset['audioMapping'] })
+    onPreset(parsePreset({ ...preset, audioMapping: rows }, 'demo'))
 
   const editRow = (index: number, patch: Partial<Mapping<string>>) =>
     setMapping(
@@ -186,8 +202,13 @@ export function Controls({
           }}
         >
           {PRESETS.map((entry) => (
-            <option key={entry.id} value={entry.id}>
+            <option
+              key={entry.id}
+              value={entry.id}
+              disabled={!webGpuAvailable && entry.scene === 'fluid'}
+            >
               {entry.name}
+              {!webGpuAvailable && entry.scene === 'fluid' ? ' (requires WebGPU)' : ''}
             </option>
           ))}
         </select>
@@ -214,29 +235,32 @@ export function Controls({
           onChange={(event) => onScene(event.target.value as SceneId)}
         >
           {SCENE_IDS.map((id) => (
-            <option key={id} value={id}>
+            <option key={id} value={id} disabled={!webGpuAvailable && id === 'fluid'}>
               {SCENE_LABELS[id]}
+              {!webGpuAvailable && id === 'fluid' ? ' (requires WebGPU)' : ''}
             </option>
           ))}
         </select>
         <span />
       </label>
 
-      <label style={row}>
-        <span>grid</span>
-        <select
-          style={cell}
-          value={fluidSize}
-          onChange={(event) => onFluidSize(Number(event.target.value))}
-        >
-          {FLUID_SIZES.map((size) => (
-            <option key={size} value={size}>
-              {size}
-            </option>
-          ))}
-        </select>
-        <span />
-      </label>
+      {scene === 'fluid' && (
+        <label style={row}>
+          <span>grid</span>
+          <select
+            style={cell}
+            value={fluidSize}
+            onChange={(event) => onFluidSize(Number(event.target.value))}
+          >
+            {FLUID_SIZES.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+          <span />
+        </label>
+      )}
 
       <label style={row}>
         <span>hud (H)</span>
@@ -249,7 +273,8 @@ export function Controls({
         <Slider
           key={knob}
           name={knob}
-          value={preset.sceneParams[knob]}
+          range={ranges[knob]}
+          value={(preset.sceneParams as Readonly<Record<string, number>>)[knob] ?? 0}
           onChange={(value) => setKnob(knob, value)}
         />
       ))}

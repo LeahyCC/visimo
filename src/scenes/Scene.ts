@@ -14,9 +14,9 @@ export interface Scene {
   resize(width: number, height: number): void
   /**
    * Per-frame CPU work: camera, parameters. `features` is the latest packet,
-   * which a scene reads only for the clock and for events such as an onset;
+   * which a scene reads for the clock, its individual band voices and events;
    * `tuning` is the preset's numbers with its audio mapping already added, so
-   * no scene decides for itself which feature drives what.
+   * mappings control the overall scene while each band keeps its own identity.
    */
   update(features: Float32Array, dt: number, tuning: Tuning): void
   render(encoder: GPUCommandEncoder, view: GPUTextureView): void

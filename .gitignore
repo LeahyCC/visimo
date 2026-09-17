@@ -2,4 +2,5 @@ node_modules/
 dist/
 demo/dist/
 .env
-
+demo/public/audio/Ecstasy Of Soul.m4a
+demo/public/audio/Ecstasy Of Soul.flac

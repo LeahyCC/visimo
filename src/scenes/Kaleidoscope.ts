@@ -18,6 +18,8 @@ export class Kaleidoscope implements Scene {
   private height = 1
   private readonly motion = new KaleidoscopeMotion()
   private readonly data = new Float32Array(KALEIDOSCOPE_UNIFORM_FLOATS)
+  // Every frame is a full raymarch and the motion is slow.
+  readonly maxFps = 60
 
   get detail() {
     return `5-band 3D kaleidoscope / ${this.width}x${this.height}`

@@ -317,6 +317,11 @@ class Renderer {
     if (!canvas || (!compatibility && (!context || !gpu || !scene || !post || gpu.lost))) return
     const win = canvas.ownerDocument.defaultView ?? window
     this.frame = win.requestAnimationFrame(this.tick)
+    // Skip display frames a capped scene does not want. The 0.75 lets a
+    // display that is not a multiple of the cap land just above it, not far
+    // below: 144 Hz draws at 72, 176 Hz at 59.
+    const cap = scene?.maxFps
+    if (cap && now - this.last < 750 / cap) return
     const dt = Math.min(0.1, Math.max(0.001, (now - this.last) / 1000))
     this.last = now
     this.frameMs += (dt * 1000 - this.frameMs) * 0.1

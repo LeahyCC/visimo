@@ -10,6 +10,11 @@ export type SceneContext = {
 export interface Scene {
   /** One short line naming the scene's workload, for the overlay and tests. */
   readonly detail: string
+  /**
+   * Frames per second worth drawing. A scene that costs a lot per frame and
+   * moves slowly sets this so a fast display does not multiply its GPU load.
+   */
+  readonly maxFps?: number
   init(context: SceneContext): void
   resize(width: number, height: number): void
   /**

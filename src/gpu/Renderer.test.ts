@@ -8,12 +8,13 @@ const device = vi.hoisted(() => ({
 }))
 
 const graphics = vi.hoisted(() => ({ render: vi.fn(), dispose: vi.fn() }))
-const scene = vi.hoisted(() => ({ resize: vi.fn() }))
+const scene = vi.hoisted(() => ({ resize: vi.fn(), maxPixels: undefined as number | undefined }))
 
 vi.mock('../scenes/Kaleidoscope', () => ({
   Kaleidoscope: class {
     init() {}
     resize = scene.resize
+    maxPixels = scene.maxPixels
     dispose() {}
   },
 }))
@@ -80,40 +81,56 @@ function pendingAcquisition() {
 // These paths stop before canvas configuration, so they need no DOM or GPU.
 const canvas = () => ({}) as HTMLCanvasElement
 
+function sizedCanvas(width: number, height: number) {
+  device.acquireGpu.mockResolvedValue({
+    device: {} as GPUDevice,
+    format: 'bgra8unorm',
+    info: { vendor: '', architecture: '', device: '', description: '', software: false },
+    lost: false,
+  })
+
+  return {
+    width,
+    height,
+    clientWidth: width,
+    clientHeight: height,
+    dataset: {},
+    ownerDocument: {
+      defaultView: {
+        devicePixelRatio: 1,
+        performance: { now: () => 0 },
+        requestAnimationFrame: () => 1,
+        cancelAnimationFrame: vi.fn(),
+        ResizeObserver: class {
+          observe() {}
+          disconnect() {}
+        },
+      },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    },
+  } as unknown as HTMLCanvasElement
+}
+
 describe('renderer attachment lifetime', () => {
   it('sizes a fresh scene when the attached canvas already has its display dimensions', async () => {
-    device.acquireGpu.mockResolvedValue({
-      device: {} as GPUDevice,
-      format: 'bgra8unorm',
-      info: { vendor: '', architecture: '', device: '', description: '', software: false },
-      lost: false,
-    })
-    const element = {
-      width: 1412,
-      height: 1020,
-      clientWidth: 1412,
-      clientHeight: 1020,
-      dataset: {},
-      ownerDocument: {
-        defaultView: {
-          devicePixelRatio: 1,
-          performance: { now: () => 0 },
-          requestAnimationFrame: () => 1,
-          cancelAnimationFrame: vi.fn(),
-          ResizeObserver: class {
-            observe() {}
-            disconnect() {}
-          },
-        },
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      },
-    } as unknown as HTMLCanvasElement
+    scene.maxPixels = undefined
+    const element = sizedCanvas(1412, 1020)
     renderer.setScene('kaleidoscope')
     await expect(renderer.attach(element, canvas(), vi.fn())).resolves.toBe('ok')
     expect(scene.resize).toHaveBeenCalledWith(1412, 1020)
     expect(element.width).toBe(1412)
     expect(element.height).toBe(1020)
+  })
+
+  it('holds a scene to its pixel budget and leaves the canvas at display size', async () => {
+    scene.maxPixels = 2560 * 1440
+    const element = sizedCanvas(3840, 2160)
+    renderer.setScene('kaleidoscope')
+    await expect(renderer.attach(element, canvas(), vi.fn())).resolves.toBe('ok')
+    expect(scene.resize).toHaveBeenLastCalledWith(2560, 1440)
+    expect(element.width).toBe(3840)
+    expect(element.height).toBe(2160)
   })
 
   it('cancels the old mount when the same canvas attaches again', async () => {

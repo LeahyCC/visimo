@@ -170,10 +170,16 @@ export default function App() {
               setDuration(Number.isFinite(length) ? length : 0)
             }}
             onSeeked={() => void resumeAudio()}
-            onError={() => setAudioError('Could not load this track. Choose a local audio file.')}
+            onError={() => setAudioError('Could not load a track. Drop one in or choose a file.')}
           >
             <source src="/audio/Ecstasy%20Of%20Soul.flac" type="audio/flac" />
-            <source src="/audio/Ecstasy%20Of%20Soul.m4a" type="audio/mp4" />
+            {/* The default track is Git-ignored, so a fresh checkout has none.
+                The last source failing means nothing loaded, so stop naming it. */}
+            <source
+              src="/audio/Ecstasy%20Of%20Soul.m4a"
+              type="audio/mp4"
+              onError={() => setTrack('')}
+            />
           </audio>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
             <button

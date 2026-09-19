@@ -13,6 +13,8 @@ layout(std140) uniform Params {
 
 layout(location = 0) out vec4 fragColour;
 const float TAU = 6.28318530718;
+const float LOD_LOW = 0.05;
+const float LOD_HIGH = 0.25;
 
 vec2 rotate(vec2 v, float a) {
   return mat2(cos(a), sin(a), -sin(a), cos(a)) * v;
@@ -43,16 +45,24 @@ vec4 fold(vec3 z, vec3 origin, int i) {
 }
 
 // Keep the distance pass separate so material orbits are evaluated only at hits.
-float distanceToFractal(vec3 point) {
+// The march passes `pixel` as zero and gets every fold, since the surface is
+// wherever the derivative grows large enough. The normal passes the world size
+// of a pixel: a fold with creases below that only scrambles the gradient, which
+// shimmers, so those folds fade out of the field the normal is taken from.
+float distanceToFractal(vec3 point, float pixel) {
   vec3 origin = originOf(point);
   vec3 z = origin;
   float derivative = 1.0;
+  float estimate = length(z);
   for (int i = 0; i < int(p.detail.x) + 2; i++) {
     vec4 next = fold(z, origin, i);
     z = next.xyz;
     derivative = derivative * next.w + 1.0;
+    float unresolved = smoothstep(LOD_LOW, LOD_HIGH, derivative * pixel);
+    if (i > 1 && unresolved >= 1.0) break;
+    estimate = mix(length(z) / derivative, estimate, i < 2 ? 0.0 : unresolved);
   }
-  return length(z) / derivative / 0.7;
+  return estimate / 0.7;
 }
 
 vec3 surface(vec3 point, vec3 normal, vec3 ray, float occlusion) {
@@ -106,10 +116,11 @@ vec4 sampleScene(vec2 pixel) {
   bool found = false;
   float steps = 0.0;
   int limit = p.response.y > 0.5 ? 44 : 72;
-  float footprint = 1.0 / min(p.screen.x, p.screen.y);
+  // The sweep narrows the field of view, which shrinks a pixel with it.
+  float footprint = 1.0 / (min(p.screen.x, p.screen.y) * exp(zoom * 0.75));
   for (int i = 0; i < limit; i++) {
     if (distance > 10.0) break;
-    float d = distanceToFractal(ro + rd * distance);
+    float d = distanceToFractal(ro + rd * distance, 0.0);
     if (d < max(0.0005, distance * footprint * 0.75)) {
       found = true;
       break;
@@ -125,7 +136,8 @@ vec4 sampleScene(vec2 pixel) {
     vec3 b = vec3(-1.0, -1.0, 1.0);
     vec3 c = vec3(-1.0, 1.0, -1.0);
     vec3 d = vec3(1.0, 1.0, 1.0);
-    vec3 gradient = a * distanceToFractal(point + a * e) + b * distanceToFractal(point + b * e) + c * distanceToFractal(point + c * e) + d * distanceToFractal(point + d * e);
+    float size = distance * footprint;
+    vec3 gradient = a * distanceToFractal(point + a * e, size) + b * distanceToFractal(point + b * e, size) + c * distanceToFractal(point + c * e, size) + d * distanceToFractal(point + d * e, size);
     vec3 normal = gradient / max(length(gradient), 0.000001);
     float occlusion = exp(-steps * 0.018);
     colour = surface(point, normal, rd, occlusion);

@@ -8,6 +8,8 @@ struct Params {
 }
 @group(0) @binding(0) var<uniform> p: Params;
 const TAU = 6.28318530718;
+const LOD_LOW = 0.05;
+const LOD_HIGH = 0.25;
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
   let xy = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
   return vec4<f32>(xy * 2.0 - 1.0, 0.0, 1.0);
@@ -38,16 +40,24 @@ fn fold(z: vec3<f32>, origin: vec3<f32>, i: i32) -> vec4<f32> {
 }
 // Box and sphere folds carry a scalar derivative, bounding a safe march step.
 // Keep this pass distance-only; five material scales are sampled once at the hit.
-fn distanceToFractal(point: vec3<f32>) -> f32 {
+// The march passes `pixel` as zero and gets every fold, since the surface is
+// wherever the derivative grows large enough. The normal passes the world size
+// of a pixel: a fold with creases below that only scrambles the gradient, which
+// shimmers, so those folds fade out of the field the normal is taken from.
+fn distanceToFractal(point: vec3<f32>, pixel: f32) -> f32 {
   let origin = originOf(point);
   var z = origin;
   var derivative = 1.0;
+  var estimate = length(z);
   for(var i=0;i<i32(p.detail.x)+2;i++) {
     let next = fold(z,origin,i);
     z = next.xyz;
     derivative = derivative*next.w+1.0;
+    let unresolved = smoothstep(LOD_LOW,LOD_HIGH,derivative*pixel);
+    if(i>1 && unresolved>=1.0){break;}
+    estimate = mix(length(z)/derivative,estimate,select(unresolved,0.0,i<2));
   }
-  return length(z)/derivative/0.7;
+  return estimate/0.7;
 }
 fn surface(point: vec3<f32>, normal: vec3<f32>, ray: vec3<f32>, occlusion: f32) -> vec3<f32> {
   let origin = originOf(point);
@@ -102,10 +112,11 @@ fn sampleScene(pixel: vec2<f32>) -> vec4<f32> {
   var found = false;
   var steps = 0.0;
   let limit = select(72,44,p.response.y>0.5);
-  let footprint = 1.0/min(p.screen.x,p.screen.y);
+  // The sweep narrows the field of view, which shrinks a pixel with it.
+  let footprint = 1.0/(min(p.screen.x,p.screen.y)*exp(zoom*0.75));
   for(var i=0;i<limit;i++) {
     if(distance>10.0){break;}
-    let d = distanceToFractal(ro+rd*distance);
+    let d = distanceToFractal(ro+rd*distance,0.0);
     if(d<max(0.0005,distance*footprint*0.75)){found=true;break;}
     distance+=max(d*0.65,0.0004);
     steps+=1.0;
@@ -119,7 +130,8 @@ fn sampleScene(pixel: vec2<f32>) -> vec4<f32> {
     let b = vec3<f32>(-1.0,-1.0,1.0);
     let c = vec3<f32>(-1.0,1.0,-1.0);
     let d = vec3<f32>(1.0,1.0,1.0);
-    let gradient = a*distanceToFractal(point+a*e)+b*distanceToFractal(point+b*e)+c*distanceToFractal(point+c*e)+d*distanceToFractal(point+d*e);
+    let size = distance*footprint;
+    let gradient = a*distanceToFractal(point+a*e,size)+b*distanceToFractal(point+b*e,size)+c*distanceToFractal(point+c*e,size)+d*distanceToFractal(point+d*e,size);
     let normal = gradient/max(length(gradient),0.000001);
     let occlusion = exp(-steps*0.018);
     colour = surface(point,normal,rd,occlusion);

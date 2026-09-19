@@ -1,4 +1,4 @@
-import { BAND_COUNT, BAND_HIT, BAND_HIT_WIDTH } from '../audio/FeatureExtractor'
+import { BAND_COUNT, BAND_HIT } from '../audio/FeatureExtractor'
 import type { KaleidoscopeKnob, Tuning } from '../presets/knobs'
 
 export type KaleidoscopeParams = Record<KaleidoscopeKnob, number>
@@ -71,7 +71,7 @@ export class KaleidoscopeMotion {
   lift = 0
   sparkle = 0
   zoomPhase = 0
-  /** One vec4 per band: sustained level, hit envelope, motion phase, hit width. */
+  /** One vec4 per band: sustained level, hit envelope, motion phase, padding. */
   readonly bands = new Float32Array(BAND_COUNT * 4)
 
   step(params: KaleidoscopeParams, dt: number, features?: Float32Array) {
@@ -103,7 +103,6 @@ export class KaleidoscopeMotion {
         (this.bands[slot + 2] ?? 0) +
           elapsed * (0.08 + band * 0.035 + level * params.bandReaction * 0.45),
       )
-      if (hit > 0) this.bands[slot + 3] = bounded(features?.[BAND_HIT_WIDTH + band])
     }
   }
 }

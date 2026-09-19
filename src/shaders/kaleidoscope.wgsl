@@ -4,7 +4,7 @@ struct Params {
   detail: vec4<f32>, // fold budget, warp, thickness, sub expansion trim
   colour: vec4<f32>, // treble highlight trim, intensity, saturation, palette
   response: vec4<f32>, // band gain, software adapter
-  bands: array<vec4<f32>, 5>, // level, hit envelope, phase, hit width
+  bands: array<vec4<f32>, 5>, // level, hit envelope, phase, unused
 }
 @group(0) @binding(0) var<uniform> p: Params;
 const TAU = 6.28318530718;
@@ -151,7 +151,7 @@ fn sampleScene(pixel: vec2<f32>) -> vec4<f32> {
 // Higher-resolution canvases already sample a smaller area of the fractal.
 @fragment fn fs(@builtin(position) pixel: vec4<f32>) -> @location(0) vec4<f32> {
   let smaller = min(p.screen.x,p.screen.y);
-  if(p.response.y>0.5 || smaller>=1440.0) { return sampleScene(pixel.xy); }
+  if(p.response.y>0.5 || p.screen.x*p.screen.y>=3600000.0) { return sampleScene(pixel.xy); }
   if(smaller>=900.0) {
     return (sampleScene(pixel.xy+vec2<f32>(-0.25,0.25))+sampleScene(pixel.xy+vec2<f32>(0.25,-0.25)))*0.5;
   }

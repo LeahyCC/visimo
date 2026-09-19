@@ -149,7 +149,7 @@ vec4 sampleScene(vec2 pixel) {
 
 vec4 spatialSamples(vec2 pixel) {
   float smaller = min(p.screen.x, p.screen.y);
-  if (p.response.y > 0.5 || smaller >= 1440.0) return sampleScene(pixel);
+  if (p.response.y > 0.5 || p.screen.x * p.screen.y >= 3600000.0) return sampleScene(pixel);
   if (smaller >= 900.0) {
     return (sampleScene(pixel + vec2(-0.25, 0.25)) + sampleScene(pixel + vec2(0.25, -0.25))) * 0.5;
   }

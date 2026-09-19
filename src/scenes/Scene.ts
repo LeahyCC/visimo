@@ -15,6 +15,11 @@ export interface Scene {
    * moves slowly sets this so a fast display does not multiply its GPU load.
    */
   readonly maxFps?: number
+  /**
+   * The most pixels worth drawing. Past this the scene and the post stack run
+   * smaller and the composite scales the result up to the canvas.
+   */
+  readonly maxPixels?: number
   init(context: SceneContext): void
   resize(width: number, height: number): void
   /**

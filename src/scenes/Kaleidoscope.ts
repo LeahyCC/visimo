@@ -20,6 +20,8 @@ export class Kaleidoscope implements Scene {
   private readonly data = new Float32Array(KALEIDOSCOPE_UNIFORM_FLOATS)
   // Every frame is a full raymarch and the motion is slow.
   readonly maxFps = 60
+  // 2560x1440. A 4K canvas at full size pinned an RTX 5080.
+  readonly maxPixels = 3_686_400
 
   get detail() {
     return `5-band 3D kaleidoscope / ${this.width}x${this.height}`

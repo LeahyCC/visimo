@@ -69,6 +69,8 @@ class Renderer {
   private base: PostParams = defaultPostParams()
   private readonly live: PostParams = defaultPostParams()
   private frameMs = 16.7
+  private drawWidth = 1
+  private drawHeight = 1
   private reported = 0
   private disposed = false
   private failed = false
@@ -252,7 +254,21 @@ class Renderer {
       software: gpu.info.software,
     })
 
-    if (this.canvas) this.scene.resize(this.canvas.width, this.canvas.height)
+    this.sizeScene()
+  }
+
+  // The scene and the post stack share one size, which a scene may hold below
+  // the canvas. Every post stage samples by uv, so the composite scales it up.
+  private sizeScene() {
+    const { canvas, scene } = this
+    if (!canvas || !scene) return
+    const shrink = Math.min(
+      1,
+      Math.sqrt((scene.maxPixels ?? Infinity) / (canvas.width * canvas.height)),
+    )
+    this.drawWidth = Math.max(1, Math.round(canvas.width * shrink))
+    this.drawHeight = Math.max(1, Math.round(canvas.height * shrink))
+    scene.resize(this.drawWidth, this.drawHeight)
   }
 
   // Construction stays here so scenes share the device and post stack.
@@ -294,7 +310,7 @@ class Renderer {
     }
     // A replacement scene still needs its size when HMR or recovery keeps
     // the canvas and its existing drawing-buffer dimensions.
-    this.scene?.resize(width, height)
+    this.sizeScene()
     this.hud?.resize(canvas.clientWidth, canvas.clientHeight, displayRatio)
   }
 
@@ -357,7 +373,7 @@ class Renderer {
       // The scene draws into the stack's texture and the stack writes the
       // canvas. With every stage off the composite is a straight copy, so the
       // path is the same either way and the scene has one pipeline.
-      const offscreen = post.target(canvas.width, canvas.height)
+      const offscreen = post.target(this.drawWidth, this.drawHeight)
       if (!offscreen) return
       scene.render(encoder, offscreen)
       post.render(encoder, context.getCurrentTexture().createView(), this.packet)

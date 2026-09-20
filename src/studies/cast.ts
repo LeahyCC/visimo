@@ -107,6 +107,18 @@ const defaultCanvasKnobs = (): Record<CanvasKnob, number> => ({
   'feedback.ceiling': DEFAULT_POST_PARAMS.feedback.ceiling,
 })
 
+/**
+ * The canvas a cast draws on when nothing says otherwise: the post stack's
+ * own feedback numbers, switched on and undriven. A cast file that leaves
+ * `canvas` out gets this, and so does every cast the director builds, which
+ * has no file to read numbers from.
+ */
+export const defaultCanvas = (): CastCanvas => ({
+  enabled: true,
+  knobs: defaultCanvasKnobs(),
+  mapping: [],
+})
+
 function readField(value: unknown, source: string, path: string): StudyField {
   const from = readString(value, source, path)
   if (!(STUDY_FIELDS as readonly string[]).includes(from))

@@ -25,6 +25,7 @@ import { AUDIO_FIELDS } from '../presets/knobs'
 import { defaultCanvas, parseCast } from '../studies/cast'
 import { castOrDefault } from '../studies/casts/index'
 import frames from '../studies/casts/preset-frames.json'
+import { DUST_KNOBS } from '../studies/impls'
 import type { ImplId } from '../studies/impls'
 import { STUDIES } from '../studies/registry'
 import type { LiveCast } from '../studies/resolve'
@@ -249,6 +250,26 @@ vi.mock('../impls/ShardsInk', () => ({
     }
     dispose() {
       impls.disposed.shards = (impls.disposed.shards ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/DustInk', () => ({
+  DustInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.dust = (impls.built.dust ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('dust', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('dust')
+    }
+    dispose() {
+      impls.disposed.dust = (impls.disposed.dust ?? 0) + 1
     }
   },
 }))
@@ -1296,6 +1317,72 @@ describe('the study bench', () => {
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     expect(() => draw(1000)).not.toThrow()
     expect(impls.built.shards).toBeUndefined()
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('builds the dust ink for its study, hands it its numbers and draws it in cast order', async () => {
+    const { draw } = await start()
+    renderer.setBench({
+      live: live('ribbon', 'dust', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.energy] = 0.3
+        packet[F.tension] = 0
+      },
+    })
+    draw(1000)
+    expect(impls.built.dust).toBe(1)
+    expect(impls.drawn).toEqual(['ribbon', 'dust'])
+    expect(impls.seen.dust?.presence).toBe(1)
+    expect(Object.keys(impls.seen.dust?.knobs ?? {}).sort()).toEqual([...DUST_KNOBS].sort())
+    // A quiet passage is not silence: there is dust to draw, and none gathered.
+    expect(impls.seen.dust?.knobs.count ?? 0).toBeGreaterThan(30)
+    expect(impls.seen.dust?.knobs.gather).toBe(0)
+
+    // The study's tension row reaches the ink through the resolver.
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.energy] = 0.3
+        packet[F.tension] = 1
+      },
+    })
+    draw(2000)
+    expect(impls.seen.dust?.knobs.gather).toBeCloseTo(0.5, 9)
+  })
+
+  it('is handed a count of nothing at a silent packet, which is how it draws nothing', async () => {
+    const { draw } = await start()
+    renderer.setBench({ live: live('ribbon', 'dust', 'clean-glass') })
+    draw(1000)
+    expect(impls.seen.dust?.knobs.count).toBe(0)
+  })
+
+  it('does not build the dust ink for a study that is faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('ribbon', 'dust', 'clean-glass')
+    const dust = cast.studies[1]
+    if (!dust) throw new Error('the dust is in the cast')
+    dust.presence = 0
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.built.dust).toBeUndefined()
+    expect(impls.updates.dust).toBeUndefined()
+    dust.presence = 0.5
+    draw(2000)
+    expect(impls.built.dust).toBe(1)
+    expect(impls.seen.dust?.presence).toBe(0.5)
+  })
+
+  it('skips the dust on the WebGL2 path, which has no compute and draws the fractal alone', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('ribbon', 'dust', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(1000)).not.toThrow()
+    expect(impls.built.dust).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

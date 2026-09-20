@@ -26,6 +26,7 @@ export const IMPL_IDS = [
   'ribbon',
   'streaks',
   'shards',
+  'dust',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -115,6 +116,22 @@ export const STREAKS_KNOBS = [
 export type StreaksKnob = (typeof STREAKS_KNOBS)[number]
 
 /**
+ * The dust's numbers. Their ranges and units are in `impls/dust.params.ts`.
+ * `gather` is the one that is not a property of a speck: it pulls every
+ * speck's place toward the middle of the canvas, which is what tension does.
+ */
+export const DUST_KNOBS = [
+  'count',
+  'size',
+  'drift',
+  'twinkle',
+  'intensity',
+  'hueSpread',
+  'gather',
+] as const
+export type DustKnob = (typeof DUST_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -183,7 +200,7 @@ export const isCountKnob = (knob: string): boolean =>
   (COUNT_KNOBS as readonly string[]).includes(knob)
 
 export type ImplKnob =
-  FluidKnob | AnalyticKnob | KaleidoscopeKnob | ShardKnob | PostKnob | StreaksKnob
+  FluidKnob | AnalyticKnob | KaleidoscopeKnob | ShardKnob | PostKnob | StreaksKnob | DustKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -194,6 +211,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   ribbon: RIBBON_KNOBS,
   streaks: STREAKS_KNOBS,
   shards: SHARD_KNOBS,
+  dust: DUST_KNOBS,
   look: LOOK_KNOBS,
 }
 

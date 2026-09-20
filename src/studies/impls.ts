@@ -30,6 +30,7 @@ export const IMPL_IDS = [
   'caustics',
   'halo',
   'rings',
+  'spectrum',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -161,6 +162,24 @@ export const RINGS_KNOBS = ['rate', 'speed', 'thickness', 'intensity', 'life', '
 export type RingsKnob = (typeof RINGS_KNOBS)[number]
 
 /**
+ * The spectrum ring's numbers. Their ranges and units are in
+ * `impls/spectrum.params.ts`. `radius` is where the bars' feet stand and
+ * `length` how far a bar at full level reaches from them, both fractions of
+ * the short side; `spin` is in turns a second, and `hueSpread` is the palette
+ * run from the sub's pole of the ring to the treble's.
+ */
+export const SPECTRUM_KNOBS = [
+  'bars',
+  'radius',
+  'length',
+  'width',
+  'intensity',
+  'hueSpread',
+  'spin',
+] as const
+export type SpectrumKnob = (typeof SPECTRUM_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -239,6 +258,7 @@ export type ImplKnob =
   | CausticsKnob
   | HaloKnob
   | RingsKnob
+  | SpectrumKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -253,6 +273,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   caustics: CAUSTICS_KNOBS,
   halo: HALO_KNOBS,
   rings: RINGS_KNOBS,
+  spectrum: SPECTRUM_KNOBS,
   look: LOOK_KNOBS,
 }
 

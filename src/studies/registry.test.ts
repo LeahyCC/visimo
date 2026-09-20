@@ -22,6 +22,7 @@ import { DUST_RANGES } from '../impls/dust.params'
 import { HALO_RANGES } from '../impls/halo.params'
 import { RING_RANGES } from '../impls/rings.params'
 import { SHARD_RANGES } from '../impls/shards.params'
+import { SPECTRUM_RANGES } from '../impls/spectrum.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
 import { MAX_WEAVE, POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostKnob } from '../post/params'
@@ -30,7 +31,15 @@ import type { AnalyticKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs
 import { KALEIDOSCOPE_RANGES } from '../scenes/kaleidoscope.params'
 import { CASTS } from './casts/index'
 import { IMPL_IDS, implKnobs, isImplId, isImplKnob } from './impls'
-import type { CausticsKnob, DustKnob, HaloKnob, ImplId, RingsKnob, StreaksKnob } from './impls'
+import type {
+  CausticsKnob,
+  DustKnob,
+  HaloKnob,
+  ImplId,
+  RingsKnob,
+  SpectrumKnob,
+  StreaksKnob,
+} from './impls'
 import { findStudy, STUDIES } from './registry'
 import { castFrame, resolveCast, resolveStudy } from './resolve'
 import { STUDY_FIELDS, STUDY_KINDS } from './types'
@@ -113,6 +122,8 @@ const isHaloKnob = (knob: string): knob is HaloKnob =>
   Object.prototype.hasOwnProperty.call(HALO_RANGES, knob)
 const isRingsKnob = (knob: string): knob is RingsKnob =>
   Object.prototype.hasOwnProperty.call(RING_RANGES, knob)
+const isSpectrumKnob = (knob: string): knob is SpectrumKnob =>
+  Object.prototype.hasOwnProperty.call(SPECTRUM_RANGES, knob)
 
 /** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
 const SIGNED = new Set(['colourDrift'])
@@ -138,6 +149,7 @@ function safeRange(impl: ImplId, knob: string): readonly [number, number] | unde
   if (impl === 'caustics' && isCausticsKnob(knob)) return CAUSTICS_RANGES[knob]
   if (impl === 'halo' && isHaloKnob(knob)) return HALO_RANGES[knob]
   if (impl === 'rings' && isRingsKnob(knob)) return RING_RANGES[knob]
+  if (impl === 'spectrum' && isSpectrumKnob(knob)) return SPECTRUM_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
 }
@@ -294,6 +306,11 @@ const ALLOWED: Record<string, Record<string, string>> = {
   },
   'beat-rings': {
     hueSpread: 'how far the hues step round the ribbon’s, a setting of the look and not a level',
+  },
+  'spectrum-ring': {
+    bars: 'how many bars stand on the ring, the resolution of the drawing and not a level; a live count would pop bars in and out of it',
+    hueSpread:
+      'how far the palette runs from the ring’s sub pole to its treble one, a setting of the look and not a level',
   },
   'fractal-glints': {
     symmetry: 'how many times the frame is folded, a whole number; moving it flickers the fold',

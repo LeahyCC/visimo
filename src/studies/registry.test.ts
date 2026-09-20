@@ -20,6 +20,7 @@ import { ANALYTIC_RANGES } from '../impls/analytic.params'
 import { CAUSTICS_RANGES } from '../impls/caustics.params'
 import { DUST_RANGES } from '../impls/dust.params'
 import { HALO_RANGES } from '../impls/halo.params'
+import { RING_RANGES } from '../impls/rings.params'
 import { SHARD_RANGES } from '../impls/shards.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
 import { MAX_WEAVE, POST_KNOBS, POST_LANES } from '../post/params'
@@ -29,7 +30,7 @@ import type { AnalyticKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs
 import { KALEIDOSCOPE_RANGES } from '../scenes/kaleidoscope.params'
 import { CASTS } from './casts/index'
 import { IMPL_IDS, implKnobs, isImplId, isImplKnob } from './impls'
-import type { CausticsKnob, DustKnob, HaloKnob, ImplId, StreaksKnob } from './impls'
+import type { CausticsKnob, DustKnob, HaloKnob, ImplId, RingsKnob, StreaksKnob } from './impls'
 import { findStudy, STUDIES } from './registry'
 import { castFrame, resolveCast, resolveStudy } from './resolve'
 import { STUDY_FIELDS, STUDY_KINDS } from './types'
@@ -110,6 +111,8 @@ const isCausticsKnob = (knob: string): knob is CausticsKnob =>
   Object.prototype.hasOwnProperty.call(CAUSTICS_RANGES, knob)
 const isHaloKnob = (knob: string): knob is HaloKnob =>
   Object.prototype.hasOwnProperty.call(HALO_RANGES, knob)
+const isRingsKnob = (knob: string): knob is RingsKnob =>
+  Object.prototype.hasOwnProperty.call(RING_RANGES, knob)
 
 /** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
 const SIGNED = new Set(['colourDrift'])
@@ -134,6 +137,7 @@ function safeRange(impl: ImplId, knob: string): readonly [number, number] | unde
   if (impl === 'dust' && isDustKnob(knob)) return DUST_RANGES[knob]
   if (impl === 'caustics' && isCausticsKnob(knob)) return CAUSTICS_RANGES[knob]
   if (impl === 'halo' && isHaloKnob(knob)) return HALO_RANGES[knob]
+  if (impl === 'rings' && isRingsKnob(knob)) return RING_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
 }
@@ -247,6 +251,18 @@ const ALLOWED: Record<string, Record<string, string>> = {
     twist: 'the same, and a twist that varies with radius is the polar twist study',
     ...UNUSED_CURL,
   },
+  'beat-pump': {
+    swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
+    twist: 'the same, and a twist that varies with radius is the polar twist study',
+    ...UNUSED_CURL,
+  },
+  'tunnel': {
+    falloff:
+      'a plain zoom about the middle, which is what reads as travel; a peak nearer the middle would read as a burst',
+    twist:
+      'a twist that varies with radius is the polar twist study, and the swirl is the turn this study has',
+    ...UNUSED_CURL,
+  },
   'curl-drift': {
     radial: 'this flow is the curl term alone; a pull to the middle is the implode study',
     falloff: 'the shape of the radial term, which this flow does not use',
@@ -275,6 +291,9 @@ const ALLOWED: Record<string, Record<string, string>> = {
   },
   'halo': {
     hue: 'the offset from the ribbon’s colour at the key, a setting of the look for a cast to make and not a level',
+  },
+  'beat-rings': {
+    hueSpread: 'how far the hues step round the ribbon’s, a setting of the look and not a level',
   },
   'fractal-glints': {
     symmetry: 'how many times the frame is folded, a whole number; moving it flickers the fold',

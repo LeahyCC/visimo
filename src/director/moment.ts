@@ -13,7 +13,7 @@
  * of what build and drop leave, so the six still sum to 1. An intro is where
  * the track has only just begun, however loud it is: it is read off how much
  * has been heard and how many sections have been confirmed, so a track that
- * opens at full energy has one as much as a track that opens on a pad. An
+ * opens at full energy has one too, at half the weight (`INTRO_LOUD_SHARE`). An
  * outro is where the track is ending, and how much of that can be known
  * depends on the host. Given the playhead and the length it is the last
  * stretch of the track, loud or quiet. Given neither it is the shape an
@@ -43,6 +43,16 @@ export type Playhead = { readonly currentTime: number; readonly duration: number
  */
 export const INTRO_FULL_SECONDS = 8
 export const INTRO_GONE_SECONDS = 30
+
+/**
+ * How much of a loud opening is an intro. A quiet opening is wholly one, but
+ * every study made for an intro was made for a quiet one and dims as the music
+ * gets loud, so a riff at full energy read as all intro was handed curl drift
+ * and dust for its first half minute, which is an empty picture under the
+ * loudest part of the track. A loud opening keeps the rest as groove, so the
+ * studies of the track's own character can win it and the intro still shows.
+ */
+export const INTRO_LOUD_SHARE = 0.5
 
 /** How many sections an intro may survive. By the third, the track has started. */
 export const INTRO_SECTIONS = 2
@@ -181,7 +191,8 @@ export class MomentReader {
     const length = lengthOf(playhead)
     const position = length > 0 ? positionOf(playhead) : 0
     const intro = this.introShare(length, position)
-    const roomLeft = room * (1 - intro)
+    const introRoom = room * intro * INTRO_LOUD_SHARE
+    const roomLeft = room - introRoom
     const quietLeft = quiet * (1 - intro)
 
     // Position takes the room and the quiet alike, which is how a loud ending
@@ -191,7 +202,7 @@ export class MomentReader {
     const ending = this.endingShare(length, position, tension)
     const outroRoom = roomLeft * ending
     const outroQuiet = quietLeft * Math.max(ending, this.outroShare(tension))
-    this.value.intro = (room + quiet) * intro
+    this.value.intro = introRoom + quiet * intro
     this.value.groove = roomLeft - outroRoom
     this.value.rest = quietLeft - outroQuiet
     this.value.outro = outroRoom + outroQuiet

@@ -243,6 +243,143 @@ const CURL_DRIFT: FlowStudy = {
 }
 
 /**
+ * A zoom pulse that lands on the predicted beat: the flow for the groove and
+ * the drop of a steady, hard track. The radial term is a sawtooth in the beat
+ * phase, and everything below is why it is that one and not another.
+ *
+ * The sign. The feedback pass reads the last frame back at `uv - velocity x
+ * step`, so the history moves WITH the velocity, and a positive `radial` pushes
+ * the picture outward. The kick is outward and the settle is inward.
+ *
+ * The curve. `beatPhase` is 0 on the beat and rises to 1, so a negative gain on
+ * it is highest at the beat and falls in a straight line to the next: an
+ * `invert` on it would draw the same line. The line is the row and the offset
+ * that makes its mean zero is the confidence row, and not a resting value, for
+ * the reason under "confidence" below. At a confidence of 1 the radial speed is
+ * 0.12 - 0.24 x phase: +0.12 field widths a second on the beat, 0 half a beat
+ * later and -0.12 just before the next, so the mean over a beat is 0 and the
+ * picture breathes about where it was instead of marching off the edge. The
+ * picture is at its smallest on the beat and its widest half a beat later: the
+ * velocity reverses on the beat, and the reversal is what reads as the hit.
+ *
+ * How deep. The scale swings by about 2.5 percent peak to peak at the rim at
+ * 128 BPM (0.24 x the beat / 8 field widths, 36 px at 2560 wide), which is
+ * more than twice what the canvas's own `beatPhase` zoom row swings, about 1
+ * percent (that row is one-sided, it only ever zooms out faster on the beat, so
+ * it is a surge and never a pump). It is a velocity, so the depth scales with
+ * the length of a beat: 1.8 percent at 175 BPM and 3.5 at 90. The 0.24 is the
+ * number to trust least: too deep judders the whole picture and too shallow is
+ * invisible, and it can only be judged on a real adapter.
+ *
+ * Confidence. Rows add, so nothing here can scale the pulse by how sure the
+ * beat is, and it does not fade: at a confidence of 0 with a phase still
+ * running the sawtooth is as deep as ever, which is the tracker's own choice (a
+ * ramp that carries on through a bar of doubt is less jarring than one that
+ * stalls). What a row can do is take out the constant. Before any tempo has
+ * been found the phase is stuck at 0, the top of the sawtooth, and any resting
+ * offset would leave the picture pushed outward for as long as that lasts. So
+ * the offset is `sqrt(tempoConfidence)`, which is 0 with no beat, keeps the
+ * silent packet still (the flow encodes nothing) and rises fast enough that a
+ * two-step at 0.45 is only a sixth of a swing under level. In a doubted bar
+ * with the phase running there is a slow inward drift, -0.12 field widths a
+ * second at the worst, which the canvas's own outward zoom (0.05 to 0.15 at
+ * the rim) largely cancels. The real gate is the director: `steadiness` is the
+ * character axis the tracker's confidence feeds, the home is 0.9 and the reach
+ * is moderate, so a track without a steady beat never has this cast and one
+ * that loses it is faded out over a glide.
+ *
+ * Tension deepens it by widening it. The swing is the phase row's gain and no
+ * row can multiply it, but `falloff` is a shape: at 0 the speed is proportional
+ * to the radius and only the rim takes the full swing, and at 1.5 most of the
+ * frame does, which is 1.67 times the mean speed over a 16:9 frame with the
+ * rim a tenth slower. It stays zero mean at every falloff, so a build brings
+ * the pulse into the middle of the picture and never starts a drift.
+ * `beatPulse` is left out on purpose: it is a decaying pulse with a positive
+ * mean, so any gain on it is a net outward push, and the onset it reports is
+ * what the tracker's phase is already made from.
+ *
+ * Its home is steady and hard, in the corner where a hardstyle or techno groove
+ * lives, and its reach is moderate, so a lo-fi track is not welcome there.
+ */
+const BEAT_PUMP: FlowStudy = {
+  id: 'beat-pump',
+  kind: 'flow',
+  name: 'Beat pump',
+  impl: 'analytic',
+  home: { drive: 0.7, weight: 0.5, tonality: 0.5, steadiness: 0.9, hardness: 0.85 },
+  reach: 0.5,
+  moments: { intro: 0, groove: 1, build: 0, drop: 1, rest: 0, outro: 0 },
+  knobs: { ...NO_CURL, radial: 0, falloff: 0, swirl: 0, twist: 0 },
+  mapping: [
+    { from: 'beatPhase', to: 'radial', gain: -0.24, curve: 'linear' },
+    { from: 'tempoConfidence', to: 'radial', gain: 0.12, curve: 'sqrt' },
+    { from: 'tension', to: 'falloff', gain: 1.5, curve: 'linear' },
+  ],
+  cost: 'cheap',
+}
+
+/**
+ * Steady travel, the picture always streaming out of the middle and off the
+ * edge, for the groove and the build of a steady track. It is `radial` at a
+ * small constant with `falloff` 0, so the speed is proportional to the radius:
+ * a plain zoom, which is what makes it read as moving through something and not
+ * as a burst.
+ *
+ * Which way is forward. The catalogue says inward, and this goes outward, for
+ * four reasons that come from the canvas keeping its history. The light is
+ * drawn near the middle (the ribbon, the halo, the streaks' eye) and the
+ * history is what moves, so outward is light leaving where it was drawn and
+ * rushing past, which is what flying forward looks like; inward is light
+ * shrinking away from where it was drawn, which is what backing off looks like.
+ * Every cast the director builds already zooms outward at about 9 percent a
+ * second (`carriedCanvas` holds a `feedback.zoom` of 1.0015 a frame), so an
+ * inward tunnel would first cancel that, sit still at about -0.05 and only
+ * then start to recede, where an outward one adds to it. Outward flow leaves
+ * through the rim, and inward flow piles the history up in the middle, where the
+ * halo already piles light. And a build that speeds up outward runs straight
+ * into the radial burst, which is outward, where implode already is the inward
+ * build. The direction is one sign on the radial rows if it looks wrong.
+ *
+ * It rests at 0.04 field widths a second at the rim, 100 px a second at 2560
+ * wide and 7 percent a second of zoom, and it is not still at a silent packet:
+ * a flow draws nothing, so what it does there is carry what is left of the
+ * picture at that speed, as curl drift does. Loudness adds 0.04, so a full
+ * groove is 0.08. Tension is the study: it adds 0.15, so at the top of a build
+ * the rim moves at 0.23 field widths a second, 590 px a second, which is under
+ * half of implode's pull of 0.49 at the same point. `carriedCanvas` shortens
+ * the trails by 0.04 of decay at full tension, so the streaks do not lengthen
+ * as fast as the speed does.
+ *
+ * A small swirl, so it is not a dead straight zoom: 0.002 turns a second at
+ * rest, which bends the streaks by about 10 degrees at the rim, or 5 in a full
+ * groove, and a chord change turns it further (`harmonicChange` at 0.012, so a
+ * full change is 0.014 and about 30 degrees in a groove for the couple of
+ * seconds it lasts). Tension winds it a little more, 0.008, so a build is a
+ * slight corkscrew and not a flat rush. A track whose chords the drums drown
+ * out has nothing on the harmonic row and keeps the resting turn.
+ *
+ * Its home is steady and nothing else, the catalogue's own word, and its reach
+ * is moderate.
+ */
+const TUNNEL: FlowStudy = {
+  id: 'tunnel',
+  kind: 'flow',
+  name: 'Tunnel',
+  impl: 'analytic',
+  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.85, hardness: 0.5 },
+  reach: 0.5,
+  moments: { intro: 0, groove: 1, build: 1, drop: 0, rest: 0, outro: 0 },
+  knobs: { ...NO_CURL, radial: 0.04, falloff: 0, swirl: 0.002, twist: 0 },
+  mapping: [
+    { from: 'energy', to: 'radial', gain: 0.04, curve: 'linear' },
+    { from: 'tension', to: 'radial', gain: 0.15, curve: 'linear' },
+    { from: 'harmonicChange', to: 'swirl', gain: 0.012, curve: 'linear' },
+    { from: 'tension', to: 'swirl', gain: 0.008, curve: 'linear' },
+  ],
+  cost: 'cheap',
+}
+
+/**
  * The fluid's dye, one emitter per band. It has nothing to draw into unless a
  * fluid flow is stirring the field, hence `requires`, and it covers most of
  * the frame, so it does not share a cast with the fractal. Tension thins the
@@ -729,6 +866,76 @@ const HALO: InkStudy = {
 }
 
 /**
+ * The beat made visible: thin circles born at the middle on the predicted
+ * beat and spreading out, for a steady groove and for a build, where a roll of
+ * them is the tension drawn. A ring is born where `beatPhase` wraps and not
+ * where an onset falls, so it lands on the beat the tracker expects, and the
+ * ink births none while `tempoConfidence` is under its gate: a phase on a wrong
+ * tempo is a steady rhythm in the wrong place. The gate is here as well as in
+ * the ink, as the same `invert` row the caustics use for the key: the intensity
+ * is its rest value times the confidence, so a silent packet resolves to no
+ * light and an unsteady track to a dim one the ink then refuses to birth for.
+ *
+ * Tension takes `rate` from 1 to 4 rings a beat, which the ink snaps to 1, 2 or
+ * 4, so spacing halves the way a snare roll does. It also takes 1.5 s off the
+ * life, which is the row that keeps a roll sparse: four a beat at the same life
+ * would be a crowd. Nothing else in the light moves with a build, so it adds
+ * rings and not brightness. Energy thickens a ring by under a pixel and a
+ * heavy low end quickens it by a third, and both are small on purpose.
+ *
+ * It is sparse by design. At its worst, a roll at full tension on a loud,
+ * low-heavy passage at 200 beats a minute, a ring is 3.3 px thick at 1080 high
+ * plus its edge and 12 are alive at once, which lights 3.6% of a 16:9 frame,
+ * 6.4% of a square one and 6.1% of a tall one (`ringsCoverage`, an upper bound
+ * that counts every ring at full light and none overlapping), and a test holds
+ * it under a tenth on eight canvas shapes. One ring is under 2% of a frame.
+ * That is the flash statement for WCAG 2.3.1: what a ring does to the frame is
+ * a thin moving line and never a large-area change of luminance, and the rate
+ * is the beat's own, about 13 a second at the fastest tempo the tracker
+ * reports, each too small to count as a flash by area.
+ *
+ * The intensity is the number to trust least, and it was set by looking. It
+ * first rested at 0.45, from the sum: light that moves does not sum the way a
+ * still image does, and the canvas takes 0.018 off every pixel every frame, so
+ * a ring adds its one frame and a wake that the floor eats. Beside the ribbon
+ * on the adapter in the bench at a quiet level that was a faint ring you had to
+ * look for. At 1 the rings were clear and a little bold beside the ribbon, and
+ * 0.8 sits between: the newest ring reads about as bright as the ribbon and the
+ * older ones fade to the black behind them. A moving ring peaks at exactly its
+ * own intensity, 0.8 (`ringPassPeak`), which the feedback pass bends a little
+ * at a loud level and never clips; only a ring slower than the range allows
+ * would stand on a pixel long enough to sum higher.
+ *
+ * Its home is the steady, hard-ish middle of the space, with a moderate reach:
+ * a house or a hardstyle track is at home with it and a lo-fi one is not.
+ */
+const BEAT_RINGS: InkStudy = {
+  id: 'beat-rings',
+  kind: 'ink',
+  name: 'Beat rings',
+  impl: 'rings',
+  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.85, hardness: 0.55 },
+  reach: 0.5,
+  moments: { intro: 0, groove: 1, build: 1, drop: 0, rest: 0, outro: 0 },
+  knobs: {
+    rate: 1,
+    speed: 0.24,
+    thickness: 2.5,
+    intensity: 0.8,
+    life: 2.4,
+    hueSpread: 0.12,
+  },
+  mapping: [
+    { from: 'tension', to: 'rate', gain: 3, curve: 'linear' },
+    { from: 'tension', to: 'life', gain: -1.5, curve: 'linear' },
+    { from: 'tempoConfidence', to: 'intensity', gain: -0.8, curve: 'invert' },
+    { from: 'lowEnd', to: 'speed', gain: 0.08, curve: 'linear' },
+    { from: 'energy', to: 'thickness', gain: 0.8, curve: 'linear' },
+  ],
+  cost: 'cheap',
+}
+
+/**
  * Low contrast, grain and a gentle bloom: what Plume, Wash and Drift are
  * shown through. A hard track splits more and is clean, a soft one splits
  * less and is grainy, which is the one row `hardness` owns here. Tension
@@ -1041,6 +1248,8 @@ export const STUDIES: readonly Study[] = [
   IMPLODE,
   RADIAL_BURST,
   CURL_DRIFT,
+  BEAT_PUMP,
+  TUNNEL,
   DYE_PLUMES,
   RIBBON,
   FRACTAL_GLINTS,
@@ -1049,6 +1258,7 @@ export const STUDIES: readonly Study[] = [
   DUST,
   CAUSTICS,
   HALO,
+  BEAT_RINGS,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

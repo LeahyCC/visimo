@@ -40,6 +40,7 @@ import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
 import { HaloInk } from '../impls/HaloInk'
 import { RibbonInk } from '../impls/RibbonInk'
+import { RingsInk } from '../impls/RingsInk'
 import { ShardsInk } from '../impls/ShardsInk'
 import { StreaksInk } from '../impls/StreaksInk'
 import { mergePostPatch, patchPostParams, postSummary } from '../post/params'
@@ -622,6 +623,7 @@ class Renderer {
     if (impl === 'dust') return new DustInk()
     if (impl === 'caustics') return new CausticsInk()
     if (impl === 'halo') return new HaloInk()
+    if (impl === 'rings') return new RingsInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

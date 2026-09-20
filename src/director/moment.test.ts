@@ -6,6 +6,7 @@ import type { Moment } from '../studies/types'
 import {
   INTRO_FULL_SECONDS,
   INTRO_GONE_SECONDS,
+  INTRO_LOUD_SHARE,
   MomentReader,
   OUTRO_LAST_SHARE,
   OUTRO_MAX_STRETCH_SECONDS,
@@ -124,19 +125,25 @@ describe('MomentReader', () => {
     expect(landed.build).toBeLessThan(0.1)
   })
 
-  // An intro is where the track is, so it takes the room groove would have
-  // had as well as the quiet, and the six still sum to one.
+  // An intro is where the track is, so it takes all of the quiet and a share
+  // of the room groove would have had. The share is not the whole of it: the
+  // studies made for an intro are quiet ones, and a loud opening keeps enough
+  // groove for the track's own studies to win it.
   it('reads the first seconds of a track as an intro, quiet or not', () => {
-    const reader = new MomentReader()
-    const weights = play(reader, packet({ rest: 0.6, section: 1 }), 2, 60)
-    expect(weights.intro).toBeCloseTo(1)
-    expect(weights.rest).toBeCloseTo(0)
-    expect(weights.groove).toBeCloseTo(0)
+    const quiet = play(new MomentReader(), packet({ rest: 1, section: 1 }), 2, 60)
+    expect(quiet.intro).toBeCloseTo(1)
+    const mixed = play(new MomentReader(), packet({ rest: 0.6, section: 1 }), 2, 60)
+    expect(mixed.intro).toBeCloseTo(0.6 + 0.4 * INTRO_LOUD_SHARE)
+    expect(mixed.rest).toBeCloseTo(0)
+    expect(mixed.groove).toBeCloseTo(0.4 * (1 - INTRO_LOUD_SHARE))
+    const loud = play(new MomentReader(), packet({ section: 1 }), 2, 60)
+    expect(loud.intro).toBeCloseTo(INTRO_LOUD_SHARE)
+    expect(loud.groove).toBeCloseTo(1 - INTRO_LOUD_SHARE)
   })
 
   it('hands the intro over over the first few sections, and not in a step', () => {
     const reader = new MomentReader()
-    const quiet = (section: number) => packet({ rest: 0.6, section })
+    const quiet = (section: number) => packet({ rest: 1, section })
     expect(play(reader, quiet(1), 1, 60).intro).toBeCloseTo(1)
     expect(play(reader, quiet(2), 4, 60).intro).toBeCloseTo(0.5)
     expect(play(reader, quiet(3), 4, 60).intro).toBeCloseTo(0)
@@ -152,11 +159,11 @@ describe('MomentReader', () => {
 
   it('ends the intro the moment a passage comes back', () => {
     const reader = new MomentReader()
-    expect(play(reader, packet({ rest: 0.6, section: 1 }), 1, 60).intro).toBeCloseTo(1)
-    const weights = play(reader, packet({ rest: 0.6, section: 1, recall: 0.9 }), 1, 60)
+    expect(play(reader, packet({ rest: 1, section: 1 }), 1, 60).intro).toBeCloseTo(1)
+    const weights = play(reader, packet({ rest: 1, section: 1, recall: 0.9 }), 1, 60)
     expect(weights.intro).toBe(0)
-    expect(weights.rest).toBeCloseTo(0.6)
-    expect(weights.groove).toBeCloseTo(0.4)
+    expect(weights.rest).toBeCloseTo(1)
+    expect(weights.groove).toBeCloseTo(0)
   })
 
   // A track that goes straight into its verse never confirms a change in its
@@ -164,9 +171,9 @@ describe('MomentReader', () => {
   it('ends the intro off the clock when no section has changed', () => {
     const reader = new MomentReader()
     const steady = packet({ section: 1 })
-    expect(play(reader, steady, INTRO_FULL_SECONDS, 60).intro).toBeCloseTo(1)
+    expect(play(reader, steady, INTRO_FULL_SECONDS, 60).intro).toBeCloseTo(INTRO_LOUD_SHARE)
     const halfway = (INTRO_FULL_SECONDS + INTRO_GONE_SECONDS) / 2 - INTRO_FULL_SECONDS
-    expect(play(reader, steady, halfway, 60).intro).toBeCloseTo(0.5)
+    expect(play(reader, steady, halfway, 60).intro).toBeCloseTo(0.5 * INTRO_LOUD_SHARE)
     const gone = play(reader, steady, INTRO_GONE_SECONDS, 60)
     expect(gone.intro).toBe(0)
     expect(gone.groove).toBeCloseTo(1)
@@ -177,7 +184,7 @@ describe('MomentReader', () => {
   it('never cuts a build or a drop out of the opening of a track', () => {
     const build = new MomentReader().step(packet({ tension: 0.8, section: 1 }), 1 / 60)
     expect(build.build).toBeCloseTo(0.8)
-    expect(build.intro).toBeCloseTo(0.2)
+    expect(build.intro).toBeCloseTo(0.2 * INTRO_LOUD_SHARE)
     const drop = new MomentReader().step(packet({ release: 1, section: 1 }), 1 / 60)
     expect(drop.drop).toBeCloseTo(1)
     expect(drop.intro).toBeCloseTo(0)
@@ -190,7 +197,7 @@ describe('MomentReader', () => {
   it('does not spend the intro on silence before the first note', () => {
     const reader = new MomentReader()
     play(reader, packet({ energy: 0 }), 40, 60)
-    expect(play(reader, packet({ section: 1 }), 1, 60).intro).toBeCloseTo(1)
+    expect(play(reader, packet({ section: 1 }), 1, 60).intro).toBeCloseTo(INTRO_LOUD_SHARE)
   })
 
   // A minute-long track has a count-in and not half a minute of intro, so
@@ -201,18 +208,24 @@ describe('MomentReader', () => {
     const known = new MomentReader()
     const unknown = new MomentReader()
     expect(play(known, packet({ section: 1 }), 12, 60, short).intro).toBe(0)
-    expect(play(unknown, packet({ section: 1 }), 12, 60).intro).toBeGreaterThan(0.8)
+    expect(play(unknown, packet({ section: 1 }), 12, 60).intro).toBeGreaterThan(
+      0.8 * INTRO_LOUD_SHARE,
+    )
     // A track of a normal length keeps the intro it had.
     const normal = new MomentReader()
     const long: Playhead = { currentTime: 0, duration: 240 }
-    expect(play(normal, packet({ section: 1 }), 12, 60, long).intro).toBeGreaterThan(0.8)
+    expect(play(normal, packet({ section: 1 }), 12, 60, long).intro).toBeGreaterThan(
+      0.8 * INTRO_LOUD_SHARE,
+    )
   })
 
   // Only a second of sound has been heard, but the listener is two minutes in.
   it('does not read a seek past the opening as an opening', () => {
     const seek: Playhead = { currentTime: 120, duration: 240 }
     expect(play(new MomentReader(), packet({ section: 1 }), 1, 60, seek).intro).toBe(0)
-    expect(play(new MomentReader(), packet({ section: 1 }), 1, 60).intro).toBeCloseTo(1)
+    expect(play(new MomentReader(), packet({ section: 1 }), 1, 60).intro).toBeCloseTo(
+      INTRO_LOUD_SHARE,
+    )
     // The last stretch is then an outro, though little of the track was heard.
     const end: Playhead = { currentTime: 238, duration: 240 }
     expect(play(new MomentReader(), packet({ section: 1 }), 1, 60, end).outro).toBeCloseTo(1)
@@ -222,7 +235,7 @@ describe('MomentReader', () => {
     for (const duration of [NaN, Infinity, 0, -5]) {
       const reader = new MomentReader()
       const weights = play(reader, packet({ section: 1 }), 12, 60, { currentTime: 11, duration })
-      expect(weights.intro).toBeGreaterThan(0.8)
+      expect(weights.intro).toBeGreaterThan(0.8 * INTRO_LOUD_SHARE)
       expect(weights.outro).toBe(0)
     }
   })
@@ -230,12 +243,12 @@ describe('MomentReader', () => {
   // The two songs the fixture writes, the one that opens quiet and the one
   // that opens at full energy on its first frame.
   describe('on a track that opens loud', () => {
-    it('reads its first seconds as intro and not as groove', () => {
+    it('reads its first seconds as an intro as much as a groove', () => {
       const samples = listen(METAL, 60)
       for (const time of [1, 4, 8]) {
         const { weights } = frameAt(samples, time)
-        expect(weights.intro).toBeGreaterThan(0.95)
-        expect(weights.groove).toBeLessThan(0.05)
+        expect(weights.intro).toBeCloseTo(INTRO_LOUD_SHARE, 1)
+        expect(weights.groove).toBeCloseTo(1 - INTRO_LOUD_SHARE, 1)
       }
     })
 

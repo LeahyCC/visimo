@@ -423,6 +423,22 @@ describe('the moment on a synthesised story', () => {
   const impacts = (packets: Float32Array[], rate: number) =>
     packets.flatMap((packet, index) => ((packet[F.impact] ?? 0) >= 0.999 ? [index / rate] : []))
 
+  // The rows are published against the level that means the thing is wholly
+  // happening, so a consumer reads 0 to 1 and means it. As evidence a build
+  // reached 0.71 here and 0.49 on a real track, and a drop 0.5 and 0.41: a
+  // study written so that a tension of 1 is the whole effect, which is how
+  // they are all written, ran at half strength through a real build.
+  it('publishes a whole build and a whole drop as 1', () => {
+    const packets = heard(false, 60)
+    expect(peak(packets, F.tension, BUILD_AT, DROP_AT, 60)).toBeGreaterThan(0.95)
+    expect(peak(packets, F.release, DROP_AT, DROP_AT + 1, 60)).toBeGreaterThan(0.95)
+    // And neither row ever leaves 0 to 1, whatever the evidence does.
+    for (const packet of packets) {
+      expect(packet[F.tension]).toBeLessThanOrEqual(1)
+      expect(packet[F.release]).toBeLessThanOrEqual(1)
+    }
+  }, 300000)
+
   // Both halves matter. Loudness rising over four to sixteen seconds is a
   // build and it is also the drums coming back over a breakdown, which is
   // what the middle of this story is, so a tension that read only the rise
@@ -451,7 +467,7 @@ describe('the moment on a synthesised story', () => {
       const packets = heard(false, rate)
       expect(peak(packets, F.release, DROP_AT, DROP_AT + 1, rate)).toBeGreaterThan(0.4)
       expect(peak(packets, F.release, DROP_AT + phrase, DROP_AT + phrase + 1, rate)).toBeLessThan(
-        0.2,
+        0.5,
       )
       expect(peak(packets, F.release, 0, BUILD_AT, rate)).toBeLessThan(0.1)
     }
@@ -475,7 +491,7 @@ describe('the moment on a synthesised story', () => {
     for (const rate of RATES) {
       const packets = heard(true, rate)
       expect(peak(packets, F.tension, BUILD_AT, DROP_AT, rate)).toBeGreaterThan(0.5)
-      expect(peak(packets, F.tension, DROP_AT + 4, DROP_AT + 6, rate)).toBeLessThan(0.2)
+      expect(peak(packets, F.tension, DROP_AT + 4, DROP_AT + 6, rate)).toBeLessThan(0.4)
       expect(impacts(packets, rate)).toHaveLength(0)
     }
   }, 300000)

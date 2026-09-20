@@ -1131,8 +1131,7 @@ describe('the study bench', () => {
     // Every reader saw the row: the studies through the packet, the director
     // through its moment weights.
     expect(renderer.features[F.tension]).toBeCloseTo(0.7, 5)
-    // 0.7 is past what the row reads when a build is wholly there.
-    expect(renderer.moments.build).toBeCloseTo(1, 5)
+    expect(renderer.moments.build).toBeCloseTo(0.7, 5)
     const width = impls.seen.ribbon?.knobs['ribbon.width'] ?? 0
     renderer.setBench({
       live: renderer.liveCast,

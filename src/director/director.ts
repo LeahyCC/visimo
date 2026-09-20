@@ -119,13 +119,13 @@ const NOVELTY_OFF = 0.25
  * the drop it led to. So tension rising through this is a signal like the
  * other two, and the cast for the build is chosen while there is still a
  * build to show it over. It sits where the build already outweighs the
- * groove (0.3 of a row that is full at 0.5 is a build weight of 0.6): tried
- * at 0.2 the signal fired while the groove's cast, with its margin, still
- * won, and was spent before it could choose anything. The rearm sits well
+ * groove, a build weight of 0.6: tried at 0.4 the signal fired while the
+ * groove's cast, with its margin, still won, and was spent before it could
+ * choose anything. The rearm sits well
  * under it, so a build that wavers is one signal.
  */
-const TENSION_ON = 0.3
-const TENSION_OFF = 0.12
+const TENSION_ON = 0.6
+const TENSION_OFF = 0.24
 
 /** A moment no study is written for still needs a picture. See `valueOf`. */
 const LAST_RESORT = 1e-4

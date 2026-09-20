@@ -9,7 +9,6 @@ import type { LiveStudy } from '../studies/resolve'
 import type { Character, FlowStudy, InkStudy, LookStudy, Moments, Study } from '../studies/types'
 import { COST_OF, Director, pickCast } from './director'
 import type { PickedCast } from './director'
-import { BUILD_FULL } from './moment'
 import type { MomentWeights } from './moment'
 import { DROP_AT, HARDSTYLE, HOUSE, LOFI, PARTS, playSong } from './song.fixture'
 
@@ -502,9 +501,9 @@ describe('a build beginning', () => {
     const director = new Director({ studies: BENCH, budget: 4 })
     settle(director, packet({ section: 1 }), 40)
     expect(director.cast?.inks).not.toContain('build-ink')
-    settle(director, packet({ section: 1, tension: 0.1 }), 1)
+    settle(director, packet({ section: 1, tension: 0.2 }), 1)
     expect(director.cast?.inks).not.toContain('build-ink')
-    director.step(packet({ section: 1, tension: 0.35 }), 1 / 60)
+    director.step(packet({ section: 1, tension: 0.7 }), 1 / 60)
     expect(director.cast?.inks).toContain('build-ink')
   })
 
@@ -513,7 +512,7 @@ describe('a build beginning', () => {
     settle(director, packet({ section: 1 }), 40)
     let changes = 0
     let held = name(director.cast)
-    for (const tension of [0.35, 0.28, 0.4, 0.26, 0.45, 0.3, 0.5]) {
+    for (const tension of [0.7, 0.56, 0.8, 0.52, 0.9, 0.6, 1]) {
       settle(director, packet({ section: 1, tension }), 0.5)
       if (name(director.cast) !== held) {
         changes += 1
@@ -530,9 +529,9 @@ describe('a build beginning', () => {
     const studies = [...BENCH, ink('drop-ink', moments({ drop: 1 }))]
     const director = new Director({ studies, budget: 4 })
     settle(director, packet({ section: 1 }), 40)
-    settle(director, packet({ section: 1, tension: 0.45 }), 4)
+    settle(director, packet({ section: 1, tension: 0.9 }), 4)
     expect(director.cast?.inks).toContain('build-ink')
-    director.step(packet({ section: 1, tension: 0.41, release: 0.37, impact: 1 }), 1 / 60)
+    director.step(packet({ section: 1, tension: 0.82, release: 0.93, impact: 1 }), 1 / 60)
     expect(director.cast?.flow).toBe('drop-flow')
     expect(director.cast?.inks).not.toContain('build-ink')
   })
@@ -542,11 +541,11 @@ describe('a build beginning', () => {
   it('lets the build’s cast go when the build fizzles', () => {
     const director = new Director({ studies: BENCH, budget: 4 })
     settle(director, packet({ section: 1 }), 40)
-    settle(director, packet({ section: 1, tension: 0.45 }), 4)
+    settle(director, packet({ section: 1, tension: 0.9 }), 4)
     expect(director.cast?.inks).toContain('build-ink')
-    settle(director, packet({ section: 1, tension: 0.2 }), 1)
+    settle(director, packet({ section: 1, tension: 0.4 }), 1)
     expect(director.cast?.inks).toContain('build-ink')
-    settle(director, packet({ section: 1, tension: 0.05 }), 1)
+    settle(director, packet({ section: 1, tension: 0.1 }), 1)
     expect(director.cast?.inks).not.toContain('build-ink')
     expect(director.cast?.inks).toContain('groove-ink')
   })
@@ -558,7 +557,7 @@ describe('a build beginning', () => {
     director.step(packet({ section: 1, release: 0.5, impact: 1 }), 1 / 60)
     settle(director, packet({ section: 1 }), 8)
     expect(director.cast?.flow).toBe('drop-flow')
-    director.step(packet({ section: 1, tension: 0.4 }), 1 / 60)
+    director.step(packet({ section: 1, tension: 0.8 }), 1 / 60)
     expect(director.cast?.inks).toContain('build-ink')
   })
 })
@@ -675,7 +674,7 @@ describe('a pinned cast', () => {
     expect(director.character.hardness).toBeGreaterThan(0.8)
     expect(director.character.steadiness).toBeGreaterThan(0.7)
     director.step(packet({ section: 1, tension: 0.2 }), 1 / 60)
-    expect(director.weights.build).toBeCloseTo(0.2 / BUILD_FULL)
+    expect(director.weights.build).toBeCloseTo(0.2)
   })
 })
 

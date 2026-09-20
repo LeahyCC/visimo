@@ -28,21 +28,6 @@ export const INTRO_SECTIONS = 2
 /** Once `recall` has been this high, a passage has come back and the intro is over. */
 export const RECALL_HEARD = 0.5
 
-/**
- * What the two rows read when the thing they measure is wholly there. They
- * are levels of evidence and not shares of a moment, and neither reaches 1 on
- * music: `impact` fires when `release` crosses 0.35, and a real drop peaked
- * at 0.41 and a real build at 0.49 on the first track it was tried on. Read
- * raw, a drop was four tenths drop and six tenths groove, so a study written
- * for drops alone scored 0.4 against about 1 for one that suits groove and
- * drop both, and was never cast: not once in three minutes of a real track
- * and not on the scripted song. A build lost the same way. So each row is
- * read against the level that means it is happening, and a drop that fired
- * is a drop.
- */
-export const BUILD_FULL = 0.5
-export const DROP_FULL = 0.4
-
 /** `swell` is 0.5 when loudness is steady against the last half minute. */
 const SWELL_STEADY = 0.5
 const SWELL_FALLING = 0.06
@@ -90,7 +75,7 @@ export class MomentReader {
 
   step(features: Float32Array, dt: number): MomentWeights {
     if (dt > 0 && (features[F.energy] ?? 0) >= SOUND_FLOOR) this.position(features, dt)
-    const release = clamp01((features[F.release] ?? 0) / DROP_FULL)
+    const release = clamp01(features[F.release] ?? 0)
     // A drop that has fired is the build over. The tension row is slow to let
     // go by design, and is still near its top on the frame of the impact: on
     // a real track that read as build 0.47 and drop 0.53, the build's flow
@@ -98,7 +83,7 @@ export class MomentReader {
     // that was already there, through both drops of the track. The extractor
     // cuts tension by release itself, but by the raw row, which tops out near
     // 0.4; this is the same cut at the level the release is read at here.
-    const tension = clamp01((features[F.tension] ?? 0) / BUILD_FULL) * (1 - release)
+    const tension = clamp01(features[F.tension] ?? 0) * (1 - release)
     const rest = clamp01(features[F.rest] ?? 0)
 
     // Groove is the room the other three leave. Past a full frame's worth

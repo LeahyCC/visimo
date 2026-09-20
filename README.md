@@ -574,6 +574,7 @@ The director, which chooses the cast and fades studies in and out as the song go
 | `src/presets/*.json`, `presets/index.ts`         | `src/studies/casts/*.json`, `studies/casts/index.ts`                 |
 | `presets/flow.ts`, `FLOW_IDS`, `needsFlowSolver` | a cast names a flow study, and the renderer builds it like any other |
 | `resolveScene`, `resolvePost`                    | `resolveLive` and `resolveCast` in `studies/resolve.ts`              |
+| `SCENE_KNOBS`, `SceneValues`                     | `IMPL_KNOBS` and `implKnobs` in `studies/impls.ts`                   |
 | `Scene` in `src/scenes/Scene.ts`                 | `FlowImpl` and `InkImpl` in `src/scenes/Impl.ts`                     |
 | `renderer.setScene`                              | nothing; `setPreset` decides what is built                           |
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { presetOrDefault } from '../presets/index'
 import type { Gpu } from './Device'
 
 const device = vi.hoisted(() => ({
@@ -9,6 +10,13 @@ const device = vi.hoisted(() => ({
 
 const graphics = vi.hoisted(() => ({ render: vi.fn(), dispose: vi.fn() }))
 const scene = vi.hoisted(() => ({ resize: vi.fn(), maxPixels: undefined as number | undefined }))
+const flow = vi.hoisted(() => ({
+  built: 0,
+  initialised: 0,
+  disposed: 0,
+  resize: vi.fn(),
+  setSize: vi.fn(),
+}))
 
 vi.mock('../scenes/Kaleidoscope', () => ({
   Kaleidoscope: class {
@@ -16,6 +24,26 @@ vi.mock('../scenes/Kaleidoscope', () => ({
     resize = scene.resize
     maxPixels = scene.maxPixels
     dispose() {}
+  },
+}))
+
+// The flow a preset asks for is a Fluid the renderer owns and never draws.
+// Its GPU work is Fluid's own business and tested there; what matters here is
+// that one is built, sized and released with the scene and the preset.
+vi.mock('../scenes/Fluid', () => ({
+  Fluid: class {
+    constructor() {
+      flow.built++
+    }
+    init() {
+      flow.initialised++
+    }
+    resize = flow.resize
+    setSize = flow.setSize
+    simulate() {}
+    dispose() {
+      flow.disposed++
+    }
   },
 }))
 
@@ -61,6 +89,9 @@ let renderer: typeof import('./Renderer').renderer
 beforeEach(async () => {
   vi.resetModules()
   vi.clearAllMocks()
+  flow.built = 0
+  flow.initialised = 0
+  flow.disposed = 0
   renderer = (await import('./Renderer')).renderer
 })
 
@@ -131,6 +162,42 @@ describe('renderer attachment lifetime', () => {
     expect(scene.resize).toHaveBeenLastCalledWith(2560, 1440)
     expect(element.width).toBe(3840)
     expect(element.height).toBe(2160)
+  })
+
+  it('runs a flow beside a scene that solves none, sized with it', async () => {
+    scene.maxPixels = undefined
+    const element = sizedCanvas(1280, 720)
+    renderer.setPreset(presetOrDefault('melt'))
+    renderer.setScene('kaleidoscope')
+    await expect(renderer.attach(element, canvas(), vi.fn())).resolves.toBe('ok')
+    expect(flow.initialised).toBe(1)
+    expect(flow.resize).toHaveBeenLastCalledWith(1280, 720)
+    // One control, one grid: the flow follows the fluid size as the scene does.
+    renderer.setFluidSize(1024)
+    expect(flow.setSize).toHaveBeenCalledWith(1024)
+  })
+
+  it('keeps a flowless preset as it was, and drops the flow when one stops asking', async () => {
+    scene.maxPixels = undefined
+    const element = sizedCanvas(1280, 720)
+    renderer.setPreset(presetOrDefault('prism'))
+    renderer.setScene('kaleidoscope')
+    await expect(renderer.attach(element, canvas(), vi.fn())).resolves.toBe('ok')
+    expect(flow.built).toBe(0)
+    renderer.setPreset(presetOrDefault('melt'))
+    expect(flow.initialised).toBe(1)
+    renderer.setPreset(presetOrDefault('prism'))
+    expect(flow.disposed).toBe(1)
+  })
+
+  it('releases the flow with everything else the device owned', async () => {
+    scene.maxPixels = undefined
+    renderer.setPreset(presetOrDefault('melt'))
+    renderer.setScene('kaleidoscope')
+    await expect(renderer.attach(sizedCanvas(800, 600), canvas(), vi.fn())).resolves.toBe('ok')
+    expect(flow.initialised).toBe(1)
+    renderer.dispose()
+    expect(flow.disposed).toBe(1)
   })
 
   it('cancels the old mount when the same canvas attaches again', async () => {

@@ -12,8 +12,10 @@
 import { defaultPostParams, isPostKnob, POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostParams, PostStage } from '../post/params'
 import { isSceneId, SCENE_IDS } from '../scenes/catalog'
+import { FLOW_IDS, isFlowId } from './flow'
+import type { FlowId } from './flow'
 import { AUDIO_FIELDS, CURVES, FLUID_KNOBS, KALEIDOSCOPE_KNOBS } from './knobs'
-import type { AudioField, Curve } from './knobs'
+import type { AudioField, Curve, FluidKnob } from './knobs'
 import type { Mapping, Preset } from './types'
 
 const POST_STAGES: readonly PostStage[] = ['feedback', 'bloom', 'chromatic', 'tonemap', 'grain']
@@ -75,6 +77,27 @@ function readKnobs<K extends string>(
   for (const key of Object.keys(value))
     if (!(knobs as readonly string[]).includes(key))
       fail(source, `${path}.${key}`, `is not a knob of this scene; it has ${list(knobs)}`)
+  return out
+}
+
+/**
+ * The flow's knobs, and only the ones it moves. Unlike `sceneParams` this is
+ * a patch: the flow is not the scene the preset is written for, and what it
+ * leaves out falls back to the flow scene's own defaults.
+ */
+function readFlowParams(
+  value: unknown,
+  source: string,
+  path: string,
+): Partial<Record<FluidKnob, number>> {
+  if (!isRecord(value)) fail(source, path, `expected an object, got ${describe(value)}`)
+  const out: Partial<Record<FluidKnob, number>> = {}
+  for (const [key, raw] of Object.entries(value)) {
+    if (!(FLUID_KNOBS as readonly string[]).includes(key))
+      fail(source, `${path}.${key}`, `is not a knob of the fluid; it has ${list(FLUID_KNOBS)}`)
+    out[key as FluidKnob] = readNumber(raw, source, `${path}.${key}`)
+  }
+
   return out
 }
 
@@ -170,7 +193,29 @@ function readStage(
   }
 }
 
-const KEYS = ['id', 'name', 'scene', 'sceneParams', 'postParams', 'audioMapping']
+const KEYS = [
+  'id',
+  'name',
+  'scene',
+  'flow',
+  'flowParams',
+  'sceneParams',
+  'postParams',
+  'audioMapping',
+]
+
+/**
+ * The flow the preset asks for, if it asks for one. Absent is the common
+ * case and means the scene's own field, so `undefined` rather than a default
+ * is the answer; the key is left off the preset entirely so a round trip
+ * through the demo's copy button gives back the same file.
+ */
+function readFlow(value: unknown, source: string): FlowId | undefined {
+  if (value === undefined) return undefined
+  const flow = readString(value, source, 'flow')
+  if (!isFlowId(flow)) fail(source, 'flow', `is not a flow; they are ${list(FLOW_IDS)}`)
+  return flow
+}
 
 /** `source` names the file, so a failure says which preset is wrong. */
 export function parsePreset(value: unknown, source: string): Preset {
@@ -182,12 +227,23 @@ export function parsePreset(value: unknown, source: string): Preset {
   const scene = readString(value.scene, source, 'scene')
   if (!isSceneId(scene)) fail(source, 'scene', `is not a scene; they are ${list(SCENE_IDS)}`)
   const postParams = readPost(value.postParams, source, 'postParams')
+  const flow = readFlow(value.flow, source)
+  // Knobs for a flow nothing asked for would be silently ignored, which is
+  // exactly the kind of quiet mistake the rest of this file refuses.
+  if (value.flowParams !== undefined && !flow)
+    fail(source, 'flowParams', 'needs a flow; add "flow": "fluid"')
+  const flowParams =
+    value.flowParams === undefined
+      ? undefined
+      : readFlowParams(value.flowParams, source, 'flowParams')
 
   if (scene === 'kaleidoscope')
     return {
       id,
       name,
       scene,
+      ...(flow ? { flow } : {}),
+      ...(flowParams ? { flowParams } : {}),
       postParams,
       sceneParams: readKnobs(KALEIDOSCOPE_KNOBS, value.sceneParams, source, 'sceneParams'),
       audioMapping: readMapping(KALEIDOSCOPE_KNOBS, value.audioMapping, source, 'audioMapping'),
@@ -197,6 +253,8 @@ export function parsePreset(value: unknown, source: string): Preset {
     id,
     name,
     scene,
+    ...(flow ? { flow } : {}),
+    ...(flowParams ? { flowParams } : {}),
     sceneParams: readKnobs(FLUID_KNOBS, value.sceneParams, source, 'sceneParams'),
     postParams,
     audioMapping: readMapping(FLUID_KNOBS, value.audioMapping, source, 'audioMapping'),

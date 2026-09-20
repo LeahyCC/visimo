@@ -1,12 +1,14 @@
 /**
  * What a preset is. One JSON file holds a scene, the numbers that scene
- * starts from, the post stack it wants, and the table saying which feature
- * drives which number. Nothing here touches the GPU; `parse.ts` turns an
+ * starts from, the flow that carries the picture if the scene solves none,
+ * the post stack it wants, and the table saying which feature drives which
+ * number. Nothing here touches the GPU; `parse.ts` turns an
  * unknown JSON value into one of these and `resolve.ts` turns one plus a
  * feature packet into the numbers a frame is drawn from.
  */
 import type { PostKnob, PostParams } from '../post/params'
 import type { SceneId } from '../scenes/catalog'
+import type { FlowId } from './flow'
 import type { AudioField, Curve, FluidKnob, KaleidoscopeKnob } from './knobs'
 
 /**
@@ -31,6 +33,19 @@ type Shape<S extends SceneId, K extends string> = {
   /** What the picker shows, and what the debug overlay names. */
   name: string
   scene: S
+  /**
+   * A velocity field to carry the picture, when the scene solves none of its
+   * own. The renderer runs it beside the scene and the feedback pass reads
+   * the last frame back along it; absent, the scene's own flow is used, which
+   * for a scene that offers none is no carry at all.
+   */
+  flow?: FlowId
+  /**
+   * What that flow is tuned with, as a patch: the knobs it leaves out fall
+   * back to the flow scene's own defaults, so a preset need only say what it
+   * moves. Nothing maps onto these, since the mapping is the drawing scene's.
+   */
+  flowParams?: Readonly<Partial<Record<FluidKnob, number>>>
   /** The resting value of every knob the scene offers. */
   sceneParams: Readonly<Record<K, number>>
   /**

@@ -1,6 +1,7 @@
 /**
  * The one renderer. It owns the device, the feature buffer, whichever scene
- * is chosen with its state, and the post stack, and outlives every stage. A stage
+ * is chosen with its state, the flow a preset asks for when its scene solves
+ * none, and the post stack, and outlives every stage. A stage
  * hands it a canvas to draw on and takes it back on unmount; the popout
  * portals a fresh stage into another document, so the canvas and its context
  * are the only things made per mount.
@@ -16,6 +17,7 @@ import { Hud } from '../hud/Hud'
 import { defaultPostParams, mergePostParams, postSummary } from '../post/params'
 import type { PostParams, PostPatch } from '../post/params'
 import { PostStack, SCENE_FORMAT } from '../post/PostStack'
+import { needsFlowSolver } from '../presets/flow'
 import { DEFAULT_PRESET_ID, presetOrDefault } from '../presets/index'
 import type { Tuning } from '../presets/knobs'
 import { resolvePost, resolveScene } from '../presets/resolve'
@@ -32,6 +34,9 @@ import type { Gpu, GpuInfo } from './Device'
 
 export type AttachResult = 'ok' | 'unsupported' | 'cancelled'
 
+/** A flow whose preset names no knobs; the fluid falls back to its defaults. */
+const NO_TUNING: Tuning = {}
+
 const describe = (info: GpuInfo) =>
   [info.vendor, info.architecture, info.device, info.description].filter(Boolean).join(' ') ||
   'unknown adapter'
@@ -42,6 +47,13 @@ class Renderer {
   private readonly compatibilityMotion = new KaleidoscopeMotion()
   private unwatchContext: (() => void) | null = null
   private scene: Scene | null = null
+  /**
+   * The fluid a preset asks for when its scene solves no field of its own. It
+   * is never drawn: the renderer steps it before the scene renders and hands
+   * its velocity to the post stack in place of the scene's. A Fluid scene
+   * needs none, since it already offers the field it is solving.
+   */
+  private flowSolver: Fluid | null = null
   private post: PostStack | null = null
   private client: FeatureClient | null = null
   private canvas: HTMLCanvasElement | null = null
@@ -110,12 +122,18 @@ class Renderer {
       }
       this.post.useParams(this.live)
       if (!this.scene) this.buildScene()
+      // A kept scene comes back without one, so the flow is reconciled here
+      // as well as in `buildScene`; it is a no-op when nothing changed.
+      this.syncFlow()
       const context = configureCanvas(gpu, canvas)
       if (!context) return 'unsupported'
       this.context = context
       canvas.dataset.adapter = describe(gpu.info)
       canvas.dataset.backend = 'webgpu'
     } else {
+      // WebGL2 has no compute, so nothing can solve a flow there. A preset
+      // that asks for one still draws; its feedback is the zoom and turn.
+      this.releaseFlow()
       this.compatibility = new KaleidoscopeWebGL(canvas, this.compatibilityMotion)
       canvas.dataset.adapter = this.compatibility.adapter
       canvas.dataset.backend = 'webgl2'
@@ -181,6 +199,7 @@ class Renderer {
     if (this.canvas) this.detach(this.canvas)
     this.scene?.dispose()
     this.scene = null
+    this.releaseFlow()
     this.post?.dispose()
     this.post = null
     this.client?.dispose()
@@ -216,6 +235,10 @@ class Renderer {
   setPreset(preset: Preset) {
     this.preset = preset
     this.base = mergePostParams(preset.postParams, {})
+    // The stage sets the preset before the scene it names, so this runs
+    // twice on a change; building a flow is idempotent and the second call
+    // is the one that sees the pair the frame will actually draw with.
+    this.syncFlow()
   }
 
   get presetId() {
@@ -225,6 +248,8 @@ class Renderer {
   setFluidSize(size: number) {
     this.fluidSize = size
     if (this.scene instanceof Fluid) this.scene.setSize(size)
+    // A flow is a fluid on the same grid, so the one control moves both.
+    this.flowSolver?.setSize(size)
   }
 
   /** Swap the whole scene. The old one's buffers go with it. */
@@ -245,6 +270,9 @@ class Renderer {
     const gpu = this.gpu
     if (!gpu) return
     this.scene?.dispose()
+    // A new scene starts with no trail behind it, so the field that carries
+    // that trail starts still as well.
+    this.releaseFlow()
     this.post?.resetHistory()
     this.scene = this.build()
 
@@ -254,6 +282,7 @@ class Renderer {
       software: gpu.info.software,
     })
 
+    this.syncFlow()
     this.sizeScene()
   }
 
@@ -269,6 +298,33 @@ class Renderer {
     this.drawWidth = Math.max(1, Math.round(canvas.width * shrink))
     this.drawHeight = Math.max(1, Math.round(canvas.height * shrink))
     scene.resize(this.drawWidth, this.drawHeight)
+    // The flow is cropped to the same band the scene draws, since the post
+    // stack reads it through the canvas uv the scene wrote.
+    this.flowSolver?.resize(this.drawWidth, this.drawHeight)
+  }
+
+  /**
+   * Keep the separate flow in step with the preset and the scene. A fluid
+   * flow under the Fluid scene is the scene itself, and WebGL2 has no compute
+   * at all, so both leave the picture with whatever flow the scene offers.
+   */
+  private syncFlow() {
+    const gpu = this.gpu
+    if (!gpu || this.compatibility || !needsFlowSolver(this.preset.flow, this.sceneId)) {
+      this.releaseFlow()
+      return
+    }
+
+    if (this.flowSolver) return
+    const solver = new Fluid(this.fluidSize)
+    solver.init({ device: gpu.device, format: SCENE_FORMAT, software: gpu.info.software })
+    solver.resize(this.drawWidth, this.drawHeight)
+    this.flowSolver = solver
+  }
+
+  private releaseFlow() {
+    this.flowSolver?.dispose()
+    this.flowSolver = null
   }
 
   // Construction stays here so scenes share the device and post stack.
@@ -369,24 +425,39 @@ class Renderer {
       compatibility.render(this.packet, dt, tuning, this.live)
     } else if (gpu && context && scene && post) {
       scene.update(this.packet, dt, tuning)
+      const flow = this.flowSolver
+      // The flow is the preset's rather than the scene's, so it is tuned by
+      // the preset's own `flowParams` and not by the mapping, which speaks
+      // the drawing scene's knobs. What it leaves out falls back to the
+      // fluid's defaults.
+      if (flow) flow.update(this.packet, dt, preset.flowParams ?? NO_TUNING)
       const encoder = gpu.device.createCommandEncoder()
       // The scene draws into the stack's texture and the stack writes the
       // canvas. With every stage off the composite is a straight copy, so the
       // path is the same either way and the scene has one pipeline.
       const offscreen = post.target(this.drawWidth, this.drawHeight)
       if (!offscreen) return
+      // The flow is stirred before the scene draws, so the picture is carried
+      // along the field this frame solved rather than the last one's.
+      flow?.simulate(encoder)
       scene.render(encoder, offscreen)
-      // The flow is read after the scene has drawn, because the field it
-      // names is whichever half of a ping-pong pair this frame wrote.
-      post.render(encoder, context.getCurrentTexture().createView(), this.packet, scene.flow)
+      // It is read after both have run, because the field either names is
+      // whichever half of a ping-pong pair this frame wrote.
+      post.render(
+        encoder,
+        context.getCurrentTexture().createView(),
+        this.packet,
+        flow?.flow ?? scene.flow,
+      )
       gpu.device.queue.submit([encoder.finish()])
     }
 
+    const detail = this.detailOf(compatibility?.detail ?? scene?.detail ?? '')
     this.hud?.record(this.packet)
     this.hud?.draw(this.packet, {
       fps: 1000 / this.frameMs,
       frameMs: this.frameMs,
-      scene: compatibility?.detail ?? scene?.detail ?? '',
+      scene: detail,
       adapter: compatibility?.adapter ?? (gpu ? describe(gpu.info) : ''),
       post: postSummary(this.live),
       preset: preset.name,
@@ -396,10 +467,20 @@ class Renderer {
       this.reported = now
       canvas.dataset.frameMs = this.frameMs.toFixed(1)
       canvas.dataset.scene = this.sceneId
-      canvas.dataset.detail = compatibility?.detail ?? scene?.detail ?? ''
+      canvas.dataset.detail = detail
       canvas.dataset.post = postSummary(this.live)
       canvas.dataset.preset = preset.id
     }
+  }
+
+  /**
+   * What the scene is doing, plus the flow under it when the preset asked for
+   * one. `data-detail` is public API, so a preset with no flow reads exactly
+   * as it always did.
+   */
+  private detailOf(scene: string) {
+    const flow = this.flowSolver
+    return flow ? `${scene} + ${flow.simSize} flow` : scene
   }
 
   // The browser took the device away. Drop everything that depended on it
@@ -412,6 +493,7 @@ class Renderer {
     if (canvas) this.detach(canvas)
     this.scene?.dispose()
     this.scene = null
+    this.releaseFlow()
     this.post?.dispose()
     this.post = null
     this.client?.dispose()

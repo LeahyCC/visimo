@@ -85,14 +85,14 @@ Both canvases are `position: absolute; inset: 0`, so **give them a positioned pa
 
 The scene canvas carries, on attach and then throttled to 500 ms:
 
-| Attribute       | What it says                                  |
-| --------------- | --------------------------------------------- |
-| `data-adapter`  | the adapter, as its info describes it         |
-| `data-frame-ms` | the frame time                                |
-| `data-scene`    | the scene id drawing                          |
-| `data-detail`   | what that scene is doing, such as `512 fluid` |
-| `data-post`     | the post stages running, or `off`             |
-| `data-preset`   | the preset id                                 |
+| Attribute       | What it says                                                                                   |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `data-adapter`  | the adapter, as its info describes it                                                          |
+| `data-frame-ms` | the frame time                                                                                 |
+| `data-scene`    | the scene id drawing                                                                           |
+| `data-detail`   | what that scene is doing, such as `512 fluid`, and the flow under it if a preset asked for one |
+| `data-post`     | the post stages running, or `off`                                                              |
+| `data-preset`   | the preset id                                                                                  |
 
 They exist for tests and screenshots and Musimo's e2e suite asserts on all six. Breaking one breaks a consumer silently, so treat them as the interface they are. Kaleidoscope's `data-detail` includes its internal render dimensions, allowing a canvas/scene size mismatch to be diagnosed.
 
@@ -109,7 +109,7 @@ Vite is pinned to `http://127.0.0.1:5174/` with `strictPort: true`; it fails if 
 
 If graphics cannot start, **Retry graphics** mounts a fresh stage while retaining the audio element and its track. After failed WebGPU recovery, the stage replaces its scene canvas once so WebGL2 can acquire a fresh context. A canvas previously used for WebGPU cannot switch context type in place. The console logs unavailable APIs and initialization failures.
 
-Every control is generated from the lists the package keeps: the scene knobs from `SCENE_KNOBS`, the post knobs from `POST_LANES`, the mapping vocabulary from `AUDIO_FIELDS` and `CURVES`. Add a knob to the package and it appears here with nothing to change, though a knob whose range is not obvious wants a row in `RANGES` in `demo/controls.tsx`. **copy preset** puts the whole thing on the clipboard as JSON that `parsePreset` accepts; drop it into `src/presets/` and add it to the list in `src/presets/index.ts`. **reset** puts every number back to what the preset file holds, and is greyed out until something is touched, so it also answers whether the panel has drifted from the file. H toggles the HUD. F opens full view and Esc returns. Choosing a preset selects its scene; choosing a scene selects its first preset. The grid control appears only for Fluid.
+Every control is generated from the lists the package keeps: the scene knobs from `SCENE_KNOBS`, the post knobs from `POST_LANES`, the mapping vocabulary from `AUDIO_FIELDS` and `CURVES`. Add a knob to the package and it appears here with nothing to change, though a knob whose range is not obvious wants a row in `RANGES` in `demo/controls.tsx`. **copy preset** puts the whole thing on the clipboard as JSON that `parsePreset` accepts; drop it into `src/presets/` and add it to the list in `src/presets/index.ts`. **reset** puts every number back to what the preset file holds, and is greyed out until something is touched, so it also answers whether the panel has drifted from the file. H toggles the HUD. F opens full view and Esc returns. Choosing a preset selects its scene; choosing a scene selects its first preset. The grid control appears for Fluid and for a preset that asks for a fluid flow, since both draw on the same grid.
 
 What updates without a reload, measured by editing each file while the demo ran:
 
@@ -213,6 +213,7 @@ GPUDevice, CPU feature packet             canvas elements (scene + HUD)
 pipelines, the fluid's field textures      GPUCanvasContext, configure()
 the post stack and its parameters          ResizeObserver, visibility hook
 the preset and its resolved numbers        requestAnimationFrame handle
+the flow that preset asks for, if any
 the feature worker and its client
 frame clock, HUD history
 ```
@@ -221,13 +222,17 @@ The post stack's offscreen textures belong to neither column: the singleton owns
 
 `attach` configures the context, sizes the canvas to its CSS box times `devicePixelRatio`, and starts a loop on the canvas's own window, so a popped-out window keeps drawing while the tab behind it is hidden. On device loss the renderer drops the scene, post stack and feature client, then reattaches the same canvas through the bounded acquisition retries. Startup, recovery and frame errors are logged and reach the fallback. A failed frame cancels the next animation callback instead of submitting repeatedly. `VisualizerStage` ignores inactive callbacks and replaces its scene canvas once after failed recovery, allowing a different graphics backend. If graphics remain unavailable, Retry graphics retains audio playback.
 
-Each frame: read the analyser through the feature client, stamp time and dt into the CPU packet, resolve the preset's mapping into the scene's numbers and the stack's, run the scene's passes into the stack's texture, run the stack onto the canvas, then draw the HUD if it is on. Each scene uploads its own resolved parameters. Nothing per frame touches React.
+Each frame: read the analyser through the feature client, stamp time and dt into the CPU packet, resolve the preset's mapping into the scene's numbers and the stack's, step the preset's flow if it asked for one, run the scene's passes into the stack's texture, run the stack onto the canvas, then draw the HUD if it is on. Each scene uploads its own resolved parameters. Nothing per frame touches React.
+
+A preset may name a `flow`, which is the field the stack carries the last frame along when its scene solves none of its own. The renderer then owns a second `Fluid` beside the scene: it is initialised with the scene, updated from the same packet with the preset's `flowParams`, stepped into the same command encoder before the scene draws, and its velocity goes to the stack in place of the scene's. It is never drawn, and it goes with the scene, the preset that asked for it, device loss and disposal. `needsFlowSolver` in `presets/flow.ts` is the whole decision: a fluid flow under the Fluid scene is the scene itself, so nothing extra runs, and WebGL2 has no compute to run it with. `data-detail` then names it after the scene, as `5-band 3D kaleidoscope / 960x800 + 512 flow`.
 
 ### Scenes
 
 Fluid and Kaleidoscope share the `Scene` interface in `src/scenes/Scene.ts`: `init`, `resize`, `update`, `render`, `dispose`, and a `detail` line naming what it is doing. Switching disposes the old scene, discards its feedback history and builds the new one on the same device. The audio worker and post stack carry on.
 
 A scene may also offer a `flow`: the velocity field it is solving, as a texture view plus the `cover` that maps canvas uv to that field's own uv. The feedback pass reads the last frame back along it, which is `feedback.carry` under Post stack below. Fluid offers its velocity field and Kaleidoscope offers nothing, so the property is optional and the stack binds one zero texel in its place. It is read after `render` and never held, because the field a scene names is whichever half of a ping-pong pair that frame wrote.
+
+A scene that offers nothing can still be carried, because a preset may ask for a flow of its own; see Presets below. Fluid splits its solve from its drawing for that: `simulate` steps the field and `render` is that step plus the dye drawn, so the renderer can keep a second Fluid beside another scene and only ever step it. Nothing about the Fluid scene changes, since it is the same call in the same order.
 
 No scene decides what drives what. `update` takes the packet and a set of already resolved numbers, and every magnitude comes from the second of those; the packet is read for the clock and for events such as an onset. Per-band levels and hits are the exception. Fluid's voices and Kaleidoscope's band envelopes read them straight from the packet, so a preset scales them with a knob such as `bandReaction` and cannot remap them.
 
@@ -261,7 +266,7 @@ advect velocity ─► diffuse xN ─► curl ─► vorticity and injection ─
 
 Velocity is kept in grid widths per second, so a semi-Lagrangian backtrace is `uv - velocity * dt` with nothing scaling in between. The pressure solve is 24 Jacobi sweeps warm-started from last frame's solution faded to 0.8, which converges far better in that many sweeps than starting from nothing. The viscosity solve is two sweeps with the alpha set directly rather than derived from a physical viscosity, because what is wanted is a knob. Walls are free slip. Vorticity confinement pushes each eddy back toward its own centre, which keeps small detail alive against the smearing advection adds.
 
-Every field is `rgba16float`, including the three carrying one number. `r32float` would halve the memory but is not filterable, so each would need its own bind group layout; one format means one explicit layout and any three fields can go to any step. Curl is read before divergence is written, so both live in one scratch field. Seven textures in all: velocity, dye and pressure ping-ponging, and the scratch. 14 MB at 512, 56 MB at 1024.
+Every field is `rgba16float`, including the three carrying one number. `r32float` would halve the memory but is not filterable, so each would need its own bind group layout; one format means one explicit layout and any three fields can go to any step. Curl is read before divergence is written, so both live in one scratch field. Seven textures in all: velocity, dye and pressure ping-ponging, and the scratch. 14 MB at 512, 56 MB at 1024. A preset that asks for a fluid flow under another scene pays that a second time, since the flow is another fluid with a grid of its own; Melt at 512 is 14 MB on top of what Kaleidoscope and the stack hold.
 
 The grid is fixed at 512 or 1024, so nothing is rebuilt on a resize. It covers the canvas and the overflow is cropped, which keeps the scale the same on both axes so a round splat stays round; `visibleExtent` reports the band the canvas shows and the emitters are placed inside it. A software rasteriser gets 512 whatever was chosen, with 8 pressure sweeps and one viscosity sweep.
 
@@ -344,7 +349,21 @@ One JSON file under `src/presets/`, and it is the whole of what the stage draws 
 }
 ```
 
-`sceneParams` gives every knob that scene offers a resting value; all of them are required, because a preset is a whole state and not a patch over whatever the last one left. `postParams` is a patch over the stack's defaults, so a preset that only moves the bloom says only that. `audioMapping` is what makes it move:
+`sceneParams` gives every knob that scene offers a resting value; all of them are required, because a preset is a whole state and not a patch over whatever the last one left. `postParams` is a patch over the stack's defaults, so a preset that only moves the bloom says only that.
+
+Two more keys are optional, and only Melt uses them:
+
+```json
+{
+  "scene": "kaleidoscope",
+  "flow": "fluid",
+  "flowParams": { "vorticity": 16, "force": 0.4 }
+}
+```
+
+`flow` names the field the feedback pass carries the last frame along when the scene solves none: `fluid` is the only one, and the renderer runs a second fluid for it, as The renderer above describes. `flowParams` is a patch over the fluid's own defaults rather than a whole state, since the flow is not the scene the preset is written for; naming it with no `flow` is an error, as is a knob the fluid does not have. Nothing in `audioMapping` reaches it, because the mapping speaks the drawing scene's knobs; the music still moves the flow, through the emitters and events the fluid drives from the packet itself. A preset whose scene is `fluid` needs neither, since that scene already offers the field it is solving.
+
+`audioMapping` is what makes it move:
 
 ```
 value = sceneParams[to] + Σ gain × curve(feature[from])
@@ -354,12 +373,13 @@ value = sceneParams[to] + Σ gain × curve(feature[from])
 
 All of it is resolved on the CPU, once a frame, in `presets/resolve.ts`, and nowhere else. That is why a preset can send treble to a knob that used to take bass without a line of WGSL changing. Both resolvers write into an object the renderer owns and keeps, since this runs every animation frame.
 
-| Preset | Scene        | What it does differently                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Plume  | Fluid        | The default, and the one the language below describes. Five emitters well split by voice, the key colouring all of them, bass deciding what an onset is worth and treble the vorticity, and the song's own pace, swell and weight moving the resting numbers.                                                                                                                                                                                                                     |
-| Wash   | Fluid        | The opposite way round, with thinner viscosity, wider spread, a slower orbit and the voices half blended, so the plumes stay separate instead of growing into each other. It takes the key's colour and nothing else of the song's shape, and it went almost black through the loudest drop until energy fed the dye as well as its decay.                                                                                                                                        |
-| Drift  | Fluid        | Plume with the trail turned up and carried by the fluid itself: the last frame is read back along the velocity field, so the echo swirls with the dye rather than zooming out of the middle. The zoom and the turn are off, the dye and the intensity are pulled down against the longer sum, energy lengthens the trail through `feedback.decay`, a floor of 0.018 holds the background near black against the fluid's own base colour, and a ceiling of 1.8 keeps it off white. |
-| Prism  | Kaleidoscope | The raymarched fractal, and what the demo opens on. Each band owns a recursion scale, the key moves the palette, and pace, swell and harmony move the slower numbers. Bloom and tonemap only; feedback, grain and chromatic splitting are off.                                                                                                                                                                                                                                    |
+| Preset | Scene        | What it does differently                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Plume  | Fluid        | The default, and the one the language below describes. Five emitters well split by voice, the key colouring all of them, bass deciding what an onset is worth and treble the vorticity, and the song's own pace, swell and weight moving the resting numbers.                                                                                                                                                                                                                                                                                                                                                                           |
+| Wash   | Fluid        | The opposite way round, with thinner viscosity, wider spread, a slower orbit and the voices half blended, so the plumes stay separate instead of growing into each other. It takes the key's colour and nothing else of the song's shape, and it went almost black through the loudest drop until energy fed the dye as well as its decay.                                                                                                                                                                                                                                                                                              |
+| Drift  | Fluid        | Plume with the trail turned up and carried by the fluid itself: the last frame is read back along the velocity field, so the echo swirls with the dye rather than zooming out of the middle. The zoom and the turn are off, the dye and the intensity are pulled down against the longer sum, energy lengthens the trail through `feedback.decay`, a floor of 0.018 holds the background near black against the fluid's own base colour, and a ceiling of 1.8 keeps it off white.                                                                                                                                                       |
+| Prism  | Kaleidoscope | The raymarched fractal, and what the demo opens on. Each band owns a recursion scale, the key moves the palette, and pace, swell and harmony move the slower numbers. Bloom and tonemap only; feedback, grain and chromatic splitting are off.                                                                                                                                                                                                                                                                                                                                                                                          |
+| Melt   | Kaleidoscope | Prism carried by a fluid the music pushes: the scene solves no field, so the preset asks for one and the renderer runs a fluid under it that is stepped and never drawn. The trail is long (a gain of 0.972, about two seconds), the carry is 1 so every part of the screen bends its own way, a ceiling of 0.4 is what the filled areas settle at, a floor of 0.0012 takes the trail the rest of the way to black, and the scene's intensity is 0.5 against Prism's 1 so fresh light and carried light together do not wash out. Under WebGL2 there is no compute and so no flow; it draws as Prism with the same trail sitting still. |
 
 ### What means what
 

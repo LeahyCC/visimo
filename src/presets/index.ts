@@ -8,6 +8,7 @@
  * for the picker without pulling the visualizer into the main bundle.
  */
 import drift from './drift.json'
+import melt from './melt.json'
 import { parsePreset } from './parse'
 import plume from './plume.json'
 import prism from './prism.json'
@@ -20,6 +21,7 @@ export const PRESETS: readonly Preset[] = [
   parsePreset(wash, 'presets/wash.json'),
   parsePreset(drift, 'presets/drift.json'),
   parsePreset(prism, 'presets/prism.json'),
+  parsePreset(melt, 'presets/melt.json'),
 ]
 
 /** The fluid as PR #58 tuned it, which is what the stage shows by default. */

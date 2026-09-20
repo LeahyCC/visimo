@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { defaultPostParams } from '../post/params'
+import { PRESETS } from './index'
 import { AUDIO_FIELDS } from './knobs'
 import { bend, feature, resolvePost, resolveScene } from './resolve'
 import type { Mapping } from './types'
@@ -109,6 +110,16 @@ describe('resolveScene', () => {
     ]
     const out = resolveScene({ vorticity: 1 }, mapping, packet({ energy: 1 }), {})
     expect(out).toEqual({ vorticity: 1 })
+  })
+
+  // The flow a preset asks for is tuned by `flowParams` and the mapping
+  // speaks the drawing scene's knobs, so the resolver never sees either.
+  it('resolves a preset with a flow into the drawing scene’s knobs alone', () => {
+    const preset = PRESETS.find((entry) => entry.flow !== undefined)
+    if (!preset) throw new Error('Expected a preset with a flow')
+    const out = resolveScene(preset.sceneParams, preset.audioMapping, packet({ energy: 1 }), {})
+    expect(Object.keys(out).sort()).toEqual(Object.keys(preset.sceneParams).sort())
+    expect(Object.keys(out)).not.toContain('vorticity')
   })
 
   it('rewrites the object it is given rather than keeping last frame', () => {

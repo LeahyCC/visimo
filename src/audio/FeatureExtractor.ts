@@ -332,10 +332,12 @@ const PACE_SECONDS = 30
 // struck sound however many bands it trips, so this is a rate of sounds and
 // not of detector firings: four to the floor at 128 BPM settles at 2.1 and a
 // two-step at 174 at 2.9, since a hat under a kick or a pad is worth little.
-// The 12 predates that. It was read off a count that ran two or three times
-// the true rate at a 120 Hz display, and has not been re-measured on real
-// tracks.
-const PACE_FULL = 12
+// Full is 4 a second, which puts 80 BPM near a third, 128 near a half and
+// drum and bass near three quarters. It was 12 while the count ran two or
+// three times the true rate, and left at 12 every track would sit in the
+// bottom quarter of the range with nothing to tell them apart. Not yet
+// re-measured on real tracks.
+const PACE_FULL = 4
 const SWELL_SHORT_MS = 2000
 const SWELL_LONG_MS = 30000
 // A passage this many dB above its half-minute average reads as a full drop,

@@ -483,7 +483,7 @@ describe('the song rather than the frame', () => {
     const busy = clicks(10, 60)[F.pace] ?? 0
     const sparse = clicks(60, 60)[F.pace] ?? 0
     expect(busy).toBeGreaterThan(0.4)
-    expect(sparse).toBeLessThan(0.15)
+    expect(sparse).toBeLessThan(0.3)
     expect(busy).toBeGreaterThan(sparse * 3)
   })
 
@@ -536,13 +536,13 @@ describe('the song rather than the frame', () => {
   // over more frames and read busier for it.
   it('counts one struck sound once however its onsets are spread over frames', () => {
     // Two hits a second for twenty seconds, a decayed count over half a minute
-    // and 12 a second for full.
-    const expected = (2 * (1 - Math.exp(-20 / 30))) / 12
+    // and 4 a second for full.
+    const expected = (2 * (1 - Math.exp(-20 / 30))) / 4
     for (const fps of [30, 60, 120, 144]) {
       const alone = paceOf(fps, 20, 2, [0])
       const spread = paceOf(fps, 20, 2, [0, 0.02, 0.07])
-      expect(Math.abs(alone - expected)).toBeLessThan(0.006)
-      expect(Math.abs(spread - alone)).toBeLessThan(0.006)
+      expect(Math.abs(alone - expected)).toBeLessThan(0.018)
+      expect(Math.abs(spread - alone)).toBeLessThan(0.018)
     }
   })
 
@@ -552,8 +552,8 @@ describe('the song rather than the frame', () => {
   it('counts a hit for how far it stands above what is under it', () => {
     const clear = paceOf(60, 20, 2, [0])
     const buried = paceOf(60, 20, 0.03, [0])
-    expect(clear).toBeGreaterThan(0.07)
-    expect(buried).toBeLessThan(0.01)
+    expect(clear).toBeGreaterThan(0.21)
+    expect(buried).toBeLessThan(0.03)
   })
 
   it('holds swell at the middle while the music holds steady', () => {

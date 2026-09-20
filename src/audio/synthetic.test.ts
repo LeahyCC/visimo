@@ -296,9 +296,9 @@ describe('pace on whole tracks', () => {
 
   // A kick every 0.4 seconds at 150 BPM, and nothing else the detectors hear
   // over it: the count is of hits, so 2.5 a second over 25 seconds of a
-  // half-minute decay, at 12 a second for full.
+  // half-minute decay, at 4 a second for full.
   it('counts a hardstyle kick once, at any frame rate', () => {
-    const expected = (2.5 * (1 - Math.exp(-seconds / 30))) / 12
+    const expected = (2.5 * (1 - Math.exp(-seconds / 30))) / 4
     for (const rate of RATES)
       expect(Math.abs(heard(tracks.hardstyle, rate) - expected)).toBeLessThan(0.015)
   }, 180000)

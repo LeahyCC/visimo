@@ -881,6 +881,34 @@ describe('the study bench', () => {
     expect(impls.drawn).toEqual(['fractal'])
   })
 
+  // What the director read in the bench was the sliders and not a song. Left
+  // standing it would choose for that character, fully settled, under Auto.
+  it('starts the director again when the bench is left', async () => {
+    const { draw } = await start()
+    audio.attached = true
+    const sliders = new Float32Array(PACKET_LENGTH)
+    renderer.setBench({
+      live: live('lazy-fluid', 'ribbon', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.energy] = 0.8
+        packet[F.hardness] = 1
+      },
+    })
+    audio.packet = sliders
+    let now = 0
+    for (let frame = 0; frame < 60 * 45; frame += 1) {
+      now += 1000 / 60
+      draw(now)
+    }
+
+    expect(renderer.settled).toBe(1)
+    expect(renderer.character.hardness).toBeGreaterThan(0.8)
+    renderer.setBench(null)
+    draw(now + 17)
+    expect(renderer.settled).toBe(0)
+    expect(renderer.character.hardness).toBeLessThan(0.6)
+  })
+
   it('hands the frame hook the packet and the real dt before anything reads it', async () => {
     const { draw } = await start()
     const seen: { dt: number; time: number }[] = []

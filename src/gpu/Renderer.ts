@@ -459,9 +459,15 @@ class Renderer {
    * reading follows the bench's sliders. A new cast empties the canvas the way
    * a change of pinned cast does, so a study is judged on its own picture and
    * not on the last one's trails; the same cast handed again is left alone.
+   *
+   * Leaving the bench starts the director again, as a new track does. What it
+   * read in there was the sliders and a synthetic beat, not a song, and left
+   * standing it would go on choosing for a character no track ever had, fully
+   * settled, until the half minute smoothers drifted back.
    */
   setBench(bench: Bench | null) {
     const changed = bench !== null && bench.live !== this.bench?.live
+    if (this.bench && !bench) this.newTrack()
     this.bench = bench
     if (!bench || !changed) return
     this.setLive(bench.live)

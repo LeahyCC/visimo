@@ -112,7 +112,7 @@ describe('FeatureExtractor', () => {
   const make = (fftSize = FFT_SIZE) => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize })
 
   it('has the documented packet length and indices', () => {
-    expect(PACKET_LENGTH).toBe(46)
+    expect(PACKET_LENGTH).toBe(47)
     expect(F.treble).toBe(4)
     expect(F.tempoBpm).toBe(21)
     expect(F.dt).toBe(23)
@@ -124,6 +124,7 @@ describe('FeatureExtractor', () => {
     // Rows are only ever added at the end, because the indices are public.
     expect(F.tempoConfidence).toBe(44)
     expect(F.beatPhase).toBe(45)
+    expect(F.hardness).toBe(46)
     expect(make().packet).toHaveLength(PACKET_LENGTH)
   })
 
@@ -180,6 +181,9 @@ describe('FeatureExtractor', () => {
     expect(packet[F.tempo]).toBe(0)
     expect(packet[F.swell]).toBe(0.5)
     expect(packet[F.weight]).toBe(0.5)
+    // Hardness rests in the middle too: a track nothing has been heard of is
+    // not a soft one.
+    expect(packet[F.hardness]).toBe(0.5)
     expect(packet[F.tempoConfidence]).toBe(0)
     expect(packet[F.beatPhase]).toBe(0)
     expect(packet[F.time]).toBeCloseTo(5, 1)

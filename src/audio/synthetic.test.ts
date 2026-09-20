@@ -1,18 +1,33 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, FeatureExtractor } from './FeatureExtractor'
-import { analyse, breakdown, fft, fourOnTheFloor, synthesize, twoStep } from './synthetic'
-import type { Section } from './synthetic'
+import {
+  analyse,
+  atLevel,
+  breakdown,
+  fft,
+  fourOnTheFloor,
+  kit,
+  padOnly,
+  steadyHits,
+  synthesize,
+  twoStep,
+} from './synthetic'
+import type { Pattern, Section } from './synthetic'
 
 const SAMPLE_RATE = 48000
 const FFT_SIZE = 4096
 
-/** Play sections through the extractor at a frame rate; one packet copy a frame. */
-function play(sections: readonly Section[], frameRate: number) {
-  const samples = synthesize(sections, SAMPLE_RATE)
+/** Play samples through the extractor at a frame rate; one packet copy a frame. */
+function run(samples: Float32Array, frameRate: number) {
   const frames = analyse(samples, { sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, frameRate })
   const extractor = new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
   return frames.map((frame) => extractor.update(frame, 1 / frameRate).slice())
+}
+
+/** Play sections through the extractor at a frame rate. */
+function play(sections: readonly Section[], frameRate: number) {
+  return run(synthesize(sections, SAMPLE_RATE), frameRate)
 }
 
 /** The packet nearest to `seconds` in, allowing for the analyser's window. */
@@ -161,4 +176,142 @@ describe('the song on synthesised music', () => {
   it('reads a bass-heavy mix as weighty', () => {
     expect(at(packets, 19, frameRate)[F.weight] ?? 0).toBeGreaterThan(0.8)
   })
+})
+
+describe('hardness on synthesised hits', () => {
+  // The pair the measure is tuned on: the same register struck as hard and as
+  // softly as a signal can be, on the same grid and held to the same RMS. The
+  // level is well clear of the quiet floor so that 20 dB down is too.
+  const seconds = 20
+  const LOUD = 0.5
+  const hard = synthesize([{ pattern: steadyHits(128, 'hardKick'), seconds }], SAMPLE_RATE)
+  const soft = synthesize([{ pattern: steadyHits(128, 'pulse'), seconds }], SAMPLE_RATE)
+  const last = (packets: Float32Array[]) => packets[packets.length - 1]?.[F.hardness] ?? 0
+  const heard = (samples: Float32Array, gain: number, frameRate = 60) =>
+    last(run(atLevel(samples, gain), frameRate))
+
+  it('reads a clipped kick well above a soft pulse at the same rate and loudness', () => {
+    const clipped = heard(hard, LOUD)
+    const pulses = heard(soft, LOUD)
+    expect(clipped).toBeGreaterThan(0.8)
+    expect(pulses).toBeLessThan(0.2)
+    expect(clipped - pulses).toBeGreaterThan(0.6)
+  }, 60000)
+
+  // Both halves of the measure are ratios of a signal to itself: a window
+  // against its own peak, and the spectrum's mean against its mean square. So
+  // the only thing 20 dB could take away is the onsets, and those are read
+  // off log magnitudes for the same reason.
+  it('keeps the ordering and the values 20 dB down', () => {
+    const quiet = LOUD / 10
+    expect(heard(hard, quiet)).toBeGreaterThan(0.8)
+    expect(heard(soft, quiet)).toBeLessThan(0.2)
+    expect(Math.abs(heard(hard, quiet) - heard(hard, LOUD))).toBeLessThan(0.07)
+    expect(Math.abs(heard(soft, quiet) - heard(soft, LOUD))).toBeLessThan(0.07)
+  }, 60000)
+
+  // The share is of time and not of frames, and the window is a span of time,
+  // so a display twice as fast sees the same hit the same way.
+  it('reads the same at 60 and at 144 frames a second', () => {
+    expect(Math.abs(heard(hard, LOUD, 144) - heard(hard, LOUD, 60))).toBeLessThan(0.07)
+    expect(Math.abs(heard(soft, LOUD, 144) - heard(soft, LOUD, 60))).toBeLessThan(0.07)
+  }, 60000)
+
+  it('reads a sustained pad with nothing struck in it as soft', () => {
+    const pad = synthesize([{ pattern: padOnly(128, 0.5), seconds }], SAMPLE_RATE)
+    expect(heard(pad, LOUD)).toBeLessThan(0.2)
+  }, 60000)
+
+  it('holds its value through silence', () => {
+    const packets = run(
+      atLevel(
+        synthesize(
+          [
+            { pattern: steadyHits(128, 'hardKick'), seconds },
+            { pattern: padOnly(128, 0), seconds: 6 },
+          ],
+          SAMPLE_RATE,
+        ),
+        LOUD,
+      ),
+      60,
+    )
+    const playing = packets[Math.round(19 * 60)]?.[F.hardness] ?? 0
+    expect(playing).toBeGreaterThan(0.8)
+    // Six seconds of nothing, a third of the window the mean is kept over,
+    // and it has not moved: silence steps neither half of the ratio.
+    expect(Math.abs(last(packets) - playing)).toBeLessThan(0.02)
+  }, 60000)
+
+  it('moves slowly enough that one odd hit barely shifts it', () => {
+    const packets = run(
+      atLevel(
+        synthesize(
+          [
+            { pattern: steadyHits(128, 'pulse'), seconds },
+            // One beat of it, so exactly one clipped kick lands.
+            { pattern: steadyHits(128, 'hardKick'), seconds: 60 / 128 },
+            { pattern: steadyHits(128, 'pulse'), seconds: 4 },
+          ],
+          SAMPLE_RATE,
+        ),
+        LOUD,
+      ),
+      60,
+    )
+    const before = packets[Math.round(19.5 * 60)]?.[F.hardness] ?? 0
+    const after = packets[Math.round(22 * 60)]?.[F.hardness] ?? 0
+    expect(before).toBeLessThan(0.2)
+    expect(after).toBeGreaterThan(before)
+    expect(after - before).toBeLessThan(0.1)
+  }, 60000)
+})
+
+describe('hardness on whole tracks', () => {
+  // Three tracks that differ only in the voice on the beat, the weight of the
+  // hats and the pad under them. This is the case the feature exists for, and
+  // the case a hit measured against the mix rather than against its own bed
+  // got wrong: with a loud pad under it every frame sat within a tenth of the
+  // window's peak, so lo-fi read above house.
+  const seconds = 25
+  const LOUD = 0.5
+  const heard = (pattern: Pattern, frameRate: number) =>
+    run(atLevel(synthesize([{ pattern, seconds }], SAMPLE_RATE), LOUD), frameRate).at(-1)?.[
+      F.hardness
+    ] ?? 0
+  const tracks = {
+    hardstyle: kit(150, 'hardKick', 0.3),
+    house: kit(124, 'kick', 0.3, 0.2),
+    lofi: kit(80, 'pulse', 0.1, 0.6),
+  }
+
+  it('puts hardstyle above house above lo-fi', () => {
+    const hardstyle = heard(tracks.hardstyle, 60)
+    const house = heard(tracks.house, 60)
+    const lofi = heard(tracks.lofi, 60)
+    expect(hardstyle - house).toBeGreaterThan(0.15)
+    expect(house - lofi).toBeGreaterThan(0.15)
+    // Lo-fi is a soft track, not a middling one. The pad it is built on is
+    // the loudest thing in it and must not be mistaken for a held hit.
+    expect(lofi).toBeLessThan(0.35)
+  }, 120000)
+
+  it('reads each of the three the same at 60 and at 144 frames a second', () => {
+    for (const pattern of Object.values(tracks))
+      expect(Math.abs(heard(pattern, 144) - heard(pattern, 60))).toBeLessThan(0.05)
+  }, 180000)
+
+  // The guard on a hit that barely moves the mix. A rise a hundredth of what
+  // is sounding is mostly noise, and scoring its shape read the same clipped
+  // kick anywhere from soft to hard depending on the frame rate.
+  it('reads a hit drowned under a pad as soft rather than on the shape of its rise', () => {
+    const drowned: Pattern = {
+      bpm: 100,
+      beats: 4,
+      hits: [0, 1, 2, 3].map((beat) => ({ drum: 'hardKick' as const, at: beat, gain: 0.25 })),
+      pad: 6,
+    }
+    expect(heard(drowned, 60)).toBeLessThan(0.2)
+    expect(Math.abs(heard(drowned, 144) - heard(drowned, 60))).toBeLessThan(0.05)
+  }, 120000)
 })

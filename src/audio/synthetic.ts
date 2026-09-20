@@ -11,9 +11,13 @@
  * summed into samples, and read back through a Blackman window and an FFT
  * scaled the way Chromium scales the analyser's, dB per bin and -Infinity
  * for nothing. What comes out is what `getFloatFrequencyData` would fill.
+ *
+ * Two more voices were added for `hardness`, a clipped kick and a soft pulse,
+ * for the same reason: a synthetic step says nothing about how a hit arrives,
+ * and how a hit arrives is the whole of what that feature measures.
  */
 
-export type Drum = 'kick' | 'snare' | 'hat' | 'bass'
+export type Drum = 'kick' | 'hardKick' | 'snare' | 'hat' | 'bass' | 'pulse'
 
 /** One hit on the grid: which drum, which beat of the bar, how loud. */
 export type Hit = {
@@ -45,16 +49,31 @@ export function noise(seed: number) {
   }
 }
 
+/** How long each voice runs, in seconds. */
+const VOICE_SECONDS: Record<Drum, number> = {
+  kick: 0.35,
+  hardKick: 0.35,
+  snare: 0.25,
+  hat: 0.06,
+  bass: 0.6,
+  pulse: 0.5,
+}
+
 /**
- * Four voices, each rendered into a buffer once and mixed in wherever the
+ * Six voices, each rendered into a buffer once and mixed in wherever the
  * grid asks for it. A kick is a sine sweeping down from 150 Hz to 50 with a
  * click on the front; a snare is a burst of noise with a 180 Hz body; a hat
  * is a short burst of differenced noise, which leans it toward the top of
  * the spectrum; a bass note is a 55 Hz tone with a soft attack and a long
  * tail, so it reads as a note rather than a hit.
+ *
+ * `hardKick` and `pulse` are the two ends of `hardness`, and they are a pair:
+ * the same low register struck as hard and as softly as a signal can be, so
+ * that a test can hold the rate and the loudness fixed and change only how
+ * the hit arrives.
  */
 function voice(drum: Drum, sampleRate: number, random: () => number): Float32Array {
-  const seconds = drum === 'kick' ? 0.35 : drum === 'snare' ? 0.25 : drum === 'hat' ? 0.06 : 0.6
+  const seconds = VOICE_SECONDS[drum]
   const length = Math.round(seconds * sampleRate)
   const out = new Float32Array(length)
   let phase = 0
@@ -67,6 +86,21 @@ function voice(drum: Drum, sampleRate: number, random: () => number): Float32Arr
       phase += (2 * Math.PI * hz) / sampleRate
       sample = Math.sin(phase) * Math.exp(-t / 0.12)
       if (t < 0.003) sample += random() * 0.8
+    } else if (drum === 'hardKick') {
+      const hz = 50 + 100 * Math.exp(-t / 0.03)
+      phase += (2 * Math.PI * hz) / sampleRate
+      // The same kick driven into a clipper, which is what makes a hardstyle
+      // kick one: while the envelope is above the clip point the sine is a
+      // square, so its harmonics run to Nyquist and the waveform sits at the
+      // ceiling instead of decaying away from it.
+      sample = Math.tanh(8 * Math.sin(phase) * Math.exp(-t / 0.12))
+    } else if (drum === 'pulse') {
+      // The soft end: one partial, no click, and an attack spread over
+      // several analyser windows rather than landing inside one.
+      const attack = 0.12
+      const envelope =
+        t < attack ? 0.5 - 0.5 * Math.cos((Math.PI * t) / attack) : Math.exp(-(t - attack) / 0.2)
+      sample = Math.sin(2 * Math.PI * 55 * t) * envelope * 0.9
     } else if (drum === 'snare') {
       const body = Math.sin(2 * Math.PI * 180 * t) * Math.exp(-t / 0.05) * 0.6
       sample = body + random() * 1.4 * Math.exp(-t / 0.08)
@@ -95,9 +129,11 @@ export function synthesize(sections: readonly Section[], sampleRate = 48000): Fl
   const random = noise(1)
   const voices: Record<Drum, Float32Array> = {
     kick: voice('kick', sampleRate, random),
+    hardKick: voice('hardKick', sampleRate, random),
     snare: voice('snare', sampleRate, random),
     hat: voice('hat', sampleRate, random),
     bass: voice('bass', sampleRate, random),
+    pulse: voice('pulse', sampleRate, random),
   }
   const total = sections.reduce((sum, section) => sum + Math.round(section.seconds * sampleRate), 0)
   const out = new Float32Array(total)
@@ -273,4 +309,49 @@ export function twoStep(
 /** A breakdown: no drums, just the pad and a bass note on the one. */
 export function breakdown(bpm: number, pad = 0.6): Pattern {
   return { bpm, beats: 4, hits: [on('bass', 0, 0.4)], pad }
+}
+
+/**
+ * One voice on every beat and nothing else, so two kinds of hit can be
+ * compared at the same rate with nothing else in the mix to read.
+ */
+export function steadyHits(bpm: number, drum: Drum, gain = 0.9): Pattern {
+  return { bpm, beats: 4, hits: [0, 1, 2, 3].map((beat) => on(drum, beat, gain)) }
+}
+
+/** A sustained chord and nothing struck at all: no onsets after the first. */
+export function padOnly(bpm: number, pad = 0.5): Pattern {
+  return { bpm, beats: 4, hits: [], pad }
+}
+
+/**
+ * One voice on every beat, sixteenth hats over it and a pad under it: enough
+ * of a track for `hardness` to be asked a real question, which `steadyHits`
+ * cannot since it plays one voice into silence. Changing only the voice, the
+ * hats and the pad gives a hardstyle track, a house one and a lo-fi one that
+ * differ in nothing else.
+ */
+export function kit(bpm: number, drum: Drum, hat: number, pad = 0): Pattern {
+  const hits: Hit[] = []
+  for (let beat = 0; beat < 4; beat++) hits.push(on(drum, beat, 0.9))
+  for (let sixteenth = 0; sixteenth < 16; sixteenth++) hits.push(on('hat', sixteenth / 4, hat))
+  return { bpm, beats: 4, hits, pad }
+}
+
+/** The root mean square of a rendered buffer. */
+export function level(samples: Float32Array): number {
+  let squares = 0
+  for (let index = 0; index < samples.length; index++) squares += (samples[index] ?? 0) ** 2
+  return Math.sqrt(squares / Math.max(1, samples.length))
+}
+
+/**
+ * The same buffer at a given RMS, for holding loudness fixed across a
+ * comparison of two patterns, or for asking the same one 20 dB down.
+ */
+export function atLevel(samples: Float32Array, target: number): Float32Array {
+  const gain = target / Math.max(level(samples), 1e-12)
+  const out = new Float32Array(samples.length)
+  for (let index = 0; index < samples.length; index++) out[index] = (samples[index] ?? 0) * gain
+  return out
 }

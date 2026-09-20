@@ -19,14 +19,18 @@
  * `onset` is not: they are events rather than levels, and a scene reads an
  * event straight from the packet.
  *
- * `pace`, `swell`, `weight` and `tempo` are the song rather than the frame,
- * and they move over tens of seconds: `pace` is how busy the track is,
- * `swell` whether this passage is lifting or dropping, `weight` whether it is
- * bass-led or bright, `tempo` the BPM guess normalised. They are what makes a
- * ballad and a drum and bass track look different without swapping the
- * preset. Reach for `pace` rather than `tempo` when what you mean is "fast":
- * the BPM guess is the weak part of the extractor and the README says by how
- * much.
+ * `pace`, `swell`, `weight`, `tempo` and `hardness` are the song rather than
+ * the frame, and they move over tens of seconds: `pace` is how busy the track
+ * is, `swell` whether this passage is lifting or dropping, `weight` whether
+ * it is bass-led or bright, `tempo` the BPM guess normalised, `hardness` how
+ * abrupt and how saturated its hits are. They are what makes a ballad and a
+ * drum and bass track look different without swapping the preset. Reach for
+ * `pace` rather than `tempo` when what you mean is "fast": the BPM guess is
+ * the weak part of the extractor and the README says by how much.
+ *
+ * `hardness` rests at 0.5 until a track has been heard, so a gain on it moves
+ * a knob from the moment the preset loads; a row that should do nothing on an
+ * unknown track wants the resting number set for the middle.
  *
  * Then the harmony. `keyHue` is where the key sits on the circle of fifths,
  * 0 to 1 and wrapping, so a song has a colour of its own and a modulation
@@ -66,6 +70,7 @@ export const AUDIO_FIELDS = [
   'swell',
   'weight',
   'tempo',
+  'hardness',
   'keyHue',
   'keyClarity',
   'harmonicChange',

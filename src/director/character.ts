@@ -5,7 +5,16 @@
  * names, and every one of them reads a packet row that is already slow. This
  * smooths them slower still, over tens of seconds, because the question it
  * answers is "what kind of track is this" and a number that changes its mind
- * inside a bar is no answer at all. Two of the axes are slower than the other
+ * inside a bar is no answer at all.
+ *
+ * It is also where each row is stretched onto the range an axis is supposed
+ * to use. A row is built to say one thing truly and not to fill 0 to 1, and
+ * read raw the twenty tracks measured for the spans below sat inside a corner
+ * a fifth of the space wide, which left every study about the same distance
+ * from every track. The stretching lives here and not in the extractor
+ * because the rows are public API and a preset's mapping reads them raw.
+ *
+ * Two of the axes are slower than the other
  * three: `keyClarity` falls the moment the notes stop and `tempoConfidence`
  * dips through any bar the tracker doubts, and neither of those is the track
  * becoming a different track.
@@ -65,6 +74,88 @@ export type CharacterOptions = {
 const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value)
 
 const SLOW_AXES: readonly CharacterAxis[] = ['tonality', 'steadiness']
+
+/**
+ * Where a row really sits on real music, so an axis uses the whole of 0 to 1.
+ *
+ * The rows are built to be loudness independent and frame-rate independent,
+ * which they are, and nobody ever asked them to use their range: `pace` is a
+ * count of hits against four a second, `weight` is a centroid between two
+ * groups it never reaches, and `tempoConfidence` is a correlation. Read
+ * straight, every track landed in one small corner of the space, every study
+ * was about the same distance from every track, and the character decided
+ * almost nothing. These are the measured ends, over 60 to 150 seconds of
+ * twenty tracks, with the track at each end named. That late, because these
+ * are slow readings and half of them are still settling at 30 seconds.
+ * Remeasure with `scripts/character-table.mjs` before moving one.
+ *
+ * Widening a row itself was the other option and is the wrong one: the rows
+ * are public API, Musimo pins a tag, and a preset's mapping reads them raw.
+ * Where an axis is read is the one place that can change without anything
+ * else moving.
+ */
+const span = (value: number, low: number, high: number) => clamp01((value - low) / (high - low))
+
+/** Wilco at 0.28, Kate McGill's strummed guitar at 0.72. */
+const DRIVE_SLOW = 0.22
+const DRIVE_FAST = 0.78
+/** Subtronics at 0.65, Christian Loffler at 1. Nothing real reads under 0.6. */
+const WEIGHT_BRIGHT = 0.6
+const WEIGHT_DEEP = 1
+/** Adagio for TRON at 0.02, FISHER at 0.78. */
+const STEADY_LOOSE = 0.05
+const STEADY_TIGHT = 0.8
+
+/**
+ * What the hits are worth to the hardness axis, and the reading at which they
+ * say nothing either way.
+ *
+ * `hardness` is how abrupt a track's hits are, which is half of what a
+ * listener means and the smaller half. It is also the half that goes wrong
+ * where it matters most: a wall of distorted guitars has few sharp hits over
+ * its own sustained level, so metal read 0.09 to 0.15 against hip hop's 0.47.
+ * So `grit`, the sound between the hits, carries the axis, and the hits move
+ * it a third of a step either way: a four to the floor kick and a dry snare
+ * still count for something, and a track whose hits are mush is still softer
+ * than one whose hits crack. 0.25 is what an ordinary track reads on row 46.
+ */
+const HIT_EVEN = 0.25
+const HIT_SWAY = 0.35
+
+/**
+ * The row values an axis reads back as `value`: what a bench slider writes.
+ * The hardness slider writes `grit` and leaves row 46 at the reading that
+ * neither lifts nor lowers, since two rows cannot be worked back out of one
+ * number and `grit` is the one that carries the axis.
+ */
+export function rowsForAxis(axis: CharacterAxis, value: number): readonly RowValue[] {
+  const held = clamp01(value)
+  const unspan = (low: number, high: number) => low + held * (high - low)
+  switch (axis) {
+    case 'drive': {
+      const row = unspan(DRIVE_SLOW, DRIVE_FAST)
+      return [
+        { row: F.pace, value: row },
+        { row: F.tempo, value: row },
+      ]
+    }
+
+    case 'weight':
+      return [{ row: F.weight, value: unspan(WEIGHT_BRIGHT, WEIGHT_DEEP) }]
+    case 'tonality':
+      return [{ row: F.keyClarity, value: held }]
+    case 'steadiness':
+      return [{ row: F.tempoConfidence, value: unspan(STEADY_LOOSE, STEADY_TIGHT) }]
+    case 'hardness':
+      return [
+        { row: F.grit, value: held },
+        { row: F.hardness, value: HIT_EVEN },
+      ]
+  }
+}
+
+/** One packet row and what to write into it. */
+export type RowValue = { readonly row: number; readonly value: number }
 
 export class CharacterReader {
   private readonly value: Record<CharacterAxis, number>
@@ -127,10 +218,14 @@ export class CharacterReader {
     const tempo = clamp01(features[F.tempo] ?? 0)
     // A tempo of 0 is the tracker saying it has not settled, not a slow track,
     // so pace carries the axis alone until it has.
-    this.target.drive = tempo > 0 ? (pace + tempo) / 2 : pace
-    this.target.weight = clamp01(features[F.weight] ?? 0.5)
+    const busy = tempo > 0 ? (pace + tempo) / 2 : pace
+    this.target.drive = span(busy, DRIVE_SLOW, DRIVE_FAST)
+    this.target.weight = span(features[F.weight] ?? 0.5, WEIGHT_BRIGHT, WEIGHT_DEEP)
+    // The one row that already uses its range, so it is taken as it comes.
     this.target.tonality = clamp01(features[F.keyClarity] ?? 0.5)
-    this.target.steadiness = clamp01(features[F.tempoConfidence] ?? 0.5)
-    this.target.hardness = clamp01(features[F.hardness] ?? 0.5)
+    this.target.steadiness = span(features[F.tempoConfidence] ?? 0.5, STEADY_LOOSE, STEADY_TIGHT)
+    this.target.hardness = clamp01(
+      (features[F.grit] ?? 0) + HIT_SWAY * ((features[F.hardness] ?? HIT_EVEN) - HIT_EVEN),
+    )
   }
 }

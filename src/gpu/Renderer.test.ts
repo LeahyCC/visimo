@@ -18,6 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { rowsForAxis } from '../director/character'
 import { LOFI, METAL, playSong, SONG_SECONDS } from '../director/song.fixture'
 import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
@@ -1339,7 +1340,8 @@ describe('the study bench', () => {
       live: live('lazy-fluid', 'ribbon', 'clean-glass'),
       frame: (packet) => {
         packet[F.energy] = 0.8
-        packet[F.hardness] = 1
+        // The hardness slider's rows, as the bench writes them.
+        for (const { row, value } of rowsForAxis('hardness', 1)) packet[row] = value
       },
     })
     audio.packet = sliders

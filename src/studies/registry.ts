@@ -19,6 +19,15 @@
  * strong fit and reads 1, a lower case one about 0.5, and a letter that is
  * absent reads 0. An axis the catalogue says nothing about sits at 0.5, which
  * is no opinion rather than a weak one.
+ *
+ * Where the catalogue says "hard" or "fast", the number under it was a guess
+ * at a space nothing had been measured in, and several of them sat past the
+ * end of it: the hardest of twenty real tracks reads 0.79 and three homes
+ * were at 0.85 or over, so the studies that wanted a hard track were the
+ * studies no track could reach. `director/tracks.fixture.ts` is what those
+ * twenty tracks read as, `scripts/character-table.mjs` is how to measure
+ * more, and `director.test.ts` holds every study to winning a seat for at
+ * least one of them. A home moved on that evidence says so where it is.
  */
 import { IMPL_SCENES } from './impls'
 import type { FlowStudy, InkStudy, LookStudy, Study } from './types'
@@ -34,7 +43,7 @@ const LAZY_FLUID: FlowStudy = {
   name: 'Lazy fluid',
   impl: 'fluid',
   home: { drive: 0.2, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.15 },
-  reach: 0.6,
+  reach: 0.55,
   moments: { intro: 1, groove: 1, build: 0, drop: 0, rest: 1, outro: 1 },
   knobs: {
     velocityDecay: 0.18,
@@ -81,7 +90,7 @@ const TURBULENT_FLUID: FlowStudy = {
   kind: 'flow',
   name: 'Turbulent fluid',
   impl: 'fluid',
-  home: { drive: 0.8, weight: 0.25, tonality: 0.5, steadiness: 0.5, hardness: 0.6 },
+  home: { drive: 0.7, weight: 0.35, tonality: 0.5, steadiness: 0.5, hardness: 0.6 },
   reach: 0.5,
   moments: { intro: 0, groove: 1, build: 0, drop: 1, rest: 0, outro: 0 },
   knobs: {
@@ -181,7 +190,7 @@ const RADIAL_BURST: FlowStudy = {
   kind: 'flow',
   name: 'Radial burst',
   impl: 'analytic',
-  home: { drive: 0.75, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.85 },
+  home: { drive: 0.7, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.8 },
   reach: 0.55,
   moments: { intro: 0, groove: 0, build: 0, drop: 1, rest: 0, outro: 0 },
   knobs: { ...NO_CURL, radial: 0.05, falloff: 2, swirl: 0, twist: 0 },
@@ -300,13 +309,17 @@ const CURL_DRIFT: FlowStudy = {
  *
  * Its home is steady and hard, in the corner where a hardstyle or techno groove
  * lives, and its reach is moderate, so a lo-fi track is not welcome there.
+ * Steady is 0.85 and hard is 0.75 rather than the 0.9 and 0.85 they were: a
+ * house track reads 0.92 steady and the hardest track measured reads 0.79
+ * hard, so the old corner was past the end of the space and only one track in
+ * twenty could get there.
  */
 const BEAT_PUMP: FlowStudy = {
   id: 'beat-pump',
   kind: 'flow',
   name: 'Beat pump',
   impl: 'analytic',
-  home: { drive: 0.7, weight: 0.5, tonality: 0.5, steadiness: 0.9, hardness: 0.85 },
+  home: { drive: 0.7, weight: 0.5, tonality: 0.5, steadiness: 0.85, hardness: 0.75 },
   reach: 0.5,
   moments: { intro: 0, groove: 1, build: 0, drop: 1, rest: 0, outro: 0 },
   knobs: { ...NO_CURL, radial: 0, falloff: 0, swirl: 0, twist: 0 },
@@ -366,7 +379,7 @@ const TUNNEL: FlowStudy = {
   kind: 'flow',
   name: 'Tunnel',
   impl: 'analytic',
-  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.85, hardness: 0.5 },
+  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.75, hardness: 0.5 },
   reach: 0.5,
   moments: { intro: 0, groove: 1, build: 1, drop: 0, rest: 0, outro: 0 },
   knobs: { ...NO_CURL, radial: 0.04, falloff: 0, swirl: 0.002, twist: 0 },
@@ -391,7 +404,7 @@ const DYE_PLUMES: InkStudy = {
   name: 'Dye plumes',
   impl: 'dye',
   home: { drive: 0.4, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.25 },
-  reach: 0.7,
+  reach: 0.55,
   moments: { intro: 1, groove: 1, build: 0, drop: 0, rest: 1, outro: 0 },
   knobs: {
     dyeDecay: 0.22,
@@ -481,7 +494,7 @@ const FRACTAL_GLINTS: InkStudy = {
   kind: 'ink',
   name: 'Fractal glints',
   impl: 'fractal',
-  home: { drive: 0.6, weight: 0.5, tonality: 0.8, steadiness: 0.5, hardness: 0.8 },
+  home: { drive: 0.6, weight: 0.5, tonality: 0.8, steadiness: 0.5, hardness: 0.7 },
   reach: 0.5,
   moments: { intro: 0, groove: 1, build: 0, drop: 1, rest: 0, outro: 0 },
   knobs: {
@@ -599,8 +612,8 @@ const SHARDS: InkStudy = {
   kind: 'ink',
   name: 'Shards',
   impl: 'shards',
-  home: { drive: 0.85, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.9 },
-  reach: 0.3,
+  home: { drive: 0.7, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.8 },
+  reach: 0.35,
   moments: { intro: 0, groove: 0, build: 0, drop: 1, rest: 0, outro: 0 },
   knobs: {
     burst: 48,
@@ -1043,8 +1056,8 @@ const SPECTRUM_RING: InkStudy = {
  * flow. The ink reads no flow itself, so it sits over any of them.
  *
  * Its home is the bright, fast corner, a light weight and a high drive, with a
- * reach of 0.4: wider than the shards' 0.3 and narrower than the turbulent
- * fluid's, so a lo-fi track scores it 0.45 and a hardstyle one 0.79. The
+ * reach of 0.4: wider than the shards' 0.35 and narrower than the turbulent
+ * fluid's, so a lo-fi track scores it 0.39 and a hardstyle one 0.64. The
  * catalogue gives it the groove and the drop and nothing else.
  *
  * Where a spark is born is where the hit landed. The packet says where in the
@@ -1114,7 +1127,7 @@ const SPARKS: InkStudy = {
   kind: 'ink',
   name: 'Sparks',
   impl: 'sparks',
-  home: { drive: 0.8, weight: 0.25, tonality: 0.5, steadiness: 0.5, hardness: 0.6 },
+  home: { drive: 0.7, weight: 0.35, tonality: 0.5, steadiness: 0.5, hardness: 0.6 },
   reach: 0.4,
   moments: { intro: 0, groove: 1, build: 0, drop: 1, rest: 0, outro: 0 },
   knobs: {
@@ -1151,8 +1164,8 @@ const WARM_SOFT: LookStudy = {
   kind: 'look',
   name: 'Warm and soft',
   impl: 'look',
-  home: { drive: 0.25, weight: 0.6, tonality: 0.6, steadiness: 0.4, hardness: 0.15 },
-  reach: 0.6,
+  home: { drive: 0.25, weight: 0.7, tonality: 0.6, steadiness: 0.4, hardness: 0.15 },
+  reach: 0.5,
   moments: { intro: 1, groove: 1, build: 0, drop: 0, rest: 1, outro: 1 },
   knobs: {
     'bloom.threshold': 0.85,
@@ -1231,7 +1244,7 @@ const HARD_CLEAN: LookStudy = {
   kind: 'look',
   name: 'Hard and clean',
   impl: 'look',
-  home: { drive: 0.75, weight: 0.5, tonality: 0.5, steadiness: 0.7, hardness: 0.9 },
+  home: { drive: 0.65, weight: 0.45, tonality: 0.5, steadiness: 0.7, hardness: 0.8 },
   reach: 0.5,
   moments: { intro: 0, groove: 1, build: 0.5, drop: 1, rest: 0, outro: 0 },
   knobs: {

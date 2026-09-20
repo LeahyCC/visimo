@@ -25,7 +25,9 @@
  * signals that drifted apart.
  */
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { CHARACTER_AXES } from '../studies/types'
 import type { Character } from '../studies/types'
+import { rowsForAxis } from './character'
 
 export type PartName =
   | 'intro'
@@ -244,12 +246,10 @@ export function packetAt(
   }
 
   out[F.rest] = rows.rest
-  out[F.pace] = character.drive
-  out[F.tempo] = character.drive
-  out[F.weight] = character.weight
-  out[F.keyClarity] = character.tonality
-  out[F.tempoConfidence] = character.steadiness
-  out[F.hardness] = character.hardness
+  // The character rows are written through the reader's own inverse, so a
+  // song says which character it is and the reading hands that back whole.
+  for (const axis of CHARACTER_AXES)
+    for (const { row, value } of rowsForAxis(axis, character[axis])) out[row] = value
   return out
 }
 

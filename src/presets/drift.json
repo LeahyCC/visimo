@@ -8,7 +8,7 @@
     "vorticity": 18,
     "viscosity": 0.2,
     "intensity": 0.8,
-    "saturation": 0.5,
+    "saturation": 0.65,
     "spread": 0.42,
     "force": 0.45,
     "dye": 0.8,
@@ -27,16 +27,18 @@
     "eventRadius": 0.011
   },
   "postParams": {
-    "ribbon": { "enabled": true, "intensity": 0.15, "width": 3, "height": 0.2, "shape": 0 },
+    "ribbon": { "enabled": true, "intensity": 0.15, "width": 2.5, "height": 0.2, "shape": 0 },
     "feedback": {
       "amount": 1,
-      "decay": 0.94,
-      "zoom": 1,
+      "decay": 0.93,
+      "zoom": 0.9985,
       "rotate": 0,
       "carry": 1,
       "floor": 0.018,
       "ceiling": 1.8
-    }
+    },
+    "chromatic": { "amount": 0.0002 },
+    "grain": { "amount": 0.012 }
   },
   "audioMapping": [
     { "from": "pace", "to": "vorticity", "gain": 14 },
@@ -56,11 +58,34 @@
     { "from": "lowEnd", "to": "hitDye", "gain": 0.5 },
     { "from": "lowEnd", "to": "radius", "gain": 0.016 },
     { "from": "keyHue", "to": "colourShift", "gain": 1 },
-    { "from": "keyClarity", "to": "saturation", "gain": 0.6 },
+    { "from": "keyClarity", "to": "saturation", "gain": 0.3 },
     { "from": "harmonicChange", "to": "dye", "gain": 0.8 },
     { "from": "novelty", "to": "force", "gain": 0.6 },
     { "from": "novelty", "to": "hitDye", "gain": 0.5 },
     { "from": "swell", "to": "spread", "gain": 0.2 },
-    { "from": "energy", "to": "ribbon.intensity", "gain": 0.3 }
+    { "from": "energy", "to": "ribbon.intensity", "gain": 0.3 },
+    { "from": "swell", "to": "feedback.decay", "gain": 0.02 },
+    { "from": "beatPhase", "to": "feedback.zoom", "gain": 0.003, "curve": "invert" },
+    { "from": "harmonicChange", "to": "feedback.rotate", "gain": 0.0015 },
+    { "from": "energy", "to": "feedback.carry", "gain": 0.4 },
+    { "from": "energy", "to": "feedback.floor", "gain": 0.001 },
+    { "from": "swell", "to": "feedback.floor", "gain": 0.001 },
+    { "from": "energy", "to": "feedback.ceiling", "gain": -0.25, "curve": "square" },
+    { "from": "swell", "to": "feedback.ceiling", "gain": -0.15, "curve": "square" },
+    { "from": "hardness", "to": "feedback.ceiling", "gain": -0.15, "curve": "square" },
+    { "from": "beatPulse", "to": "bloom.intensity", "gain": 0.1 },
+    { "from": "treble", "to": "bloom.threshold", "gain": -0.12 },
+    { "from": "hardness", "to": "chromatic.amount", "gain": 0.0012 },
+    { "from": "hardness", "to": "grain.amount", "gain": 0.016, "curve": "invert" },
+    { "from": "weight", "to": "ribbon.width", "gain": 1.5 },
+    { "from": "energy", "to": "tonemap.exposure", "gain": -0.04, "curve": "square" },
+    { "from": "swell", "to": "tonemap.exposure", "gain": -0.05, "curve": "square" },
+    { "from": "hardness", "to": "tonemap.exposure", "gain": -0.05, "curve": "square" },
+    { "from": "energy", "to": "intensity", "gain": -0.14, "curve": "square" },
+    { "from": "swell", "to": "intensity", "gain": -0.09, "curve": "square" },
+    { "from": "hardness", "to": "intensity", "gain": -0.09, "curve": "square" },
+    { "from": "energy", "to": "saturation", "gain": -0.14, "curve": "square" },
+    { "from": "swell", "to": "saturation", "gain": -0.09, "curve": "square" },
+    { "from": "hardness", "to": "saturation", "gain": -0.09, "curve": "square" }
   ]
 }

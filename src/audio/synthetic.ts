@@ -324,6 +324,20 @@ export function padOnly(bpm: number, pad = 0.5): Pattern {
   return { bpm, beats: 4, hits: [], pad }
 }
 
+/**
+ * One voice on every beat, sixteenth hats over it and a pad under it: enough
+ * of a track for `hardness` to be asked a real question, which `steadyHits`
+ * cannot since it plays one voice into silence. Changing only the voice, the
+ * hats and the pad gives a hardstyle track, a house one and a lo-fi one that
+ * differ in nothing else.
+ */
+export function kit(bpm: number, drum: Drum, hat: number, pad = 0): Pattern {
+  const hits: Hit[] = []
+  for (let beat = 0; beat < 4; beat++) hits.push(on(drum, beat, 0.9))
+  for (let sixteenth = 0; sixteenth < 16; sixteenth++) hits.push(on('hat', sixteenth / 4, hat))
+  return { bpm, beats: 4, hits, pad }
+}
+
 /** The root mean square of a rendered buffer. */
 export function level(samples: Float32Array): number {
   let squares = 0

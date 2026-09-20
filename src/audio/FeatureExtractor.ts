@@ -81,11 +81,12 @@
  *
  * Row 46 belongs with rows 24 to 27 and sits here only because rows are
  * added at the end. `hardness` is how a track's hits arrive rather than how
- * often or how loudly: how much of a hit's window sits at its own ceiling,
- * and how much of the spectrum its power is spread across, averaged over the
- * hits of the last twenty seconds. `onsetStrength` cannot stand in for it,
- * since that grades a hit against the loudest recent one and is therefore
- * relative to the track.
+ * often or how loudly: how much of a hit's rise over the bed under it holds
+ * near its own peak, and how much of the spectrum that hit's power is spread
+ * across, averaged over the hits of the last twenty seconds. Over the bed
+ * and not over the mix, or a pad loud enough would make every hit look held.
+ * `onsetStrength` cannot stand in for it, since that grades a hit against
+ * the loudest recent one and is therefore relative to the track.
  *
  * Nothing on the GPU binds this. Every consumer reads the Float32Array on the
  * CPU, so the layout is free of any vec4 alignment. Rows are only ever added
@@ -344,25 +345,23 @@ const TEMPO_RAMP_MS = 5000
 // enough that one odd hit cannot move it, short enough that a track that
 // changes its character is followed inside a section.
 const HARDNESS_SECONDS = 20
-// A hit is watched for this long to see how much of it sits at its own
-// ceiling. The window is cut short by the next hit, and a hit with less than
-// half of it to itself is dropped rather than judged on two or three frames:
-// one struck sound often trips two bands a frame or two apart, and this is
-// what keeps the second reading of it from being scored on nothing.
+// A hit is watched for this long. A hit that lands while a window is open
+// joins it rather than starting one, so a window is always the full tail and
+// the same sound is scored once at any frame rate: one struck sound often
+// trips two bands a frame or two apart, and when a second reading could cut
+// the first one's window short the number of hits scored, and with it the
+// mean, moved with the frame rate.
 const HARDNESS_TAIL_SECONDS = 0.1
-const HARDNESS_MIN_TAIL_SECONDS = HARDNESS_TAIL_SECONDS / 2
 // Frames in a window, at the smallest step the extractor allows. Past this
 // the oldest is dropped, which can only happen on a run at 1000 frames a
 // second and costs the measure a few percent of its window.
 const HARDNESS_WINDOW_CAPACITY = 128
-// And the fewest a window may be scored on. One frame is at its own peak by
+// And the fewest a window may be scored on. One frame is its own peak by
 // definition, so a run slow enough to put two frames in a tenth of a second
 // would read everything as held; under about 30 frames a second the measure
 // gathers no evidence at all and holds at its neutral, which is the honest
 // answer when the frames are wider than the thing being measured.
 const HARDNESS_MIN_FRAMES = 3
-// A frame within this much of the window's own peak counts as at the ceiling.
-const HARDNESS_CEILING = 0.9
 // Sound with no hit in it for this long is evidence of softness, at this
 // many hits' worth a second. Without it a pad, which has no onsets to
 // average, would sit on the neutral it started at for ever. Two seconds
@@ -376,12 +375,20 @@ const HARDNESS_SOFT_PER_SECOND = 1
 // the evidence arrives and never jumps.
 const HARDNESS_NEUTRAL = 0.5
 const HARDNESS_PRIOR = 4
-// How much of a hit's window sits within `HARDNESS_CEILING` of its own peak.
-// Measured on the synthetic pair at 60 and at 144 frames a second and at two
-// levels 20 dB apart: clipped kicks 0.71 to 0.87, soft pulses 0.43 to 0.57,
-// a full kit with hats in it 0.27 to 0.43.
+// The bed a hit has to lift the mix above is tracked by a level that falls
+// to the RMS at once and creeps back up over this long, so between hits it
+// settles on whatever is playing under them. Long enough that it does not
+// climb into the hit it is the baseline for, short enough to follow a mix
+// that thins out.
+const HARDNESS_FLOOR_MS = 300
+// The mean of a hit's rise over the bed, against that rise's own peak: how
+// much of the window the hit spends at the top rather than swelling into
+// place or ringing away. Measured over 25 seconds of each synthetic track at
+// 60 and at 144 frames a second: hardstyle 0.88 to 0.92, isolated clipped
+// kicks 0.81 to 0.91, house 0.67 to 0.73, isolated soft pulses 0.48 to 0.61,
+// lo-fi 0.38 to 0.47.
 const HOLD_SOFT = 0.55
-const HOLD_HARD = 0.8
+const HOLD_HARD = 0.9
 // How much of the spectrum the hit's power is spread across, which is what a
 // clipper does to a sine: 1 for a flat spectrum, one over the bin count for
 // a single partial. Measured on the same runs: clipped kicks 0.029 to 0.038,
@@ -389,6 +396,14 @@ const HOLD_HARD = 0.8
 // a log scale, since the two ends are a decade apart and not a difference.
 const SPREAD_TONAL = 0.003
 const SPREAD_BROAD = 0.035
+// How far a hit lifted the mix above its bed, as a share of the window's
+// peak. Under the first the rise is too small a part of what is sounding for
+// its shape to mean anything, and the hit counts as soft rather than as
+// whatever the noise on it happened to look like; over the second the hit is
+// most of what is there. Measured: a clipped kick under a pad six times its
+// own size lifts by 0.01, the same kick alone by 0.98.
+const LIFT_BURIED = 0.1
+const LIFT_CLEAR = 0.5
 const MIN_DT = 0.001
 const MAX_DT = 0.1
 // The span a hit's place is measured across, in octaves: 20 Hz to 16 kHz is
@@ -1084,40 +1099,66 @@ export class Structure {
  * a hardstyle kick from a busy jazz kit at the same pace and the same weight
  * is the shape of one hit, and two numbers say it.
  *
- * The first is how much of the hundred milliseconds after a hit sits within a
- * tenth of that window's own peak. A hit that arrives at once and is held
- * there is at its ceiling for nearly the whole window, which is what a
- * clipper and a limiter between them do to a sound; a hit that swells into
- * place or rings away is at its ceiling only in passing. The window is
- * measured against its own peak, so a level change cannot touch it.
+ * Everything here is measured against the bed the hit arrives over, never
+ * against the mix. A level that falls to the RMS at once and creeps back up
+ * settles between hits on whatever is sustaining under them, and a hit's
+ * window is the rise above that. The first version read the mix itself, and
+ * a track with a pad, a bass line or a vocal under its drums kept every
+ * frame within a tenth of the window's peak whatever the drums did: house
+ * read 0.50, and lo-fi, whose pad is the loudest thing in it, read 0.53,
+ * above house and nowhere near soft. With the bed taken out lo-fi reads 0.05
+ * and house 0.62.
+ *
+ * The first number is how much of the hundred milliseconds after a hit that
+ * rise spends near its own peak, as the mean of the rise over its peak. A
+ * hit that arrives at once and is held there sits near its peak for the
+ * whole window, which is what a clipper and a limiter between them do to a
+ * sound; a hit that swells into place or rings away passes through its peak
+ * and spends the rest of the window under it.
  *
  * The second is how much of the spectrum the hit's power is spread across:
  * the mean magnitude squared over the mean square, which is 1 for a flat
  * spectrum and one over the bin count for a single partial. A clipped hit is
  * a square wave and its harmonics run to Nyquist; a soft one is a partial or
- * two standing over the floor. It is a ratio of magnitudes to magnitudes, so
- * it too is untouched by level.
+ * two standing over the floor. Both are ratios of a signal to itself, so a
+ * level change cannot touch either.
  *
- * Neither is enough alone, and the pair is chosen for what the other rules
- * out. Hats and brushes are broadband, so a jazz kit reads as spread as a
- * clipped kick does and the spread alone would call it the harder of the two;
- * what it does not do is hold, since a hat is over in a fraction of the
- * window. A bass note swelling under a pad holds, but is one partial.
+ * The two are combined as a geometric mean, so a hit has to do both to count
+ * as hard. That is what tells the three synthetic tracks apart: hats are
+ * broadband, so every kit in them reads as spread as a clipped kick, and
+ * averaging the two rather than multiplying left lo-fi at 0.35 against
+ * house's 0.68, on the strength of its hats alone. What a hat does not do is
+ * hold. A bass note swelling under a pad holds but is one partial, and it
+ * fails the other way.
  *
- * What did not work. Attack time, as the share of a hit's rise landing in its
- * first analyser frame against the following 100 ms, moved with the frame
- * rate: the detector fires the moment the flux crosses its threshold, which
- * at 144 frames a second is part of the way up the ramp and at 60 is most of
- * the way. The crest of the flux trace, peak over mean, does not move with
- * the frame rate but barely moves with the music either, 0.68 to 0.71 for
- * clipped kicks against 0.67 to 0.73 for soft pulses, because the flux is a
- * rise in log magnitude and the loudest part of any attack in log terms is
- * the quiet beginning of it, whatever shape the rest has. Spectral flatness
- * proper, the geometric mean of the spectrum over its arithmetic mean, needs
- * a floor under the geometric mean, and with the -60 dB floor the rest of
- * this file uses nearly every bin at fftSize 4096 is under it: it read 0.65
- * for the clipped kicks and 0.84 for the soft pulses, which is both saturated
- * and the wrong way round.
+ * A hit that barely lifts the mix at all is scored as soft rather than on
+ * the shape of its rise, since a rise that is a hundredth of what is
+ * sounding is mostly noise: a clipped kick under a pad six times its size
+ * read a hold anywhere between 0.31 and 0.68 from one hit to the next, and
+ * the track came out at 0.19 at 60 frames a second and 0.15 at 144. Weighted
+ * by the lift it comes out at 0.07 at both.
+ *
+ * What did not work. Attack time, as the share of a hit's rise landing in
+ * its first analyser frame against the following 100 ms, moved with the
+ * frame rate: the detector fires the moment the flux crosses its threshold,
+ * which at 144 frames a second is part of the way up the ramp and at 60 is
+ * most of the way. The crest of the flux trace, peak over mean, does not
+ * move with the frame rate but barely moves with the music either, 0.68 to
+ * 0.71 for clipped kicks against 0.67 to 0.73 for soft pulses, because the
+ * flux is a rise in log magnitude and the loudest part of any attack in log
+ * terms is the quiet beginning of it, whatever shape the rest has. Spectral
+ * flatness proper, the geometric mean of the spectrum over its arithmetic
+ * mean, needs a floor under the geometric mean, and with the -60 dB floor
+ * the rest of this file uses nearly every bin at fftSize 4096 is under it:
+ * it read 0.65 for the clipped kicks and 0.84 for the soft pulses, which is
+ * both saturated and the wrong way round. Counting the share of the window
+ * within a tenth of the peak, rather than taking the mean over the peak,
+ * quantises: a tenth of a second at 60 frames a second is six samples, and
+ * one of them was two thirds of the range the share was mapped over, which
+ * put hardstyle 0.12 apart between 60 and 144. The spread read at the frame
+ * the detector fired on moved for the same reason the attack time did, so it
+ * is taken over the window instead, where the frame the hit most fills is
+ * the same frame at any rate.
  *
  * The mean is kept as a decayed sum over a decayed count, which is what makes
  * it slow and what makes it hold: a frame with nothing in it steps neither,
@@ -1133,11 +1174,19 @@ export class Hardness {
   private sum = 0
   private evidence = 0
   private sinceHit = Infinity
-  /** The open hit's window: the loudness of each frame and its step. */
-  private readonly levels = new Float32Array(HARDNESS_WINDOW_CAPACITY)
+  /**
+   * The quietest the mix has been lately: it falls to the level at once and
+   * creeps back up, so between hits it settles on whatever is playing under
+   * them. That is the bed a hit has to lift the mix above.
+   */
+  private readonly floor = new Envelope(HARDNESS_FLOOR_MS, 0)
+  /** The open hit's window: the rise above the bed, and each frame's step. */
+  private readonly rises = new Float32Array(HARDNESS_WINDOW_CAPACITY)
   private readonly steps = new Float32Array(HARDNESS_WINDOW_CAPACITY)
   private frames = 0
+  private base = 0
   private peak = 0
+  private peakRise = 0
   private elapsed = 0
   private spread = 0
   private open = false
@@ -1153,27 +1202,32 @@ export class Hardness {
     const keep = Math.exp(-dt / HARDNESS_SECONDS)
     this.sum *= keep
     this.evidence *= keep
-    // The window runs until the next hit or the full tail, and the frame a
-    // hit arrives on belongs to that hit and not to the one before it.
+    const floor = this.floor.step(loudness, dt)
     if (this.open) {
-      if (hit || this.elapsed >= HARDNESS_TAIL_SECONDS) this.close()
-      else this.add(loudness, dt)
+      if (this.elapsed >= HARDNESS_TAIL_SECONDS) this.close()
+      else this.add(loudness, spread, dt)
     }
 
-    if (hit) {
-      this.open = true
-      this.frames = 0
-      this.peak = 0
-      this.elapsed = 0
-      this.spread = spread
-      this.sinceHit = 0
-      this.add(loudness, dt)
-    } else {
+    if (hit) this.sinceHit = 0
+    else {
       this.sinceHit += dt
       // Softness is only evidence when there is something to hear: under the
       // quiet floor there is no telling a pad from a room.
       if (loudness >= QUIET && this.sinceHit >= HARDNESS_GAP_SECONDS)
         this.evidence += HARDNESS_SOFT_PER_SECOND * dt
+    }
+
+    // A hit that lands while a window is open belongs to that window rather
+    // than starting one of its own.
+    if (hit && !this.open) {
+      this.open = true
+      this.frames = 0
+      this.base = floor
+      this.peak = 0
+      this.peakRise = 0
+      this.spread = 0
+      this.elapsed = 0
+      this.add(loudness, spread, dt)
     }
 
     return this.value()
@@ -1185,44 +1239,45 @@ export class Hardness {
     )
   }
 
-  private add(loudness: number, dt: number) {
+  private add(loudness: number, spread: number, dt: number) {
+    const rise = Math.max(0, loudness - this.base)
     if (this.frames < HARDNESS_WINDOW_CAPACITY) {
-      this.levels[this.frames] = loudness
+      this.rises[this.frames] = rise
       this.steps[this.frames] = dt
       this.frames++
     }
 
     this.peak = Math.max(this.peak, loudness)
+    this.peakRise = Math.max(this.peakRise, rise)
+    this.spread = Math.max(this.spread, spread)
     this.elapsed += dt
   }
 
   /** Score the hit whose window has just ended, and fold it into the mean. */
   private close() {
     this.open = false
-    if (
-      this.elapsed < HARDNESS_MIN_TAIL_SECONDS ||
-      this.frames < HARDNESS_MIN_FRAMES ||
-      this.peak <= 0
-    )
-      return
-    // The share is of time and not of frames, so the window reads the same at
-    // any frame rate.
+    if (this.frames < HARDNESS_MIN_FRAMES || this.peak <= 0 || this.peakRise <= 0) return
+    // Weighted by time and not by frame, so the window reads the same at any
+    // frame rate.
     let held = 0
     let total = 0
     for (let at = 0; at < this.frames; at++) {
       const step = this.steps[at] ?? 0
       total += step
-      if ((this.levels[at] ?? 0) >= HARDNESS_CEILING * this.peak) held += step
+      held += step * (this.rises[at] ?? 0)
     }
 
     if (total <= 0) return
-    const hold = clamp01((held / total - HOLD_SOFT) / (HOLD_HARD - HOLD_SOFT))
+    const hold = clamp01((held / total / this.peakRise - HOLD_SOFT) / (HOLD_HARD - HOLD_SOFT))
     const spread = clamp01(
       Math.log(Math.max(this.spread, 1e-9) / SPREAD_TONAL) / Math.log(SPREAD_BROAD / SPREAD_TONAL),
     )
-    // Averaged rather than multiplied: a clipped kick with no top end is
-    // still a hard sound, and a product would call it soft.
-    this.sum += (hold + spread) / 2
+    const presence = clamp01((this.peakRise / this.peak - LIFT_BURIED) / (LIFT_CLEAR - LIFT_BURIED))
+    // A geometric mean rather than an average: a hit has to both hold and
+    // fill the spectrum to be a hard one, and either alone is a hat or a
+    // swell. The hit still counts as evidence whatever it scores, so a track
+    // whose hits are all soft reads soft rather than reading unknown.
+    this.sum += presence * Math.sqrt(hold * spread)
     this.evidence += 1
   }
 }

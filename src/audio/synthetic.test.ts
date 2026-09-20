@@ -7,12 +7,13 @@ import {
   breakdown,
   fft,
   fourOnTheFloor,
+  kit,
   padOnly,
   steadyHits,
   synthesize,
   twoStep,
 } from './synthetic'
-import type { Section } from './synthetic'
+import type { Pattern, Section } from './synthetic'
 
 const SAMPLE_RATE = 48000
 const FFT_SIZE = 4096
@@ -264,4 +265,53 @@ describe('hardness on synthesised hits', () => {
     expect(after).toBeGreaterThan(before)
     expect(after - before).toBeLessThan(0.1)
   }, 60000)
+})
+
+describe('hardness on whole tracks', () => {
+  // Three tracks that differ only in the voice on the beat, the weight of the
+  // hats and the pad under them. This is the case the feature exists for, and
+  // the case a hit measured against the mix rather than against its own bed
+  // got wrong: with a loud pad under it every frame sat within a tenth of the
+  // window's peak, so lo-fi read above house.
+  const seconds = 25
+  const LOUD = 0.5
+  const heard = (pattern: Pattern, frameRate: number) =>
+    run(atLevel(synthesize([{ pattern, seconds }], SAMPLE_RATE), LOUD), frameRate).at(-1)?.[
+      F.hardness
+    ] ?? 0
+  const tracks = {
+    hardstyle: kit(150, 'hardKick', 0.3),
+    house: kit(124, 'kick', 0.3, 0.2),
+    lofi: kit(80, 'pulse', 0.1, 0.6),
+  }
+
+  it('puts hardstyle above house above lo-fi', () => {
+    const hardstyle = heard(tracks.hardstyle, 60)
+    const house = heard(tracks.house, 60)
+    const lofi = heard(tracks.lofi, 60)
+    expect(hardstyle - house).toBeGreaterThan(0.15)
+    expect(house - lofi).toBeGreaterThan(0.15)
+    // Lo-fi is a soft track, not a middling one. The pad it is built on is
+    // the loudest thing in it and must not be mistaken for a held hit.
+    expect(lofi).toBeLessThan(0.35)
+  }, 120000)
+
+  it('reads each of the three the same at 60 and at 144 frames a second', () => {
+    for (const pattern of Object.values(tracks))
+      expect(Math.abs(heard(pattern, 144) - heard(pattern, 60))).toBeLessThan(0.05)
+  }, 180000)
+
+  // The guard on a hit that barely moves the mix. A rise a hundredth of what
+  // is sounding is mostly noise, and scoring its shape read the same clipped
+  // kick anywhere from soft to hard depending on the frame rate.
+  it('reads a hit drowned under a pad as soft rather than on the shape of its rise', () => {
+    const drowned: Pattern = {
+      bpm: 100,
+      beats: 4,
+      hits: [0, 1, 2, 3].map((beat) => ({ drum: 'hardKick' as const, at: beat, gain: 0.25 })),
+      pad: 6,
+    }
+    expect(heard(drowned, 60)).toBeLessThan(0.2)
+    expect(Math.abs(heard(drowned, 144) - heard(drowned, 60))).toBeLessThan(0.05)
+  }, 120000)
 })

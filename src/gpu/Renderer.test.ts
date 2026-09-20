@@ -1079,7 +1079,9 @@ describe('the study bench', () => {
     renderer.setBench({ live: live('lazy-fluid', 'ribbon', 'clean-glass') })
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     draw(1000)
-    expect(impls.built).toEqual({ fluid: 0, dye: 0, fractal: 0, ribbon: 0 })
+    // Nothing is built there, whichever implementations there are: counted
+    // rather than listed, so a new one does not break this by existing.
+    expect(Object.values(impls.built).reduce((sum, count) => sum + count, 0)).toBe(0)
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

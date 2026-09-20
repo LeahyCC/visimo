@@ -12,8 +12,10 @@ import type { SceneContext } from './Scene'
 
 /**
  * A raymarched fractal with five material scales, which is the `fractal` ink.
- * Phases survive a resize. It covers most of the frame, so it is the one ink
- * the registry keeps out of a cast with the dye.
+ * Phases survive a resize. It marches the whole frame, so it is the one ink
+ * the registry keeps out of a cast with the dye, and what it adds is cut back
+ * to its bright parts by the `glint` threshold before it leaves the shader;
+ * `kaleidoscope.params.ts` says what that level is measured against.
  */
 export class Kaleidoscope implements InkImpl {
   private context: SceneContext | null = null

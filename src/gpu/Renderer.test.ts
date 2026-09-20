@@ -1044,6 +1044,38 @@ describe('the director drives the cast', () => {
     expect(graphics.render).toHaveBeenCalled()
     fresh.dispose()
   })
+
+  // Curl drift is meant to be that path's flow one day, so what is held to
+  // here is that today it is skipped without a sound: a cast built on it is
+  // drawn as far as the fallback can and nothing throws or is reported.
+  it('does not throw on a cast built on curl drift', async () => {
+    vi.resetModules()
+    impls.reset()
+    const fresh = (await import('./Renderer')).renderer
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    audio.attached = true
+    const failure = vi.fn()
+    fresh.setPreset('auto')
+    await expect(fresh.attach(element, canvas(), failure)).resolves.toBe('ok')
+    fresh.setBench({
+      live: {
+        studies: ['curl-drift', 'ribbon', 'clean-glass'].map((id) => ({ id, presence: 1 })),
+        canvas: defaultCanvas(),
+        tension: 0.5,
+      },
+    })
+    let now = 0
+    for (let frame = 0; frame < 120; frame += 1) {
+      now += 1000 / FPS
+      expect(() => draw(now)).not.toThrow()
+    }
+
+    expect(failure).not.toHaveBeenCalled()
+    expect(impls.built.analytic).toBe(0)
+    expect(impls.updates.analytic).toBeUndefined()
+    fresh.dispose()
+  })
 })
 
 describe('the study bench', () => {

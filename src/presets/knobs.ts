@@ -143,7 +143,17 @@ export const FLUID_KNOBS = [
 ] as const
 export type FluidKnob = (typeof FLUID_KNOBS)[number]
 
-/** Mirrored fractal geometry, motion in seconds, and the colour of its enamel. */
+/**
+ * Mirrored fractal geometry, motion in seconds, and the colour of its enamel.
+ *
+ * The last two are the brightness threshold that makes this ink sparse.
+ * `glint` is how much of its own light the fractal keeps, 0 for all of it and
+ * 1 for only what reaches the brightest a ridge can be this frame, and
+ * `glintKnee` is how soft that edge is as a fraction of the level itself. The
+ * fractal fills the frame, so on a canvas that carries it has to be cut back
+ * to the bright parts or the trails sum it to a flat slab; what the level is
+ * measured against is the long comment in `scenes/kaleidoscope.params.ts`.
+ */
 export const KALEIDOSCOPE_KNOBS = [
   'symmetry',
   'zoom',
@@ -163,6 +173,8 @@ export const KALEIDOSCOPE_KNOBS = [
   'saturation',
   'colourShift',
   'colourDrift',
+  'glint',
+  'glintKnee',
 ] as const
 export type KaleidoscopeKnob = (typeof KALEIDOSCOPE_KNOBS)[number]
 
@@ -184,10 +196,25 @@ export type KaleidoscopeKnob = (typeof KALEIDOSCOPE_KNOBS)[number]
  * picture winds into a spiral. Both are signed, and positive is clockwise on
  * screen.
  *
+ * `curl` is the speed of a drifting, folding pattern that neither gathers nor
+ * thins the picture, in field widths a second at the fastest a point can go,
+ * and 0 is off. `curlScale` is how many cells the pattern has across the
+ * canvas's longer side, and `curlRate` is how fast the pattern itself
+ * evolves, in turns a second of its slowest part. The last two shape the
+ * term and are not a strength, so presence leaves them alone.
+ *
  * A term added later is a coefficient here and a few lines of
  * `impls/analytic.params.ts`; that file's header is the recipe.
  */
-export const ANALYTIC_KNOBS = ['radial', 'falloff', 'swirl', 'twist'] as const
+export const ANALYTIC_KNOBS = [
+  'radial',
+  'falloff',
+  'swirl',
+  'twist',
+  'curl',
+  'curlScale',
+  'curlRate',
+] as const
 export type AnalyticKnob = (typeof ANALYTIC_KNOBS)[number]
 
 /**

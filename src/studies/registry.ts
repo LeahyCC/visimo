@@ -113,6 +113,17 @@ const TURBULENT_FLUID: FlowStudy = {
 }
 
 /**
+ * What a study on the analytic flow that has no use for the curl term carries
+ * for it. The speed is 0, which is off and encodes nothing on its own. The two
+ * shape numbers sit at the resting values curl drift carries, and that is on
+ * purpose: two flows on one implementation are blended by their knobs while a
+ * change is running, and a shape that jumped between the two studies would
+ * slide the pattern's cells and clock across the crossfade for a term that is
+ * off in one of them.
+ */
+const NO_CURL = { curl: 0, curlScale: 3.5, curlRate: 0.05 }
+
+/**
  * Everything drawn to the middle, as a build winds up. The pull IS the
  * tension: at 0 the radial coefficient is a hundredth of a field width a
  * second, which shrinks the picture by under two percent over a whole second
@@ -138,7 +149,7 @@ const IMPLODE: FlowStudy = {
   home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.5 },
   reach: 1,
   moments: { intro: 0, groove: 0, build: 1, drop: 0, rest: 0, outro: 0 },
-  knobs: { radial: -0.01, falloff: 0, swirl: 0, twist: 0 },
+  knobs: { ...NO_CURL, radial: -0.01, falloff: 0, swirl: 0, twist: 0 },
   mapping: [
     { from: 'tension', to: 'radial', gain: -0.4, curve: 'linear' },
     { from: 'energy', to: 'radial', gain: -0.08, curve: 'linear' },
@@ -173,12 +184,60 @@ const RADIAL_BURST: FlowStudy = {
   home: { drive: 0.75, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.85 },
   reach: 0.55,
   moments: { intro: 0, groove: 0, build: 0, drop: 1, rest: 0, outro: 0 },
-  knobs: { radial: 0.05, falloff: 2, swirl: 0, twist: 0 },
+  knobs: { ...NO_CURL, radial: 0.05, falloff: 2, swirl: 0, twist: 0 },
   mapping: [
     { from: 'impact', to: 'radial', gain: 1.1, curve: 'linear' },
     { from: 'release', to: 'radial', gain: 0.3, curve: 'linear' },
     { from: 'tension', to: 'radial', gain: -0.05, curve: 'linear' },
     { from: 'impact', to: 'falloff', gain: 2, curve: 'linear' },
+  ],
+  cost: 'cheap',
+}
+
+/**
+ * Slow noise that folds the picture over on itself, for the passages where
+ * nothing else is moving it: an intro, a rest, an outro. It is the curl of a
+ * smooth potential, so it drifts and stretches what is on the canvas without
+ * gathering it in one place or thinning it in another, and it needs no solver,
+ * which is also why it is the flow the WebGL2 path will use.
+ *
+ * It rests at 0.02 field widths a second at the fastest, about 50 pixels a
+ * second across a 2560 wide canvas, which is a drift you see over half a
+ * minute and not a motion you see over a second. That is on purpose: it sits
+ * under dye plumes in a quiet passage and must not fight them. It is also not
+ * silent at silence, since a flow is not asked to draw anything: at a silent
+ * packet it still carries what is left of the picture at that resting speed,
+ * so an outro that is fading to black keeps turning as it goes.
+ *
+ * Nothing sits still. Loudness and a lifting passage speed the drift, `pace`
+ * and `weight` set the size of the cells (a busy track finer, a bass-led one
+ * larger) and `pace` also hurries the pattern's own evolution. Tension speeds
+ * both the drift and the evolution: a riser in an intro reads as the picture
+ * beginning to churn. At tension 1 and a full packet the speed is 0.15, which
+ * is still about 385 pixels a second at the fastest point and well short of a
+ * flow that would smear a plume into a band.
+ *
+ * Its home is the middle of the space with the widest reach there is, because
+ * the catalogue gives it no character at all. The catalogue gives it the quiet
+ * moments and only those, so it is never the flow of a groove or a drop.
+ */
+const CURL_DRIFT: FlowStudy = {
+  id: 'curl-drift',
+  kind: 'flow',
+  name: 'Curl drift',
+  impl: 'analytic',
+  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.5 },
+  reach: 1,
+  moments: { intro: 1, groove: 0, build: 0, drop: 0, rest: 1, outro: 1 },
+  knobs: { radial: 0, falloff: 0, swirl: 0, twist: 0, curl: 0.02, curlScale: 3.5, curlRate: 0.05 },
+  mapping: [
+    { from: 'energy', to: 'curl', gain: 0.05, curve: 'linear' },
+    { from: 'swell', to: 'curl', gain: 0.02, curve: 'linear' },
+    { from: 'tension', to: 'curl', gain: 0.06, curve: 'linear' },
+    { from: 'pace', to: 'curlScale', gain: 2, curve: 'linear' },
+    { from: 'weight', to: 'curlScale', gain: -1, curve: 'linear' },
+    { from: 'pace', to: 'curlRate', gain: 0.05, curve: 'linear' },
+    { from: 'tension', to: 'curlRate', gain: 0.05, curve: 'linear' },
   ],
   cost: 'cheap',
 }
@@ -255,10 +314,30 @@ const RIBBON: InkStudy = {
 }
 
 /**
- * Prism's raymarched ridges. It is the expensive one and it covers the frame,
- * which is why Melt washes out on a drop; the handoff's fix is an ink
- * threshold of its own, and that needs a knob the implementation does not
- * have yet, so it is not in this card. Tension sweeps the zoom in.
+ * Prism's raymarched ridges, bright parts only. The fractal is a full-frame
+ * image and a full-frame ink fills a canvas that carries to its ceiling
+ * inside a second, which is why Melt washed out on a drop. `glint` is the
+ * threshold that makes it a glint: the ink drops its own dim body and adds
+ * only what reaches a share of the brightest the frame can be this instant,
+ * worked out in `scenes/kaleidoscope.params.ts`.
+ *
+ * It rests at 0.3 and rises with the two things that fill the frame. `energy`
+ * is the plain one: every band loud drives every fold and a lit pixel reaches
+ * the full enamel, so loud is when the ink must give the most back.
+ * `release` is the drop itself, which is louder still and lands on a canvas
+ * whose trails have just been let out again. Together they reach 0.85 at a
+ * full packet, where the ink lights 22.8 percent of the worst frame there is
+ * against 83.6 percent with the threshold off, measured on the adapter. They
+ * stop short of 1, which would be an ink that draws nothing at all.
+ *
+ * Its resting `intensity` is 0.5 rather than Prism's 1, because 1 was tuned
+ * for a canvas with no feedback and everything the director builds carries.
+ * Prism's cast puts it back, the way Melt's cast already pulled it down.
+ *
+ * Tension sweeps the zoom in, which is the catalogue's own entry for it: a
+ * build travels into the fold rather than changing what is drawn, and the
+ * threshold is left alone through a build because a build is the quiet part
+ * and the drive it is measured against has already fallen with the music.
  */
 const FRACTAL_GLINTS: InkStudy = {
   id: 'fractal-glints',
@@ -283,10 +362,12 @@ const FRACTAL_GLINTS: InkStudy = {
     thickness: 0.42,
     bassLift: 0,
     sparkle: 0.1,
-    intensity: 1,
+    intensity: 0.5,
     saturation: 1.1,
     colourShift: 0,
     colourDrift: 0.009,
+    glint: 0.3,
+    glintKnee: 0.35,
   },
   mapping: [
     { from: 'keyHue', to: 'colourShift', gain: 1, curve: 'linear' },
@@ -302,6 +383,8 @@ const FRACTAL_GLINTS: InkStudy = {
     { from: 'swell', to: 'saturation', gain: -0.06, curve: 'square' },
     { from: 'hardness', to: 'saturation', gain: -0.08, curve: 'square' },
     { from: 'tension', to: 'zoom', gain: -0.2, curve: 'linear' },
+    { from: 'energy', to: 'glint', gain: 0.3, curve: 'linear' },
+    { from: 'release', to: 'glint', gain: 0.25, curve: 'linear' },
   ],
   cost: 'heavy',
   excludes: ['dye-plumes'],
@@ -718,6 +801,7 @@ export const STUDIES: readonly Study[] = [
   TURBULENT_FLUID,
   IMPLODE,
   RADIAL_BURST,
+  CURL_DRIFT,
   DYE_PLUMES,
   RIBBON,
   FRACTAL_GLINTS,

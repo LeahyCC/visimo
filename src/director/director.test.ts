@@ -174,6 +174,37 @@ describe('pickCast', () => {
     expect(cast?.inks).toEqual(['groove-ink'])
   })
 
+  // The flow is chosen first, and the dye needs a fluid under it. A better
+  // scoring flow of another implementation used to leave the cast with no ink
+  // at all, which the director reads as "keep what is on screen": a black
+  // canvas at the start of a track.
+  it('passes over a flow that leaves every ink nothing to sit on', () => {
+    const other: FlowStudy = { ...flow('other-flow', moments({ intro: 1 })), impl: 'analytic' }
+    const fluid = flow('fluid-flow', moments({ intro: 0.6 }))
+    const needs = ink('needs-fluid', moments({ intro: 1 }), { requires: ['fluid'] })
+    const studies = [other, fluid, needs, ONE_LOOK]
+    const cast = pickCast({ studies, character: NEUTRAL, weights: weights({ intro: 1 }) })
+    expect(cast).toEqual({ flow: 'fluid-flow', inks: ['needs-fluid'], look: 'one-look' })
+    // With an ink that asks for nothing the better flow keeps its seat.
+    const free = ink('free-ink', moments({ intro: 1 }))
+    expect(
+      pickCast({ studies: [...studies, free], character: NEUTRAL, weights: weights({ intro: 1 }) })
+        ?.flow,
+    ).toBe('other-flow')
+  })
+
+  it('makes no cast when no flow leaves an ink', () => {
+    const other: FlowStudy = { ...flow('other-flow', moments({ intro: 1 })), impl: 'analytic' }
+    const needs = ink('needs-fluid', moments({ intro: 1 }), { requires: ['fluid'] })
+    expect(
+      pickCast({
+        studies: [other, needs, ONE_LOOK],
+        character: NEUTRAL,
+        weights: weights({ intro: 1 }),
+      }),
+    ).toBeUndefined()
+  })
+
   // The margin is what keeps two near-equal scores from swapping seats every
   // time the music is looked at.
   it('leaves a sitting member alone unless a challenger clears the margin', () => {

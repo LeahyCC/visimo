@@ -3,13 +3,14 @@ struct Params {
   form: vec4<f32>,   // morph, symmetry, zoom, depth
   detail: vec4<f32>, // fold budget, warp, thickness, sub expansion trim
   colour: vec4<f32>, // treble highlight trim, intensity, saturation, palette
-  response: vec4<f32>, // band gain, software adapter
+  response: vec4<f32>, // band gain, software adapter, glint level, glint knee
   bands: array<vec4<f32>, 5>, // level, hit envelope, phase, unused
 }
 @group(0) @binding(0) var<uniform> p: Params;
 const TAU = 6.28318530718;
 const LOD_LOW = 0.05;
 const LOD_HIGH = 0.25;
+const LUMA = vec3<f32>(0.2126,0.7152,0.0722);
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
   let xy = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
   return vec4<f32>(xy * 2.0 - 1.0, 0.0, 1.0);
@@ -100,6 +101,18 @@ fn surface(point: vec3<f32>, normal: vec3<f32>, ray: vec3<f32>, occlusion: f32) 
   }
   return colour;
 }
+// The threshold that makes this a glint rather than a full-frame image. The
+// CPU has already worked the level out against the brightest this frame can
+// be, in `kaleidoscope.params.ts`, which is where the reasoning is; here it is
+// a soft edge on the light's own luminance. The whole colour is scaled by the
+// one number, because limiting each channel would pull the three together and
+// bleach the ridge toward white.
+fn glintScale(light: vec3<f32>) -> f32 {
+  let level = p.response.z;
+  if(level<=0.0){return 1.0;}
+  let soft = max(1.0e-5,level*p.response.w);
+  return smoothstep(level-soft,level+soft,dot(light,LUMA));
+}
 fn sampleScene(pixel: vec2<f32>) -> vec4<f32> {
   var energy = 0.0;
   for(var b=0;b<5;b++){energy=max(energy,p.bands[b].x);}
@@ -137,8 +150,9 @@ fn sampleScene(pixel: vec2<f32>) -> vec4<f32> {
     colour = surface(point,normal,rd,occlusion);
   }
   colour = max(vec3<f32>(0.0),colour-vec3<f32>(min(colour.r,min(colour.g,colour.b))*0.7));
-  let grey = dot(colour,vec3<f32>(0.2126,0.7152,0.0722));
-  return vec4<f32>(max(vec3<f32>(0.0),mix(vec3<f32>(grey),colour,p.colour.z))*p.colour.y*2.2,1.0);
+  let grey = dot(colour,LUMA);
+  let light = max(vec3<f32>(0.0),mix(vec3<f32>(grey),colour,p.colour.z))*p.colour.y*2.2;
+  return vec4<f32>(light*glintScale(light),1.0);
 }
 
 

@@ -19,10 +19,13 @@ struct Field {
   rotate: vec4<f32>,
   // xy the canvas centre in field uv, z the radius of the canvas corner, w spare
   frame: vec4<f32>,
+  // x speed, y cells across the field, z the clock in turns, w spare
+  curl: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> field: Field;
 
+const PI = 3.141592653589793;
 const TWO_PI = 6.283185307179586;
 const E = 2.718281828459045;
 
@@ -52,6 +55,32 @@ fn radial_profile(t: f32, falloff: f32) -> f32 {
   return (max(t, 0.0) * exp(-falloff * max(t, 0.0))) / peak;
 }
 
+// One octave of the curl term, before `curl` scales it: the curl of
+// `w/k sin(u) sin(v)`, which is two plane waves pushing perpendicular to
+// themselves and so cannot gather or thin anything. `axis` is the octave's
+// own (cos - sin, cos + sin), `scale` its wavenumber over the base one,
+// `offset` and `turns` are the phase of each wave and how fast it turns, and
+// `clock` is in turns. The clock's share of the phase is taken with `fract`,
+// so it stays inside one turn however long the clock has been running.
+fn curl_octave(
+  p: vec2<f32>,
+  k: f32,
+  axis: vec2<f32>,
+  weight: f32,
+  offset: vec2<f32>,
+  turns: vec2<f32>,
+  clock: f32,
+) -> vec2<f32> {
+  let a = k * (axis.x * p.x + axis.y * p.y) + offset.x + TWO_PI * fract(turns.x * clock);
+  let b = k * (axis.y * p.x - axis.x * p.y) + offset.y + TWO_PI * fract(turns.y * clock);
+  let sin_a = sin(a);
+  let sin_b = sin(b);
+  return 0.5 * weight * vec2<f32>(
+    sin_a * axis.y + sin_b * axis.x,
+    -sin_a * axis.x + sin_b * axis.y,
+  );
+}
+
 @fragment
 fn fs(in: Blit) -> @location(0) vec4<f32> {
   let offset = in.uv - field.frame.xy;
@@ -67,7 +96,29 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
   // speed times the radius is a speed along the tangent, which is the perp of
   // the outward unit vector.
   let omega = TWO_PI * (field.rotate.x + field.rotate.y * max(1.0 - t, 0.0));
-  let velocity = speed * unit + omega * r * vec2<f32>(-unit.y, unit.x);
+  var velocity = speed * unit + omega * r * vec2<f32>(-unit.y, unit.x);
+
+  // The noise. The branch is on a uniform, so a flow whose curl is 0 pays for
+  // no sines at all. The three octaves are `CURL_OCTAVES` in the params file,
+  // in the same order and with the same numbers, unrolled so that nothing has
+  // to index an array by a runtime value.
+  if (field.curl.x != 0.0) {
+    let k = PI * field.curl.y;
+    let clock = field.curl.z;
+    var noise = curl_octave(
+      in.uv, k, vec2<f32>(1.0, 1.0), 0.55,
+      vec2<f32>(1.3, 4.1), vec2<f32>(1.0, -1.3125), clock,
+    );
+    noise += curl_octave(
+      in.uv, k * 2.0, vec2<f32>(-0.3660254037844386, 1.3660254037844386), 0.3,
+      vec2<f32>(2.7, 0.4), vec2<f32>(-1.8125, 2.3125), clock,
+    );
+    noise += curl_octave(
+      in.uv, k * 4.0, vec2<f32>(-1.3660254037844386, 0.3660254037844386), 0.15,
+      vec2<f32>(5.2, 3.3), vec2<f32>(2.8125, -3.25), clock,
+    );
+    velocity += field.curl.x * noise;
+  }
 
   return vec4<f32>(velocity, 0.0, 1.0);
 }

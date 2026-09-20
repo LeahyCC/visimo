@@ -9,7 +9,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 
 import { visibleExtent } from '../scenes/fluid.params'
 import { AnalyticFlow } from './analytic'
-import { ANALYTIC_SIZE, fieldCover } from './analytic.params'
+import { ANALYTIC_SIZE, ANALYTIC_UNIFORM_FLOATS, fieldCover } from './analytic.params'
 
 const packet = new Float32Array(8)
 
@@ -107,17 +107,71 @@ describe('an analytic flow', () => {
     expect(field?.cover).toEqual(fieldCover(visibleExtent(2560, 1440)))
   })
 
-  // The velocity is a rate and nothing here integrates, so the same knobs at
-  // two frame rates hand the shader exactly the same numbers. The feedback
-  // pass is what multiplies by the real step.
-  it('writes the same field at 60 frames a second and at 144', () => {
-    const slow = built()
-    slow.flow.update(packet, 1 / 60, { radial: -0.4, swirl: 0.2 }, 1)
-    step(slow)
-    const fast = built()
-    fast.flow.update(packet, 1 / 144, { radial: -0.4, swirl: 0.2 }, 1)
-    step(fast)
-    expect([...(fast.writes[0] ?? [])]).toEqual([...(slow.writes[0] ?? [])])
+  // The velocity is a rate, so the same knobs at two frame rates hand the
+  // shader the same numbers, and the feedback pass is what multiplies by the
+  // real step. The one exception is the curl clock, which is the sum of the
+  // real steps and so agrees after the same seconds and not before.
+  it('writes the same field at 60 frames a second and at 144, after the same seconds', () => {
+    const knobs = { radial: -0.4, swirl: 0.2, curl: 0.05, curlRate: 0.1 }
+    const at = (fps: number) => {
+      const gear = built()
+      for (let frame = 0; frame < fps * 3; frame += 1) {
+        gear.flow.update(packet, 1 / fps, knobs, 1)
+        step(gear)
+      }
+
+      return [...(gear.writes.at(-1) ?? [])]
+    }
+
+    const slow = at(60)
+    const fast = at(144)
+    expect(slow).toHaveLength(ANALYTIC_UNIFORM_FLOATS)
+    for (const [index, value] of slow.entries())
+      expect(fast[index], `float ${index}`).toBeCloseTo(value, 5)
+    // Three seconds at a tenth of a turn a second.
+    expect(slow[14]).toBeCloseTo(0.3, 5)
+  })
+
+  it('encodes nothing for a curl of 0 and one pass for a curl that is not', () => {
+    const quiet = built()
+    quiet.flow.update(packet, 1 / 60, { curl: 0, curlScale: 4, curlRate: 0.1 }, 1)
+    step(quiet)
+    expect(quiet.passes).toEqual([])
+    expect(quiet.flow.flow).toBeNull()
+
+    const drifting = built()
+    drifting.flow.update(packet, 1 / 60, { curl: 0.03, curlScale: 4, curlRate: 0.1 }, 1)
+    step(drifting)
+    expect(drifting.passes).toHaveLength(1)
+    const written = drifting.writes[0]
+    expect(written?.[12]).toBeCloseTo(0.03, 6)
+    expect(written?.[13]).toBe(4)
+    expect(drifting.flow.flow?.size).toBe(ANALYTIC_SIZE)
+  })
+
+  // The clock runs while the curl is off, so a build that brings it in finds
+  // the pattern where the seconds have left it, and stops when the flow is
+  // taken down, so a flow built again starts from the same place every time.
+  it('keeps its clock through a stretch with no curl and starts again from 0 once disposed', () => {
+    const gear = built()
+    for (let frame = 0; frame < 60; frame += 1) {
+      gear.flow.update(packet, 1 / 60, { curl: 0, curlRate: 0.2 }, 1)
+      step(gear)
+    }
+
+    gear.flow.update(packet, 1 / 60, { curl: 0.05, curlRate: 0.2 }, 1)
+    step(gear)
+    expect(gear.writes[0]?.[14]).toBeCloseTo(0.2 * (61 / 60), 5)
+
+    gear.flow.dispose()
+    gear.flow.init({
+      device: gear.device as unknown as GPUDevice,
+      format: 'rgba16float',
+      software: false,
+    })
+    gear.flow.update(packet, 1 / 60, { curl: 0.05, curlRate: 0.2 }, 1)
+    step(gear)
+    expect(gear.writes.at(-1)?.[14]).toBeCloseTo(0.2 / 60, 6)
   })
 
   it('stops offering a field on the frame its knobs go quiet', () => {

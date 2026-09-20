@@ -37,6 +37,7 @@ import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
 import { RibbonInk } from '../impls/RibbonInk'
+import { ShardsInk } from '../impls/ShardsInk'
 import { StreaksInk } from '../impls/StreaksInk'
 import { mergePostPatch, patchPostParams, postSummary } from '../post/params'
 import type { PostParams, PostPatch } from '../post/params'
@@ -589,6 +590,7 @@ class Renderer {
 
   private buildInk(impl: ImplId): InkImpl | null {
     if (impl === 'fractal') return new Kaleidoscope()
+    if (impl === 'shards') return new ShardsInk()
     if (impl === 'ribbon')
       return this.post
         ? new RibbonInk(this.post, () => this.bench?.waveform?.() ?? this.client?.waveform ?? null)

@@ -17,11 +17,12 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { ANALYTIC_RANGES } from '../impls/analytic.params'
+import { SHARD_RANGES } from '../impls/shards.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
 import { POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostKnob } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
-import type { AnalyticKnob, KaleidoscopeKnob } from '../presets/knobs'
+import type { AnalyticKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs'
 import { KALEIDOSCOPE_RANGES } from '../scenes/kaleidoscope.params'
 import { CASTS } from './casts/index'
 import { IMPL_IDS, implKnobs, isImplId, isImplKnob } from './impls'
@@ -89,15 +90,17 @@ const isAnalyticKnob = (knob: string): knob is AnalyticKnob =>
   Object.prototype.hasOwnProperty.call(ANALYTIC_RANGES, knob)
 const isStreaksKnob = (knob: string): knob is StreaksKnob =>
   Object.prototype.hasOwnProperty.call(STREAK_RANGES, knob)
+const isShardKnob = (knob: string): knob is ShardKnob =>
+  Object.prototype.hasOwnProperty.call(SHARD_RANGES, knob)
 
 /** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
 const SIGNED = new Set(['colourDrift'])
 
 /**
- * The safe range for one knob of one implementation. The fractal's and the
- * analytic flow's are their own files' tables; the post ones are the table
- * above; the fluid has no table, so the rule is the preset guard's, that
- * nothing but a signed knob may go negative.
+ * The safe range for one knob of one implementation. The fractal's, the
+ * analytic flow's and the shards' are their own files' tables; the post ones
+ * are the table above; the fluid has no table, so the rule is the preset
+ * guard's, that nothing but a signed knob may go negative.
  *
  * The analytic flow needs a table of its own rather than the fluid's rule,
  * because a pull and a push are one term at two signs: its `radial` is
@@ -109,6 +112,7 @@ function safeRange(impl: ImplId, knob: string): readonly [number, number] | unde
   if (impl === 'fractal' && isKaleidoscopeKnob(knob)) return KALEIDOSCOPE_RANGES[knob]
   if (impl === 'analytic' && isAnalyticKnob(knob)) return ANALYTIC_RANGES[knob]
   if (impl === 'streaks' && isStreaksKnob(knob)) return STREAK_RANGES[knob]
+  if (impl === 'shards' && isShardKnob(knob)) return SHARD_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
 }

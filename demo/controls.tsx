@@ -94,6 +94,14 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'ribbon.height': [0, 0.5],
   // 0 is the line and 1 the circle; the lane rounds anything between.
   'ribbon.shape': [0, 1],
+  // The shards. `size` is in frame heights and `speed` in frame heights a
+  // second; `intensity` above has the one range for every implementation.
+  'burst': [0, 160],
+  'hitRate': [0, 2],
+  'speed': [0, 4],
+  'size': [0, 0.12],
+  'spin': [0, 12],
+  'life': [0.2, 3],
   'feedback.amount': [0, 1],
   'feedback.decay': [0, 1],
   'feedback.zoom': [0.9, 1.1],
@@ -126,7 +134,7 @@ const rangesOf = (impl: ImplId): Partial<Record<string, readonly [number, number
 }
 
 /** Knobs the slider must step in whole numbers, whatever the range implies. */
-const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity', 'ribbon.shape'])
+const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity', 'ribbon.shape', 'burst'])
 
 /** Four times the resting value, or 0 to 1 when it rests at zero. */
 function spanOf(name: string, value: number): readonly [number, number] {

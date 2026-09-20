@@ -232,6 +232,26 @@ vi.mock('../impls/StreaksInk', () => ({
   },
 }))
 
+vi.mock('../impls/ShardsInk', () => ({
+  ShardsInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.shards = (impls.built.shards ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('shards', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('shards')
+    }
+    dispose() {
+      impls.disposed.shards = (impls.disposed.shards ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/FlowBlend', () => ({
   FlowBlend: class {
     init() {}
@@ -1184,6 +1204,63 @@ describe('the study bench', () => {
     // Nothing is built there, whichever implementations there are: counted
     // rather than listed, so a new one does not break this by existing.
     expect(Object.values(impls.built).reduce((sum, count) => sum + count, 0)).toBe(0)
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('builds the shards ink for its study, hands it its numbers and draws it in cast order', async () => {
+    const { draw } = await start()
+    renderer.setBench({
+      live: live('ribbon', 'shards', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.tension] = 0
+      },
+    })
+    draw(1000)
+    expect(impls.built.shards).toBe(1)
+    expect(impls.drawn).toEqual(['ribbon', 'shards'])
+    expect(impls.seen.shards?.presence).toBe(1)
+    const calm = impls.seen.shards?.knobs.intensity ?? 0
+    expect(Object.keys(impls.seen.shards?.knobs ?? {}).sort()).toEqual(
+      ['burst', 'hitRate', 'intensity', 'life', 'size', 'speed', 'spin'].sort(),
+    )
+
+    // The study's own tension row reaches the ink through the resolver.
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.tension] = 1
+      },
+    })
+    draw(2000)
+    expect(impls.seen.shards?.knobs.intensity).toBeLessThan(calm)
+  })
+
+  it('does not build the shards ink for a study that is faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('ribbon', 'shards', 'clean-glass')
+    const shards = cast.studies[1]
+    if (!shards) throw new Error('the shards are in the cast')
+    shards.presence = 0
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.built.shards).toBeUndefined()
+    expect(impls.updates.shards).toBeUndefined()
+    shards.presence = 0.5
+    draw(2000)
+    expect(impls.built.shards).toBe(1)
+    expect(impls.seen.shards?.presence).toBe(0.5)
+  })
+
+  it('skips the shards on the WebGL2 path, which has no compute and draws the fractal alone', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('ribbon', 'shards', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(1000)).not.toThrow()
+    expect(impls.built.shards).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

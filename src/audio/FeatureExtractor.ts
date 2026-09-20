@@ -45,6 +45,8 @@
  *                          0..1      how wide that rise was, as a fraction of the same span
  *   44     tempoConfidence 0..1      how well the chosen period correlates; gate `tempo` on it
  *   45     beatPhase       0..1      where in the beat we are, 0 on the beat and rising to the next
+ *   46     hardness        0..1      how abrupt and how saturated this track's hits are,
+ *                                    averaged over twenty seconds; 0.5 before any
  *
  * Each band detects its own onsets, against its own flux and its own adaptive
  * threshold, which is what lets one emitter answer the kick and another the
@@ -77,13 +79,21 @@
  * `tempoConfidence` says how much to believe it; both come from the tempo
  * tracker in `TempoTracker.ts`, which reads each band's own rise.
  *
+ * Row 46 belongs with rows 24 to 27 and sits here only because rows are
+ * added at the end. `hardness` is how a track's hits arrive rather than how
+ * often or how loudly: how much of a hit's window sits at its own ceiling,
+ * and how much of the spectrum its power is spread across, averaged over the
+ * hits of the last twenty seconds. `onsetStrength` cannot stand in for it,
+ * since that grades a hit against the loudest recent one and is therefore
+ * relative to the track.
+ *
  * Nothing on the GPU binds this. Every consumer reads the Float32Array on the
  * CPU, so the layout is free of any vec4 alignment. Rows are only ever added
  * at the end: the indices are public API.
  */
 import { TEMPO_MAX_BPM, TEMPO_MIN_BPM, TempoTracker } from './TempoTracker'
 
-export const PACKET_LENGTH = 46
+export const PACKET_LENGTH = 47
 
 /** The five bands, in order. Band `i` is packet slot `i`. */
 export const BAND_NAMES = ['sub', 'bass', 'lowMid', 'highMid', 'treble'] as const
@@ -144,6 +154,7 @@ export const F = {
   trebleHitWidth: 43,
   tempoConfidence: 44,
   beatPhase: 45,
+  hardness: 46,
 } as const
 
 export type BandSpec = {
@@ -329,6 +340,55 @@ const SWELL_LONG_MS = 30000
 const SWELL_RANGE_DB = 6
 const WEIGHT_MS = 10000
 const TEMPO_RAMP_MS = 5000
+// Hardness is a mean over the hits of roughly the last twenty seconds. Long
+// enough that one odd hit cannot move it, short enough that a track that
+// changes its character is followed inside a section.
+const HARDNESS_SECONDS = 20
+// A hit is watched for this long to see how much of it sits at its own
+// ceiling. The window is cut short by the next hit, and a hit with less than
+// half of it to itself is dropped rather than judged on two or three frames:
+// one struck sound often trips two bands a frame or two apart, and this is
+// what keeps the second reading of it from being scored on nothing.
+const HARDNESS_TAIL_SECONDS = 0.1
+const HARDNESS_MIN_TAIL_SECONDS = HARDNESS_TAIL_SECONDS / 2
+// Frames in a window, at the smallest step the extractor allows. Past this
+// the oldest is dropped, which can only happen on a run at 1000 frames a
+// second and costs the measure a few percent of its window.
+const HARDNESS_WINDOW_CAPACITY = 128
+// And the fewest a window may be scored on. One frame is at its own peak by
+// definition, so a run slow enough to put two frames in a tenth of a second
+// would read everything as held; under about 30 frames a second the measure
+// gathers no evidence at all and holds at its neutral, which is the honest
+// answer when the frames are wider than the thing being measured.
+const HARDNESS_MIN_FRAMES = 3
+// A frame within this much of the window's own peak counts as at the ceiling.
+const HARDNESS_CEILING = 0.9
+// Sound with no hit in it for this long is evidence of softness, at this
+// many hits' worth a second. Without it a pad, which has no onsets to
+// average, would sit on the neutral it started at for ever. Two seconds
+// because anything played on a kit hits more often than that, so a track
+// with drums never pays the drag.
+const HARDNESS_GAP_SECONDS = 2
+const HARDNESS_SOFT_PER_SECOND = 1
+// The neutral the measure starts at, and how many hits' worth of evidence it
+// is worth. A prior rather than a threshold, so there is no step the moment
+// the extractor decides it has heard enough: the value leaves 0.5 as fast as
+// the evidence arrives and never jumps.
+const HARDNESS_NEUTRAL = 0.5
+const HARDNESS_PRIOR = 4
+// How much of a hit's window sits within `HARDNESS_CEILING` of its own peak.
+// Measured on the synthetic pair at 60 and at 144 frames a second and at two
+// levels 20 dB apart: clipped kicks 0.71 to 0.87, soft pulses 0.43 to 0.57,
+// a full kit with hats in it 0.27 to 0.43.
+const HOLD_SOFT = 0.55
+const HOLD_HARD = 0.8
+// How much of the spectrum the hit's power is spread across, which is what a
+// clipper does to a sine: 1 for a flat spectrum, one over the bin count for
+// a single partial. Measured on the same runs: clipped kicks 0.029 to 0.038,
+// soft pulses 0.0026 to 0.0037, a kit with hats in it 0.031 to 0.17. Read on
+// a log scale, since the two ends are a decade apart and not a difference.
+const SPREAD_TONAL = 0.003
+const SPREAD_BROAD = 0.035
 const MIN_DT = 0.001
 const MAX_DT = 0.1
 // The span a hit's place is measured across, in octaves: 20 Hz to 16 kHz is
@@ -1015,6 +1075,158 @@ export class Structure {
   }
 }
 
+/**
+ * How hard the track hits, as a running mean over its hits.
+ *
+ * `onsetStrength` cannot answer this: it grades a hit against the loudest
+ * recent hit, so it says how big this one was for this track and nothing
+ * about whether the track's hits are sharp or soft in general. What separates
+ * a hardstyle kick from a busy jazz kit at the same pace and the same weight
+ * is the shape of one hit, and two numbers say it.
+ *
+ * The first is how much of the hundred milliseconds after a hit sits within a
+ * tenth of that window's own peak. A hit that arrives at once and is held
+ * there is at its ceiling for nearly the whole window, which is what a
+ * clipper and a limiter between them do to a sound; a hit that swells into
+ * place or rings away is at its ceiling only in passing. The window is
+ * measured against its own peak, so a level change cannot touch it.
+ *
+ * The second is how much of the spectrum the hit's power is spread across:
+ * the mean magnitude squared over the mean square, which is 1 for a flat
+ * spectrum and one over the bin count for a single partial. A clipped hit is
+ * a square wave and its harmonics run to Nyquist; a soft one is a partial or
+ * two standing over the floor. It is a ratio of magnitudes to magnitudes, so
+ * it too is untouched by level.
+ *
+ * Neither is enough alone, and the pair is chosen for what the other rules
+ * out. Hats and brushes are broadband, so a jazz kit reads as spread as a
+ * clipped kick does and the spread alone would call it the harder of the two;
+ * what it does not do is hold, since a hat is over in a fraction of the
+ * window. A bass note swelling under a pad holds, but is one partial.
+ *
+ * What did not work. Attack time, as the share of a hit's rise landing in its
+ * first analyser frame against the following 100 ms, moved with the frame
+ * rate: the detector fires the moment the flux crosses its threshold, which
+ * at 144 frames a second is part of the way up the ramp and at 60 is most of
+ * the way. The crest of the flux trace, peak over mean, does not move with
+ * the frame rate but barely moves with the music either, 0.68 to 0.71 for
+ * clipped kicks against 0.67 to 0.73 for soft pulses, because the flux is a
+ * rise in log magnitude and the loudest part of any attack in log terms is
+ * the quiet beginning of it, whatever shape the rest has. Spectral flatness
+ * proper, the geometric mean of the spectrum over its arithmetic mean, needs
+ * a floor under the geometric mean, and with the -60 dB floor the rest of
+ * this file uses nearly every bin at fftSize 4096 is under it: it read 0.65
+ * for the clipped kicks and 0.84 for the soft pulses, which is both saturated
+ * and the wrong way round.
+ *
+ * The mean is kept as a decayed sum over a decayed count, which is what makes
+ * it slow and what makes it hold: a frame with nothing in it steps neither,
+ * so the ratio is exactly where the last sound left it, the way `weight`
+ * holds its centroid. A neutral 0.5 is carried as a prior worth a few hits
+ * rather than as a value held until a threshold, so the measure leaves the
+ * middle as fast as the evidence arrives and never steps. Neutral rather than
+ * 0 because a track that has not been heard yet is not a soft track, and 0.5
+ * is where a scene would put an unknown.
+ */
+export class Hardness {
+  /** Scores of the hits heard, and how many, both decayed over the window. */
+  private sum = 0
+  private evidence = 0
+  private sinceHit = Infinity
+  /** The open hit's window: the loudness of each frame and its step. */
+  private readonly levels = new Float32Array(HARDNESS_WINDOW_CAPACITY)
+  private readonly steps = new Float32Array(HARDNESS_WINDOW_CAPACITY)
+  private frames = 0
+  private peak = 0
+  private elapsed = 0
+  private spread = 0
+  private open = false
+
+  /**
+   * `loudness` is the raw RMS across the span, the same one `swell` reads,
+   * and `spread` is how much of the spectrum this frame's power covers.
+   */
+  step(hit: boolean, loudness: number, spread: number, dt: number): number {
+    // Nothing in the frame and no hit being measured: the mean is left
+    // exactly where the last sound put it.
+    if (loudness <= 0 && !hit && !this.open) return this.value()
+    const keep = Math.exp(-dt / HARDNESS_SECONDS)
+    this.sum *= keep
+    this.evidence *= keep
+    // The window runs until the next hit or the full tail, and the frame a
+    // hit arrives on belongs to that hit and not to the one before it.
+    if (this.open) {
+      if (hit || this.elapsed >= HARDNESS_TAIL_SECONDS) this.close()
+      else this.add(loudness, dt)
+    }
+
+    if (hit) {
+      this.open = true
+      this.frames = 0
+      this.peak = 0
+      this.elapsed = 0
+      this.spread = spread
+      this.sinceHit = 0
+      this.add(loudness, dt)
+    } else {
+      this.sinceHit += dt
+      // Softness is only evidence when there is something to hear: under the
+      // quiet floor there is no telling a pad from a room.
+      if (loudness >= QUIET && this.sinceHit >= HARDNESS_GAP_SECONDS)
+        this.evidence += HARDNESS_SOFT_PER_SECOND * dt
+    }
+
+    return this.value()
+  }
+
+  private value() {
+    return clamp01(
+      (this.sum + HARDNESS_NEUTRAL * HARDNESS_PRIOR) / (this.evidence + HARDNESS_PRIOR),
+    )
+  }
+
+  private add(loudness: number, dt: number) {
+    if (this.frames < HARDNESS_WINDOW_CAPACITY) {
+      this.levels[this.frames] = loudness
+      this.steps[this.frames] = dt
+      this.frames++
+    }
+
+    this.peak = Math.max(this.peak, loudness)
+    this.elapsed += dt
+  }
+
+  /** Score the hit whose window has just ended, and fold it into the mean. */
+  private close() {
+    this.open = false
+    if (
+      this.elapsed < HARDNESS_MIN_TAIL_SECONDS ||
+      this.frames < HARDNESS_MIN_FRAMES ||
+      this.peak <= 0
+    )
+      return
+    // The share is of time and not of frames, so the window reads the same at
+    // any frame rate.
+    let held = 0
+    let total = 0
+    for (let at = 0; at < this.frames; at++) {
+      const step = this.steps[at] ?? 0
+      total += step
+      if ((this.levels[at] ?? 0) >= HARDNESS_CEILING * this.peak) held += step
+    }
+
+    if (total <= 0) return
+    const hold = clamp01((held / total - HOLD_SOFT) / (HOLD_HARD - HOLD_SOFT))
+    const spread = clamp01(
+      Math.log(Math.max(this.spread, 1e-9) / SPREAD_TONAL) / Math.log(SPREAD_BROAD / SPREAD_TONAL),
+    )
+    // Averaged rather than multiplied: a clipped kick with no top end is
+    // still a hard sound, and a product would call it soft.
+    this.sum += (hold + spread) / 2
+    this.evidence += 1
+  }
+}
+
 /** What kind of track this is, and where in it we are. */
 export type Character = {
   /** Onsets a second, decayed over half a minute and scaled. */
@@ -1025,6 +1237,8 @@ export type Character = {
   weight: number
   /** The BPM guess across 60 to 200, smoothed so it ramps rather than steps. */
   tempo: number
+  /** How abrupt and how saturated this track's hits are. 0.5 before any. */
+  hardness: number
 }
 
 /** What one frame hands the song: the whole-spectrum numbers it is summarised by. */
@@ -1038,6 +1252,12 @@ export type Frame = {
    */
   brightness: number
   bpm: number
+  /**
+   * How much of the spectrum this frame's power is spread across: the mean
+   * magnitude squared over the mean square, 1 for a flat spectrum and one
+   * over the bin count for a single partial.
+   */
+  spread: number
 }
 
 /**
@@ -1047,7 +1267,7 @@ export type Frame = {
  * be calm through a ballad and busy through drum and bass without a preset
  * being swapped.
  *
- * All four are slow on purpose. The point is a number that has made up its
+ * All five are slow on purpose. The point is a number that has made up its
  * mind, not another thing that flickers, so nothing here is allowed to move
  * quickly even when the music does.
  *
@@ -1062,6 +1282,7 @@ export class Song {
   private readonly brightness = new Envelope(WEIGHT_MS, WEIGHT_MS)
   private brightnessSeen = false
   private readonly ramp = new Envelope(TEMPO_RAMP_MS, TEMPO_RAMP_MS)
+  private readonly hardness = new Hardness()
   private elapsed = 0
 
   /**
@@ -1074,7 +1295,7 @@ export class Song {
    * anything with a kick and a hat in it.
    */
   step(frame: Frame, dt: number): Character {
-    const { onset, loudness, brightness, bpm } = frame
+    const { onset, loudness, brightness, bpm, spread } = frame
     this.elapsed += dt
     // A decayed count rather than a rate measured between hits: it needs no
     // memory of when the last one was and it cannot spike on one close pair.
@@ -1111,11 +1332,16 @@ export class Song {
     const target = bpm > 0 ? clamp01((bpm - TEMPO_MIN_BPM) / (TEMPO_MAX_BPM - TEMPO_MIN_BPM)) : null
     const tempo = target === null ? this.ramp.value : this.ramp.step(target, dt)
 
+    // Hardness reads the raw RMS for the same reason swell does, and because
+    // a hit's window is judged against its own peak rather than against any
+    // fixed level.
+    const hardness = this.hardness.step(onset, loudness, spread, dt)
     return {
       pace: clamp01(this.paceCount / PACE_SECONDS / PACE_FULL),
       swell,
       weight,
       tempo,
+      hardness,
     }
   }
 }
@@ -1287,6 +1513,9 @@ export class FeatureExtractor {
     let squares = 0
     let flux = 0
     let centroid = 0
+    // The mean magnitude, for the spread the hardness of a hit is read from;
+    // gathered here because the pass is already running.
+    let sum = 0
     for (let index = 0; index < weights.length; index++) {
       const weight = weights[index] ?? 0
       if (weight === 0) continue
@@ -1295,6 +1524,7 @@ export class FeatureExtractor {
       const power = weight * magnitude * magnitude
       squares += power
       centroid += power * (this.logFrequencies[bin] ?? 0)
+      sum += weight * magnitude
       const rise = (logs[bin] ?? 0) - (previousLogs[bin] ?? 0)
       if (rise > 0) flux += weight * rise
     }
@@ -1308,6 +1538,11 @@ export class FeatureExtractor {
             (centroid / squares - LOW_GROUP_CENTROID) / (HIGH_GROUP_CENTROID - LOW_GROUP_CENTROID),
           )
         : NaN
+    // How much of the spectrum the power is spread across: the mean magnitude
+    // squared over the mean square, which is the share of the bins a flat
+    // spectrum of this shape would need. A ratio of magnitudes to magnitudes,
+    // so it says nothing about how loud the frame was.
+    const spread = squares > 0 ? (sum * sum) / (total * squares) : 0
 
     // The chroma, from the peaks of the log spectrum. A peak's frequency is
     // refined between bins with a parabola through its neighbours, since a
@@ -1357,13 +1592,14 @@ export class FeatureExtractor {
     // bins barely moves the flux of the whole spectrum; the global detector
     // is for broadband hits and the beat pulse the post stack reads.
     const song = this.song.step(
-      { onset: anyBand || whole.onset, loudness: rms, brightness, bpm: beat.bpm },
+      { onset: anyBand || whole.onset, loudness: rms, brightness, bpm: beat.bpm, spread },
       dt,
     )
     packet[F.pace] = song.pace
     packet[F.swell] = song.swell
     packet[F.weight] = song.weight
     packet[F.tempo] = song.tempo
+    packet[F.hardness] = song.hardness
 
     const harmony = this.harmony.step(dt)
     packet[F.keyHue] = harmony.keyHue

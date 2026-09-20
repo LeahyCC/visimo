@@ -165,7 +165,7 @@ export class Hud {
     // way to tell whether one is worth mapping is to watch this line for a
     // while before wiring it to a knob.
     ctx.fillText(
-      `pace ${slow(F.pace)}  swell ${slow(F.swell)}  weight ${slow(F.weight)}  tempo ${slow(F.tempo)}`,
+      `pace ${slow(F.pace)}  swell ${slow(F.swell)}  weight ${slow(F.weight)}  tempo ${slow(F.tempo)}  hard ${slow(F.hardness)}`,
       x + 8,
       top + height + 26,
     )

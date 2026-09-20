@@ -172,6 +172,18 @@ const BUILT_LIGHT: Record<string, Record<string, { max: number; why: string }>> 
 }
 
 /**
+ * What a flow that has no curl in it says of the three curl knobs. Its speed
+ * is 0 and the other two are the shape curl drift rests at, which is why they
+ * sit still and not because nobody thought of them.
+ */
+const UNUSED_CURL = {
+  curl: 'the curl term is off in this flow, and its speed at 0 is what off means',
+  curlScale:
+    'a shape of the curl term, held where curl drift rests so a change to it blends only speed',
+  curlRate: 'the same: a shape of the curl term, held where curl drift rests',
+}
+
+/**
  * Knobs a study deliberately leaves still, and why. A knob that is in neither
  * this list nor a mapping row fails, so leaving one static is a decision
  * someone writes down rather than an oversight.
@@ -200,9 +212,17 @@ const ALLOWED: Record<string, Record<string, string>> = {
       'a plain zoom about the middle: the shape of the pull is what makes it read as gathering',
     swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
     twist: 'the same, and a twist that varies with radius is the polar twist study',
+    ...UNUSED_CURL,
   },
   'radial-burst': {
     swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
+    twist: 'the same, and a twist that varies with radius is the polar twist study',
+    ...UNUSED_CURL,
+  },
+  'curl-drift': {
+    radial: 'this flow is the curl term alone; a pull to the middle is the implode study',
+    falloff: 'the shape of the radial term, which this flow does not use',
+    swirl: 'this flow is the curl term alone; a turn about the centre is the vortex study',
     twist: 'the same, and a twist that varies with radius is the polar twist study',
   },
   'dye-plumes': {

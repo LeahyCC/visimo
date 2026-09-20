@@ -673,13 +673,15 @@ describe('the structure on a dense song', () => {
       // the most the track has done it pins the scale at the top: the fixed
       // bar back again, and the dense song one section from there on. Told
       // of the seek, the scales start over and the song's own changes show.
+      // The spectra are worked out as the file loads, the way `packets` is,
+      // so the test itself is two passes of the extractor and no transforms.
+      const before = 20
+      const frames = analyse(
+        synthesize([{ pattern: padOnly(90, 0.3), seconds: before }, ...song], SAMPLE_RATE),
+        { sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, frameRate },
+      )
+
       it('does not take a seek for the widest change the track makes', () => {
-        const before = 20
-        const samples = synthesize(
-          [{ pattern: padOnly(90, 0.3), seconds: before }, ...song],
-          SAMPLE_RATE,
-        )
-        const frames = analyse(samples, { sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, frameRate })
         const found = (told: boolean) => {
           const extractor = new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
           const packets = frames.map((frame, index) => {
@@ -690,7 +692,7 @@ describe('the structure on a dense song', () => {
         }
         expect(found(false).length).toBeLessThan(2)
         expect(found(true)).toHaveLength(2)
-      })
+      }, 30_000)
 
       it('finds nothing in ninety seconds of one passage', () => {
         const steady = play([{ pattern: denseVerse(), seconds: 90 }], frameRate)

@@ -535,14 +535,14 @@ Three pieces feed it. `character.ts` is where the song sits in the five axes, sm
 The rules, each with a test in `director.test.ts`:
 
 - **Changes land on the music.** A cast is picked on a change of `section` or on `impact`, never on a timer. The extractor confirms a section about six seconds late, so a `novelty` spike starts a fade toward a challenger and the confirmed section settles it.
-- **The drop is a cut.** On `impact` the new cast is whole inside a tenth of a second. Everything else glides over seconds.
+- **The drop is a cut.** On `impact` the new cast is whole inside a tenth of a second. Everything else glides over seconds. The trigger sits at a half and not near the top: `impact` is 1 for a single frame, and one packet read late at 30 frames a second already sees 0.83, so a trigger at 0.9 lost the drop to one janky frame.
 - **No flicker.** A challenger has to clear the margin over a sitting member to unseat it. Close scores change nothing.
-- **A section that comes back gets the cast it had**, keyed on the section id in the packet.
-- **Determinism.** Same packets in, same casts out. Any tie-break is seeded from the section id and the settled character, never `Math.random` and never the clock.
+- **A section that comes back gets the cast it had**, keyed on the section id in the packet. A cast picked before the character is half settled is not remembered, because it is the neutral opening guess, and a track that opens straight into its main groove would be handed that guess every time the groove returned.
+- **Determinism.** Same packets in, same casts out. Any tie-break is seeded from the section id and the settled character, never `Math.random` and never the clock. The character is read for the seed once, when it has settled, and rounded to quarters. Hashed afresh at every boundary to sixteenths, it undid the determinism it was there for: real packets differ a little between two plays of a track, and some axis was within that little of a rounding edge at most boundaries.
 - **Variety without randomness.** Where several studies score within the margin of one another, a section rotates among the top few by its rank, so the second verse gets a cousin of the first rather than a copy. A returning section still recalls its own.
 - **The first thirty seconds.** Until the character has settled, the score reads a study's `reach` in place of its closeness, so a track opens on the studies whose welcome is widest and drifts into its own.
 - **A study at presence 0 is not in the output at all**, so the renderer never touches one that is off.
-- **A pinned cast turns the director off.** Given one it returns that cast at presence 1 and nothing else, and still passes tension through.
+- **A pinned cast turns the director off.** Given one it returns that cast at presence 1 and nothing else, and still passes tension through. It still reads the character and the moment, since a host saves the character for the next play of the track and the overlay shows both.
 - **Frame rate independence.** Ninety seconds of packets at 60 and at 144 frames a second produce the same cast changes at the same times, within one frame.
 
 The options, all of them on the constructor:

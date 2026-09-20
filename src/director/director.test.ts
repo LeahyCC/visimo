@@ -399,6 +399,61 @@ describe('how a change lands', () => {
 
     expect(cuts).toBe(1)
   })
+
+  // The packet that holds impact at 1 is one frame long, and a janky frame
+  // can miss it. One packet late at 30 frames a second it reads 0.83.
+  it('still cuts when the frame that held the impact was never read', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    settle(director, packet({ section: 1 }), 10)
+    const late = Math.exp(-(1 / 30) / 0.18)
+    expect(late).toBeLessThan(0.9)
+    director.step(packet({ section: 1, release: 0.5, impact: late }), 1 / 30)
+    expect(director.cast?.flow).toBe('drop-flow')
+    const frame = run(director, packet({ section: 1, release: 0.5 }), 0.1)
+    expect(presenceOf(frame.live, 'drop-flow')).toBe(1)
+  })
+})
+
+describe('what a section is remembered by', () => {
+  // A track that opens straight into a section is given the neutral guess
+  // for it, since nothing is known yet. Remembered, that guess would be what
+  // the section got every time it came back.
+  it('does not remember a cast it picked before it knew the track', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    run(director, packet({ section: 1 }), 5)
+    expect(director.settled).toBe(0)
+    expect(director.cast?.inks).toContain('groove-ink')
+    run(director, packet({ section: 2 }), 40)
+    // Section 1 again, and this time it is a quiet passage. Recalled, it
+    // would be handed the groove cast it opened with.
+    run(director, packet({ section: 1, rest: 1 }), 1)
+    expect(director.cast?.inks).toContain('quiet-ink')
+    expect(director.cast?.inks).not.toContain('groove-ink')
+  })
+
+  it('remembers one it picked once the track was known', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    run(director, packet({ section: 1 }), 40)
+    expect(director.settled).toBe(1)
+    run(director, packet({ section: 2, rest: 1 }), 10)
+    const quiet = name(director.cast)
+    run(director, packet({ section: 3 }), 10)
+    expect(name(director.cast)).not.toBe(quiet)
+    // Section 2 comes back as a groove, and still gets the cast it had.
+    run(director, packet({ section: 2 }), 1)
+    expect(name(director.cast)).toBe(quiet)
+  })
+
+  // Real packets differ a little from one play of a track to the next. The
+  // seed is read from the character once and coarsely, so that little cannot
+  // send the same song to different cousins.
+  it('plays the same song the same way when the character reads a hair differently', () => {
+    const edge: Character = { ...HOUSE, tonality: 0.531, hardness: 0.469 }
+    const hair: Character = { ...HOUSE, tonality: 0.532, hardness: 0.468 }
+    const one = cue(new Director({ studies: STUDIES }), 60, edge)
+    const two = cue(new Director({ studies: STUDIES }), 60, hair)
+    expect(two).toEqual(one)
+  })
 })
 
 describe('a pinned cast', () => {
@@ -425,6 +480,18 @@ describe('a pinned cast', () => {
       before,
     )
     expect(director.cast).toBeUndefined()
+  })
+
+  // Nothing is chosen by them under a pinned cast, but a host saves the
+  // character for the next play and the overlay shows both.
+  it('still reads the character and the moment', () => {
+    const director = new Director({ pinned })
+    for (const { dt, features } of playSong(60, HARDSTYLE, 120)) director.step(features, dt)
+    expect(director.settled).toBe(1)
+    expect(director.character.hardness).toBeGreaterThan(0.8)
+    expect(director.character.steadiness).toBeGreaterThan(0.7)
+    director.step(packet({ section: 1, tension: 0.8 }), 1 / 60)
+    expect(director.weights.build).toBeCloseTo(0.8)
   })
 })
 

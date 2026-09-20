@@ -74,9 +74,24 @@ export const DEFAULT_VARIETY = 3
  */
 const INK_SHARE = 0.4
 
-/** `impact` is 1 on the frame the payoff lands and decays over about 180 ms. */
-const IMPACT_ON = 0.9
+/**
+ * `impact` is 1 on the frame the payoff lands and falls to 1/e in 180 ms.
+ * The trigger sits at a half and not near the top, because the packet that
+ * holds the 1 can be the one a janky frame never reads: one packet late at
+ * 30 frames a second already reads 0.83. Nothing but a fresh impact climbs
+ * through a half, and the rearm below it is what makes one drop one cut, so
+ * the low trigger costs nothing.
+ */
+const IMPACT_ON = 0.5
 const IMPACT_OFF = 0.3
+
+/**
+ * How settled the character has to be before a section's cast is worth
+ * remembering. Below it the pick is the neutral opening guess, and a track
+ * that opens straight into its main groove would have that guess handed back
+ * every time the groove returned.
+ */
+const MEMORY_SETTLED = 0.5
 
 /** What the extractor itself calls a candidate boundary, and where it rearms. */
 const NOVELTY_ON = 0.4
@@ -231,18 +246,23 @@ export function pickCast(options: PickOptions): PickedCast | undefined {
 }
 
 /**
- * A small integer from the section and the character, so that two tracks do
- * not rotate through the same cousins in the same order while one track does
- * it the same way every time it is played. The character is quantised, so a
- * reading that drifts by a hundredth does not change where a section starts
- * counting from. Never the clock and never `Math.random`.
+ * A small integer from the track's character, so that two tracks do not
+ * rotate through the same cousins in the same order. It is read once, when
+ * the character has settled, and kept for the track: see `trackSeed`. The
+ * character is rounded to quarters, which is coarse enough that a track sits
+ * well inside a cell on most axes and fine enough that lo-fi and hardstyle
+ * land in different ones. Never the clock and never `Math.random`.
  */
-function seedOf(section: number, character: Character): number {
-  let hash = Math.round(section) * 2654435761
+function characterSeed(character: Character): number {
+  let hash = 0
   for (const axis of CHARACTER_AXES)
-    hash = (hash ^ (Math.round(character[axis] * 16) * 2246822519)) >>> 0
+    hash = (hash ^ (Math.round(character[axis] * 4) * 2246822519)) >>> 0
   return hash % 1009
 }
+
+/** Where a section starts counting its rotation from. */
+const seedOf = (section: number, trackSeed: number): number =>
+  ((Math.round(section) * 2654435761 + trackSeed) >>> 0) % 1009
 
 export type DirectorOptions = {
   studies?: readonly Study[]
@@ -294,6 +314,17 @@ export class Director {
   private current: PickedCast | undefined
   private section = 0
   private rank = 0
+  /**
+   * The character's share of the rotation seed, read once when the character
+   * has settled and then kept. The first cut hashed the character afresh at
+   * every boundary, to sixteenths, and that undid the determinism it was
+   * there for: real analyser packets differ a little from one play to the
+   * next, some axis was within that little of a rounding edge at most
+   * boundaries, and the same song then rotated to different cousins. Read
+   * once, there is one such chance in a track and not one per section.
+   * Undefined until then, and the seed is the section's alone.
+   */
+  private trackSeed: number | undefined
   private ramp = DEFAULT_GLIDE_SECONDS
   private impactHeld = false
   private noveltyHeld = false
@@ -337,10 +368,14 @@ export class Director {
 
   step(features: Float32Array, dt: number): DirectorFrame {
     this.frame.tension = features[F.tension] ?? 0
-    if (this.pinned) return this.frame
+    // Read even when a cast is pinned and nothing will be chosen by them: a
+    // host saves the character for the next play of the track, and the
+    // overlay shows both, under a pinned preset as much as under none.
     const character = this.reader.step(features, dt)
     const weights = this.moment.step(features, dt)
+    if (this.pinned) return this.frame
     const settled = this.reader.settled
+    if (this.trackSeed === undefined && settled >= 1) this.trackSeed = characterSeed(character)
     const section = features[F.section] ?? 0
     const impact = this.fired(features[F.impact] ?? 0)
     const novelty = this.spiked(features[F.novelty] ?? 0)
@@ -379,10 +414,10 @@ export class Director {
     // Nothing has been confirmed yet, so there is nothing to rotate against:
     // the opening cast is the plain best, which while the character is still
     // a guess is the neutral one.
-    const rotation = section > 0 ? this.rank + seedOf(section, character) : 0
+    const rotation = section > 0 ? this.rank + seedOf(section, this.trackSeed ?? 0) : 0
     const picked = this.pick(character, weights, settled, rotation)
     if (!picked) return
-    if (section > 0) this.memory.set(section, picked)
+    if (section > 0 && settled >= MEMORY_SETTLED) this.memory.set(section, picked)
     this.take(picked, cut ? this.cutSeconds : this.glideSeconds)
   }
 

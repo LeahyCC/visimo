@@ -106,7 +106,11 @@ const MEMORY_SETTLED = 0.5
 const SECTION_LAG = 6
 const SECTION_SLACK = 1.5
 
-/** What the extractor itself calls a candidate boundary, and where it rearms. */
+/**
+ * What the extractor itself calls a candidate boundary, and where it rearms.
+ * The row is relative to the track's own reach, so this is the same bar on a
+ * dense track as on a dance one.
+ */
 const NOVELTY_ON = 0.4
 const NOVELTY_OFF = 0.25
 

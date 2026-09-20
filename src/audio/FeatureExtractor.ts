@@ -36,7 +36,8 @@
  *   29     keyClarity      0..1      how surely a key is heard: 0 on silence or drums alone
  *   30     harmonicChange  0..1      how far the harmony has moved in the last two seconds
  *   31     recall          0..1      how closely this passage matches one heard earlier
- *   32     novelty         0..1      how different this passage is from ten seconds ago
+ *   32     novelty         0..1      how far this passage has moved from ten seconds ago,
+ *                                    against the widest this track has moved
  *   33     section         1..       which section this is; a number comes back with its passage
  *   34-38  subHitCentre..trebleHitCentre
  *                          0..1      where across the spectrum, in octaves from 20 Hz to
@@ -478,25 +479,81 @@ const COMPARE_SECONDS = 0.5
 const STRUCTURE_WARM_SECONDS = 4
 // Novelty compares now with this long ago.
 const NOVELTY_LAG_SECONDS = 10
-// Cosine similarities mapped onto recall. On a real track the drops matched
-// one another at 1.00 and a verse its own return at 0.98 to 0.99, while a
-// drop against the intro sat at 0.96 and against a verse at 0.94, so the
-// map is steep and sits just above those.
-const RECALL_LOW = 0.94
-const RECALL_HIGH = 0.99
-const NOVELTY_GAIN = 5
+// The reach: how far apart this track puts two moments ten seconds apart, as
+// a cosine distance, at its own furthest. Everything below is a share
+// of it rather than a level, because a distance means nothing on its own: a
+// wall of guitars and cymbals moves 0.08 between a verse and a chorus where
+// a dance track moves 0.2 between its intro and its drop, and a fixed bar
+// that suits the second hears no structure at all in the first. It is a
+// peak and not a mean because what is wanted is the size of this track's
+// biggest change, which is what its boundaries are made of, and a peak of a
+// quantity is how every band level here is already scaled.
+//
+// Pinned at FULL, which is where the old fixed gain of five put full scale,
+// so a track whose passages already reach that far reads exactly as it did
+// and the worst a freak peak can do is put a track back to that. The floor
+// is four times the 0.013 a steady synthetic passage wanders by and well
+// under the 0.08 the densest real track measured reaches at its boundaries,
+// so a passage that is going nowhere cannot be stretched into structure.
+const NOVELTY_REACH_FULL = 0.2
+const NOVELTY_REACH_FLOOR = 0.05
+// Both scales are the largest the track has shown and are held for the whole
+// of it, since they are properties of the track and not of the last passage:
+// a scale that fell back between two drops would lower the bar for a
+// candidate and tighten the test that throws fills out at the same time,
+// which is the wrong way round. Until the track has run this long they are
+// taken to be full, so that the first change heard cannot set them by
+// itself; thirty seconds is what it took all four measured tracks to show
+// their widest change.
+const SCALE_WARM_SECONDS = 30
+// How long after a start or a seek before either scale takes anything in. The
+// novelty's lag is ten seconds and the snapshot it reaches back to is itself a
+// mean over the two before that, and after a seek the section the window is
+// measured against is still the one the playhead left until the jump has been
+// confirmed as a boundary, six seconds after six. Eighteen clears both, and at
+// the start of a track it is inside the warm-up, where the scales are not read.
+const SCALE_SETTLE_SECONDS = 18
+// Distances mapped onto recall, as shares of the reach. At a full reach they
+// are the 0.94 and 0.99 similarities the map was read off a real track with:
+// the drops matched one another at 1.00 and a verse its own return at 0.98
+// to 0.99, while a drop against the intro sat at 0.96 and against a verse at
+// 0.94, so the map is steep and sits just above those.
+const RECALL_FAR = 0.3
+const RECALL_NEAR = 0.05
 // A boundary starts as a candidate, novelty at or past this once a section
 // has run this long, and is confirmed a few seconds later by the new
-// passage's mean against the ending section's: at least this similar and
-// it was a fill, not a section. The candidate is a level rather than a
-// rising edge, because a riser running straight into a drop keeps the
-// novelty up across both and an edge would miss the second. A confirmed boundary joins an old
-// section when the recall to it is at least this.
+// passage's mean against the ending section's. The candidate is a level
+// rather than a rising edge, because a riser running straight into a drop
+// keeps the novelty up across both and an edge would miss the second. A
+// confirmed boundary joins an old section when the recall to it is at least
+// this.
 const CANDIDATE_NOVELTY = 0.4
 const MIN_SECTION_SECONDS = 6
 const CONFIRM_SECONDS = 6
-const SAME_SECTION_SIMILARITY = 0.965
 const RECALL_TO_REJOIN = 0.6
+// The gap: how far a six-second window of this track gets from its section's
+// mean, at its own furthest. The confirmation compares two means and not two
+// moments, and means of a dense track converge on each other: a candidate's
+// mean on the metal track sits 0.001 to 0.016 from the section it would end
+// where the demo track's sits 0.017 to 0.158. The reach cannot stand in for
+// that, being measured on the unsmoothed vector and so mostly jitter on
+// dense music, and as a share of it the two tracks' fills and boundaries
+// overlap. A candidate closer to the section it would end than this share of
+// the gap was a fill: over four real tracks and the synthetic story every
+// fill sat at 0.65 or under and every boundary at 0.71 or over, so the bar
+// sits between them.
+//
+// The window is six seconds because that is the span the candidate's own
+// mean covers, so the yardstick is the same quantity the test is. Full is
+// the gap whose share is the 0.035 that the fixed similarity of 0.965 came
+// to, so a track that opens its passages that wide reads exactly as it did.
+// The floor is the guard a share cannot give itself: a steady passage's
+// window never got further than 0.003 from its own mean, so below this the
+// track is going nowhere and nothing is confirmed.
+const STRUCTURE_WINDOW_MS = 6000
+const SAME_SECTION_GAP = 0.68
+const GAP_FULL = 0.054
+const GAP_FLOOR = 0.008
 // A section's mean starts this long after it began, and a candidate's this
 // long after the candidate, so neither takes in the passage before it. The
 // section's mean also only takes samples while the novelty is low: what a
@@ -1053,6 +1110,18 @@ class Mean {
  * deliberately not in the vector: it is loudness against the last half
  * minute, so the same quiet passage reads differently after a drop and
  * after silence, and a returning one failed to recall itself.
+ *
+ * Nothing here is a fixed amount of difference. How far a track's passages
+ * get from each other is a property of the track: two minutes of a metal
+ * track moved 0.08 between its verses and its choruses where a dance track
+ * moved 0.2 between its intro and its drop, so a bar of 0.4 read off the
+ * second heard no structure at all in the first, and every metal track was
+ * one section and one cast from end to end. The reach and the gap are the
+ * two scales this track's own changes are measured on, and every bar here is
+ * a share of one of them, the way every band level is already a share of
+ * that band's own recent peak. Both start where a dance track reaches and
+ * fall only once the track has shown it is denser than that, so a track that
+ * worked before is untouched and the scale can only become more sensitive.
  */
 export class Structure {
   private readonly now = new Float32Array(STRUCTURE_DIMS)
@@ -1067,6 +1136,31 @@ export class Structure {
   private readonly past = new Map<number, Float32Array>()
   private readonly recallRamp = new Envelope(RECALL_RAMP_MS, RECALL_RAMP_MS)
   private readonly noveltyRamp = new Envelope(NOVELTY_RAMP_MS, NOVELTY_RAMP_MS)
+  /**
+   * A six-second mean of the vector, the span a candidate's own mean covers,
+   * for measuring the gap with.
+   */
+  private readonly window = new Float32Array(STRUCTURE_DIMS)
+  private readonly windowEnvelopes = Array.from(
+    { length: STRUCTURE_DIMS },
+    () => new Envelope(STRUCTURE_WINDOW_MS, STRUCTURE_WINDOW_MS),
+  )
+  /**
+   * The furthest this track has put two moments ten seconds apart, and the
+   * furthest a six-second window of it has sat from its section's mean: how
+   * big this track's own changes are, on the two scales the two tests are
+   * asked on. Both are peaks over the whole track rather than over a window,
+   * since they are properties of the track; a track is taken for a lively
+   * one until it has been heard for long enough to show otherwise, so the
+   * scale can only ever become more sensitive than it was.
+   */
+  private reachSeen = 0
+  private gapSeen = 0
+  /** When the two scales were last started over; see `rescale`. */
+  private scaleFrom = 0
+  private reach = NOVELTY_REACH_FULL
+  private gap = GAP_FULL
+  private distance = 0
   /** What this section has sounded like so far, and what a candidate has. */
   private readonly sectionMean = new Mean()
   private readonly candidateMean = new Mean()
@@ -1082,6 +1176,22 @@ export class Structure {
   private sections = 1
   private recallTarget = 0
   private noveltyTarget = 0
+
+  /**
+   * Start the two scales over, because the playhead has jumped. Both are the
+   * most the track has done so far, and a seek is the one thing that is not the
+   * track doing anything: the present against ten seconds ago is then one part
+   * of the song against another, which reads as the widest change it ever made
+   * and pins the reach at the top for the rest of the play. On a dense track
+   * that is the fixed bar back again, and no boundary after the first seek.
+   * The scales sit at their starting values through the warm-up, as they do at
+   * the start of a track, and take nothing in until the jump has left the lag.
+   */
+  rescale() {
+    this.reachSeen = 0
+    this.gapSeen = 0
+    this.scaleFrom = this.elapsed
+  }
 
   /**
    * `packet` supplies the band levels, energy and hits; `chroma` is the
@@ -1114,6 +1224,9 @@ export class Structure {
     for (let k = 0; k < 12; k++)
       level(2 * BAND_COUNT + 1 + k, STRUCTURE_CHROMA_WEIGHT * ((chroma[k] ?? 0) - 1 / 12))
 
+    for (let k = 0; k < STRUCTURE_DIMS; k++)
+      this.window[k] = this.windowEnvelopes[k]?.step(now[k] ?? 0, dt) ?? 0
+
     if (this.candidateAt === null) {
       if (
         this.elapsed - this.sectionStartedAt >= SECTION_MEAN_FROM_SECONDS &&
@@ -1122,6 +1235,12 @@ export class Structure {
         this.sectionMean.add(now)
     } else if (this.elapsed - this.candidateAt >= CANDIDATE_MEAN_FROM_SECONDS)
       this.candidateMean.add(now)
+
+    const warm = this.elapsed - this.scaleFrom < SCALE_WARM_SECONDS
+    this.reach = warm
+      ? NOVELTY_REACH_FULL
+      : Math.min(NOVELTY_REACH_FULL, Math.max(NOVELTY_REACH_FLOOR, this.reachSeen))
+    this.gap = warm ? GAP_FULL : Math.min(GAP_FULL, Math.max(GAP_FLOOR, this.gapSeen))
 
     this.sinceCompare += dt
     if (this.sinceCompare >= COMPARE_SECONDS) {
@@ -1173,8 +1292,16 @@ export class Structure {
     return { similarity, section }
   }
 
+  /**
+   * How much of a return this match is, in units of the track's own reach:
+   * as far off as this track's passages get reads 0, and as close as one
+   * gets to itself reads 1.
+   */
   private recallOf(similarity: number) {
-    return similarity < 0 ? 0 : clamp01((similarity - RECALL_LOW) / (RECALL_HIGH - RECALL_LOW))
+    if (similarity < 0) return 0
+    const far = RECALL_FAR * this.reach
+    const near = RECALL_NEAR * this.reach
+    return clamp01((far - (1 - similarity)) / (far - near))
   }
 
   private compare() {
@@ -1191,7 +1318,20 @@ export class Structure {
         past = this.snapshots[index] ?? null
       }
     }
-    this.noveltyTarget = past ? clamp01(NOVELTY_GAIN * (1 - cosine(this.now, past))) : 0
+    this.distance = past ? 1 - cosine(this.now, past) : 0
+    // Not for the first lag after a seek: until the snapshots have caught up,
+    // "ten seconds ago" is another part of the track and the distance to it is
+    // no measure of how far this track moves.
+    if (this.elapsed - this.scaleFrom >= SCALE_SETTLE_SECONDS)
+      this.reachSeen = Math.max(this.reachSeen, this.distance)
+    this.noveltyTarget = clamp01(this.distance / this.reach)
+
+    // The gap is measured through the changes as well as between them, since
+    // what it is for is the size of a change; the window has to have filled
+    // first, or its climb out of nothing would be the widest thing the track
+    // ever did.
+    if (this.sectionMean.count > 0 && this.elapsed - this.scaleFrom >= SCALE_SETTLE_SECONDS)
+      this.gapSeen = Math.max(this.gapSeen, 1 - cosine(this.window, this.sectionMean.value))
 
     if (
       this.noveltyTarget >= CANDIDATE_NOVELTY &&
@@ -1216,7 +1356,13 @@ export class Structure {
     const candidateAt = this.candidateAt
     this.candidateAt = null
     if (this.candidateMean.count === 0) return
-    if (cosine(this.candidateMean.value, this.sectionMean.value) >= SAME_SECTION_SIMILARITY) return
+    // A fill, if the new passage has not moved as far from the section it
+    // would end as this track's own changes move. On a dense track six
+    // seconds of a verse and six of a chorus sit at 0.99, so the fixed 0.965
+    // threw every boundary out; a share of the gap asks the same question of
+    // both kinds of track.
+    const distance = 1 - cosine(this.candidateMean.value, this.sectionMean.value)
+    if (distance <= SAME_SECTION_GAP * this.gap) return
 
     // A boundary. The section that ends is remembered as its mean, folded
     // into what was remembered of it before if it has been here already.
@@ -2065,6 +2211,11 @@ export class FeatureExtractor {
     for (let bin = 0; bin < this.bins; bin++)
       this.logFrequencies[bin] = Math.log2(Math.max(bin, 0.5) * this.binHz)
     this.tempo = new TempoTracker(this.bands.length)
+  }
+
+  /** The playhead jumped. Only the structure keeps anything a jump spoils. */
+  seeked() {
+    this.structure.rescale()
   }
 
   /**

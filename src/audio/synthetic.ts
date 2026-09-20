@@ -28,6 +28,13 @@ export type Hit = {
   gain: number
 }
 
+/**
+ * A riser: a swarm of partials sliding up together, under everything else.
+ * `from` and `to` are where the lowest of them starts and ends, in Hz, and
+ * the slide is exponential so it climbs by the same interval every second.
+ */
+export type Sweep = { from: number; to: number; gain: number }
+
 export type Pattern = {
   bpm: number
   /** Beats in a bar. The hits repeat every bar. */
@@ -35,6 +42,8 @@ export type Pattern = {
   hits: readonly Hit[]
   /** A sustained chord under everything, as an amplitude; 0 for none. */
   pad?: number
+  /** A riser climbing across the whole of this section; absent for none. */
+  sweep?: Sweep
 }
 
 /** A run of one pattern for so many seconds; sections are played back to back. */
@@ -150,6 +159,32 @@ export function synthesize(sections: readonly Section[], sampleRate = 48000): Fl
         for (let index = 0; index < samples.length && at + index < length; index++)
           out[offset + at + index] =
             (out[offset + at + index] ?? 0) + (samples[index] ?? 0) * hit.gain
+      }
+    }
+
+    if (pattern.sweep) {
+      const { from, to, gain } = pattern.sweep
+      // Twelve partials at irrational spacings, all sliding up together. A
+      // riser has to lift the top of the spectrum without putting a key in
+      // it, and a harmonic stack does put one in it: its partials fold onto
+      // one pitch class and the chroma reads a note climbing. Spaced by an
+      // irrational step the twelve land on twelve different pitch classes at
+      // every moment of the slide, so `keyClarity` stays where the rest of
+      // the mix left it. The amplitude is flat across the slide, so what
+      // climbs is where the power sits and not how much of it there is.
+      const partials = 12
+      const each = (gain * 0.9) / Math.sqrt(partials)
+      for (let partial = 0; partial < partials; partial++) {
+        const ratio = 1 + partial * 0.3718
+        // Dropped whole rather than cut off part way up: a partial silenced
+        // mid-slide is a click, and a click is an onset.
+        if (ratio * to > 16000) continue
+        let phase = 0
+        for (let index = 0; index < length; index++) {
+          const hz = ratio * from * (to / from) ** (index / length)
+          phase += (2 * Math.PI * hz) / sampleRate
+          out[offset + index] = (out[offset + index] ?? 0) + Math.sin(phase) * each
+        }
       }
     }
 
@@ -309,6 +344,47 @@ export function twoStep(
 /** A breakdown: no drums, just the pad and a bass note on the one. */
 export function breakdown(bpm: number, pad = 0.6): Pattern {
   return { bpm, beats: 4, hits: [on('bass', 0, 0.4)], pad }
+}
+
+/**
+ * A build, as sections rather than as one pattern, because everything that
+ * makes a build a build changes from bar to bar and a pattern repeats.
+ *
+ * The three things a listener hears coming: a snare roll that doubles, from
+ * quarters to eighths to sixteenths; a riser climbing the whole way; and the
+ * kick walking out for the last bar, which is what leaves the hole the drop
+ * falls into. Each stage runs two bars so that the whole is the four to
+ * sixteen seconds the slow measures are built to read, bar the last, which
+ * is one.
+ *
+ * `fizzle` replaces that last bar with the groove carrying on quietly: the
+ * riser stops, the roll stops and nothing lands. It is the case a tension
+ * that only ever went up would get wrong, since not every riser ends in a
+ * drop.
+ */
+export function build(bpm: number, pad = 0.25, fizzle = false): Section[] {
+  const bar = 240 / bpm
+  // The roll gets quieter per hit as it gets denser, the way a drummer's
+  // does, so what climbs is the rate of hits and not the loudness of one.
+  // Flat gain was tried and the low end never emptied for the last bar: a
+  // snare's body is at 180 Hz, so sixteen loud ones a bar keep the low group
+  // as full as the kick did, and the drop had nothing to come back from.
+  const roll = (division: number): Hit[] =>
+    Array.from({ length: division }, (_, step) =>
+      on('snare', (step * 4) / division, 0.55 / Math.sqrt(division / 4)),
+    )
+  const kicks = [0, 1, 2, 3].map((beat) => on('kick', beat, 0.9))
+  const stage = (division: number, from: number, to: number, gain: number): Section => ({
+    pattern: { bpm, beats: 4, hits: [...kicks, ...roll(division)], pad, sweep: { from, to, gain } },
+    seconds: 2 * bar,
+  })
+  const last: Section = fizzle
+    ? { pattern: { bpm, beats: 4, hits: [...kicks, on('hat', 2, 0.15)], pad }, seconds: bar }
+    : {
+        pattern: { bpm, beats: 4, hits: roll(16), pad, sweep: { from: 1400, to: 2600, gain: 0.3 } },
+        seconds: bar,
+      }
+  return [stage(4, 200, 420, 0.12), stage(8, 420, 850, 0.18), stage(16, 850, 1400, 0.24), last]
 }
 
 /**

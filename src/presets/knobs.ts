@@ -49,6 +49,16 @@
  * `tempoConfidence` is how well the tracker's period fits; gate anything
  * built on the phase or the tempo with it, since a phase on a wrong tempo is
  * a steady rhythm in the wrong place.
+ *
+ * Last, the moment. Where the song is in its own shape rather than what kind
+ * of song it is: `tension` is something winding up, `release` the payoff
+ * happening, `rest` the floor having dropped away, and groove is what is
+ * left when all three are low. All three move over seconds. `impact` is the
+ * odd one out and is here anyway, because a level is what a mapping reads:
+ * it is 1 on the frame the payoff lands and falls away in a fifth of a
+ * second, so a row on it behaves like a row on `beatPulse` and fires once a
+ * drop rather than once a beat. They are tuned on synthetic structure and
+ * have not been tried on real tracks; the README says what that leaves.
  */
 export const AUDIO_FIELDS = [
   'sub',
@@ -78,6 +88,10 @@ export const AUDIO_FIELDS = [
   'novelty',
   'tempoConfidence',
   'beatPhase',
+  'tension',
+  'release',
+  'rest',
+  'impact',
 ] as const
 export type AudioField = (typeof AUDIO_FIELDS)[number]
 

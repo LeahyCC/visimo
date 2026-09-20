@@ -5,6 +5,7 @@ import {
   analyse,
   atLevel,
   breakdown,
+  build,
   fft,
   fourOnTheFloor,
   kit,
@@ -365,4 +366,219 @@ describe('hardness on whole tracks', () => {
     expect(heard(drowned, 60)).toBeLessThan(0.2)
     expect(Math.abs(heard(drowned, 144) - heard(drowned, 60))).toBeLessThan(0.05)
   }, 120000)
+})
+
+/**
+ * The moment on a synthesised story: groove, breakdown, groove, build, drop.
+ * The build is the reason `build()` exists, since nothing else in this file
+ * changes from bar to bar and a build is nothing but change from bar to bar.
+ *
+ * Everything is measured at three frame rates and at two levels 20 dB apart,
+ * because both are ways the same music can arrive at the extractor and both
+ * have caught a bug here: the low end's peak follower replaced a pair of
+ * means that swung with the bar and agreed with each other only by luck, and
+ * the riser was read off the centroid until it turned out the centroid is
+ * held at NaN under the -60 dB floor, which a normal mix 20 dB down is under.
+ */
+describe('the moment on a synthesised story', () => {
+  const BPM = 128
+  const LOUD = 0.5
+  const RATES = [60, 120, 144]
+  const groove = fourOnTheFloor(BPM, 0.15)
+  // Where each part begins. The build is four sections of `build()`: three
+  // stages of two bars and a last bar with no kick, so 13.125 s at 128.
+  const BREAKDOWN_AT = 24
+  const BUILD_AT = 56
+  const DROP_AT = 69.125
+  const story = (fizzle: boolean): Section[] => [
+    { pattern: groove, seconds: BREAKDOWN_AT },
+    { pattern: breakdown(BPM, 0.12), seconds: 16 },
+    { pattern: groove, seconds: 16 },
+    ...build(BPM, 0.25, fizzle),
+    { pattern: groove, seconds: 20 },
+  ]
+
+  // Rendered once per story and kept. Several tests below listen to the same
+  // ninety seconds at the same frame rate, and rendering it again for each of
+  // them made this block most of the suite's running time.
+  const stories = new Map<string, Float32Array[]>()
+  const heard = (fizzle: boolean, frameRate: number, gain = LOUD) => {
+    const key = `${fizzle} ${frameRate} ${gain}`
+    let packets = stories.get(key)
+    if (!packets) {
+      packets = run(atLevel(synthesize(story(fizzle), SAMPLE_RATE), gain), frameRate)
+      stories.set(key, packets)
+    }
+
+    return packets
+  }
+
+  const peak = (packets: Float32Array[], row: number, from: number, to: number, rate: number) => {
+    let best = 0
+    for (let i = Math.round(from * rate); i < Math.min(packets.length, Math.round(to * rate)); i++)
+      best = Math.max(best, packets[i]?.[row] ?? 0)
+    return best
+  }
+  /** When the impact row reached 1, which it does on one frame per drop. */
+  const impacts = (packets: Float32Array[], rate: number) =>
+    packets.flatMap((packet, index) => ((packet[F.impact] ?? 0) >= 0.999 ? [index / rate] : []))
+
+  // Both halves matter. Loudness rising over four to sixteen seconds is a
+  // build and it is also the drums coming back over a breakdown, which is
+  // what the middle of this story is, so a tension that read only the rise
+  // wound up through the whole of 40 to 56 s at nothing happening.
+  it('climbs through the build and not before it', () => {
+    for (const rate of RATES) {
+      const packets = heard(false, rate)
+      expect(peak(packets, F.tension, BUILD_AT, DROP_AT, rate)).toBeGreaterThan(0.6)
+      expect(peak(packets, F.tension, 0, BUILD_AT, rate)).toBeLessThan(0.1)
+    }
+  }, 300000)
+
+  it('lands one impact within a beat of the drop', () => {
+    for (const rate of RATES) {
+      const found = impacts(heard(false, rate), rate)
+      expect(found).toHaveLength(1)
+      expect(Math.abs((found[0] ?? 0) - DROP_AT)).toBeLessThan(60 / BPM)
+    }
+  }, 300000)
+
+  // A phrase here is eight beats, 3.75 s at 128, and release falls to 1/e
+  // over half of one, so one phrase on it is at a seventh of its peak.
+  it('holds release across the drop and lets it go a phrase later', () => {
+    const phrase = (8 * 60) / BPM
+    for (const rate of RATES) {
+      const packets = heard(false, rate)
+      expect(peak(packets, F.release, DROP_AT, DROP_AT + 1, rate)).toBeGreaterThan(0.4)
+      expect(peak(packets, F.release, DROP_AT + phrase, DROP_AT + phrase + 1, rate)).toBeLessThan(
+        0.2,
+      )
+      expect(peak(packets, F.release, 0, BUILD_AT, rate)).toBeLessThan(0.1)
+    }
+  }, 300000)
+
+  // Rest is slow on purpose, so it is read at the end of the breakdown and
+  // well into the groove rather than at either edge.
+  it('reads rest high in the breakdown and low in the groove', () => {
+    for (const rate of RATES) {
+      const packets = heard(false, rate)
+      expect(peak(packets, F.rest, BREAKDOWN_AT + 12, BREAKDOWN_AT + 16, rate)).toBeGreaterThan(0.6)
+      expect(peak(packets, F.rest, 8, BREAKDOWN_AT, rate)).toBeLessThan(0.1)
+      expect(peak(packets, F.rest, 48, BUILD_AT, rate)).toBeLessThan(0.1)
+    }
+  }, 300000)
+
+  // The case that says tension is built out of changes and not out of
+  // levels: the sweep and the roll stop, nothing lands, and tension falls
+  // back on its own because its evidence stopped being evidence.
+  it('lets tension fall and fires nothing when a build fizzles', () => {
+    for (const rate of RATES) {
+      const packets = heard(true, rate)
+      expect(peak(packets, F.tension, BUILD_AT, DROP_AT, rate)).toBeGreaterThan(0.5)
+      expect(peak(packets, F.tension, DROP_AT + 4, DROP_AT + 6, rate)).toBeLessThan(0.2)
+      expect(impacts(packets, rate)).toHaveLength(0)
+    }
+  }, 300000)
+
+  it('sits in groove through a minute of steady house', () => {
+    for (const rate of [60, 144]) {
+      const packets = run(
+        atLevel(synthesize([{ pattern: groove, seconds: 60 }], SAMPLE_RATE), LOUD),
+        rate,
+      )
+      for (const row of [F.tension, F.release, F.rest])
+        expect(peak(packets, row, 4, 60, rate)).toBeLessThan(0.1)
+      expect(impacts(packets, rate)).toHaveLength(0)
+    }
+  }, 300000)
+
+  // Nothing to hear: a pause, a seek, the gap between two tracks. The arms
+  // are means of dB, and stepped through five seconds of silence they sank so
+  // far that the groove coming back read as rest at a half for twenty more.
+  const silence: Pattern = { ...groove, hits: [], pad: 0 }
+  const around = (gap: number): Section[] => [
+    { pattern: groove, seconds: 30 },
+    { pattern: silence, seconds: gap },
+    { pattern: groove, seconds: 24 },
+  ]
+
+  it('reads rest through a pause and lets it go when the music comes back', () => {
+    for (const rate of [60, 144]) {
+      const back = 35
+      const packets = run(atLevel(synthesize(around(5), SAMPLE_RATE), LOUD), rate)
+      expect(peak(packets, F.rest, 33, back, rate)).toBeGreaterThan(0.6)
+      // Rest is slow on purpose, so it is given its own ramp twice over.
+      expect(peak(packets, F.rest, back + 6, back + 24, rate)).toBeLessThan(0.1)
+      expect(peak(packets, F.tension, back, back + 24, rate)).toBeLessThan(0.1)
+      expect(impacts(packets, rate)).toHaveLength(0)
+    }
+  }, 300000)
+
+  // Longer than any break a track would hold: what follows is another track,
+  // and it opens the way the first one did.
+  it('starts again after a gap too long to be a break', () => {
+    const back = 42
+    const packets = run(atLevel(synthesize(around(12), SAMPLE_RATE), LOUD), 60)
+    expect(peak(packets, F.rest, back + 6, back + 24, 60)).toBeLessThan(0.1)
+    expect(peak(packets, F.tension, back, back + 24, 60)).toBeLessThan(0.1)
+    expect(impacts(packets, 60)).toHaveLength(0)
+  }, 300000)
+
+  // The bar of nothing some tracks put before the drop. It is the top of the
+  // build and not the end of it, so the drop after it still has to land.
+  it('still lands the drop after a bar of silence', () => {
+    const bar = (4 * 60) / BPM
+    const held: Section[] = [
+      { pattern: groove, seconds: BREAKDOWN_AT },
+      { pattern: breakdown(BPM, 0.12), seconds: 16 },
+      { pattern: groove, seconds: 16 },
+      ...build(BPM, 0.25, false),
+      { pattern: silence, seconds: bar },
+      { pattern: groove, seconds: 20 },
+    ]
+    for (const rate of [60, 144]) {
+      const packets = run(atLevel(synthesize(held, SAMPLE_RATE), LOUD), rate)
+      const found = impacts(packets, rate)
+      expect(found).toHaveLength(1)
+      expect(Math.abs((found[0] ?? 0) - (DROP_AT + bar))).toBeLessThan(60 / BPM)
+    }
+  }, 300000)
+
+  // Twenty dB is a listener turning the music down, and nothing about the
+  // shape of the song changed when they did.
+  it('reads the same story 20 dB down', () => {
+    for (const rate of [60, 144]) {
+      const quiet = heard(false, rate, LOUD / 10)
+      expect(peak(quiet, F.tension, BUILD_AT, DROP_AT, rate)).toBeGreaterThan(0.6)
+      expect(peak(quiet, F.tension, 0, BUILD_AT, rate)).toBeLessThan(0.1)
+      expect(peak(quiet, F.rest, BREAKDOWN_AT + 12, BREAKDOWN_AT + 16, rate)).toBeGreaterThan(0.6)
+      const found = impacts(quiet, rate)
+      expect(found).toHaveLength(1)
+      expect(Math.abs((found[0] ?? 0) - DROP_AT)).toBeLessThan(60 / BPM)
+    }
+  }, 300000)
+
+  // The whole point of measuring differences of dB between arms that are
+  // spans of time: three displays hear one song. Measured across tension in
+  // the build, rest in the breakdown and release at the drop, the widest
+  // gap between 60, 120 and 144 frames a second is 0.04.
+  it('agrees with itself at 60, 120 and 144 frames a second', () => {
+    const spread = (values: number[]) => Math.max(...values) - Math.min(...values)
+    const runs = RATES.map((rate) => ({ rate, packets: heard(false, rate) }))
+    expect(
+      spread(runs.map(({ rate, packets }) => peak(packets, F.tension, BUILD_AT, DROP_AT, rate))),
+    ).toBeLessThan(0.05)
+
+    expect(
+      spread(
+        runs.map(({ rate, packets }) =>
+          peak(packets, F.rest, BREAKDOWN_AT + 12, BREAKDOWN_AT + 16, rate),
+        ),
+      ),
+    ).toBeLessThan(0.05)
+
+    expect(
+      spread(runs.map(({ rate, packets }) => peak(packets, F.release, DROP_AT, DROP_AT + 1, rate))),
+    ).toBeLessThan(0.1)
+  }, 300000)
 })

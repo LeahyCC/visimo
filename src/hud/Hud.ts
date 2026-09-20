@@ -31,7 +31,7 @@ const ROW_HEIGHT = 15
 const BARS_TOP = 12
 const TRACE_HEIGHT = 56
 /** The eight lines of text under the trace, the last of which is the preset, then the beat bar. */
-const FOOTER = 132
+const FOOTER = 146
 
 export class Hud {
   private readonly context: CanvasRenderingContext2D | null
@@ -170,12 +170,21 @@ export class Hud {
       top + height + 26,
     )
 
+    // The moment: where in the song's own shape we are. Groove is all four
+    // of these being low, so an empty-looking line is a reading and not a
+    // missing one.
+    ctx.fillText(
+      `tension ${slow(F.tension)}  release ${slow(F.release)}  rest ${slow(F.rest)}  impact ${slow(F.impact)}`,
+      x + 8,
+      top + height + 40,
+    )
+
     // The harmony: the key the hue stands for, how surely, and whether a
     // chord just moved. A clarity near 0 means the hue is a memory.
     ctx.fillText(
       `key ${keyLabel(packet[F.keyHue] ?? 0)}  clarity ${slow(F.keyClarity)}  hue ${slow(F.keyHue)}  change ${slow(F.harmonicChange)}`,
       x + 8,
-      top + height + 40,
+      top + height + 54,
     )
 
     // The structure: which section this is, whether it has been heard before
@@ -183,22 +192,22 @@ export class Hud {
     ctx.fillText(
       `section ${Math.round(packet[F.section] ?? 0)}  recall ${slow(F.recall)}  novelty ${slow(F.novelty)}`,
       x + 8,
-      top + height + 54,
+      top + height + 68,
     )
 
     ctx.fillText(
       `${stats.fps.toFixed(0)} fps  ${stats.frameMs.toFixed(1)} ms  ${stats.scene}`,
       x + 8,
-      top + height + 68,
+      top + height + 82,
     )
-    ctx.fillText(stats.adapter.slice(0, 44), x + 8, top + height + 82)
-    ctx.fillText(`post ${stats.post}`, x + 8, top + height + 96)
-    ctx.fillText(`preset ${stats.preset}`, x + 8, top + height + 110)
+    ctx.fillText(stats.adapter.slice(0, 44), x + 8, top + height + 96)
+    ctx.fillText(`post ${stats.post}`, x + 8, top + height + 110)
+    ctx.fillText(`preset ${stats.preset}`, x + 8, top + height + 124)
 
     // The beat phase as a bar that sweeps once a beat. If it lands as the
     // beat does, the tracker has the tempo; if it drifts against the music it
     // has a fraction of it. Grey while there is no tempo and it is coasting.
-    const bar = top + height + 122
+    const bar = top + height + 136
     ctx.fillStyle = 'rgba(255, 255, 255, 0.12)'
     ctx.fillRect(x + 8, bar - 3, width - 16, 6)
     ctx.fillStyle = tempo ? 'rgba(255, 200, 80, 0.95)' : 'rgba(255, 255, 255, 0.25)'

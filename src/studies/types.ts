@@ -39,22 +39,22 @@ export type Character = Readonly<Record<CharacterAxis, number>>
 
 /**
  * What a study's mapping may read: every packet field a preset may read, and
- * two more that are not the frame's own.
+ * one more that is not the frame's own.
  *
- * `tension` is the song winding up. It will be a packet row of its own, added
- * at the end of the packet by the estimator card, but nothing here imports
- * its index: the resolver takes the value as an argument and the caller says
- * where it came from, so this layer lands whether or not that row has. Every
- * flow and ink must say what tension does to it, which `registry.test.ts`
- * holds them to.
+ * `tension` is the song winding up, and is a packet row like the rest, so it
+ * is already among the audio fields. The resolver still takes its value as an
+ * argument rather than reading the row, so a caller can hand in something
+ * other than the packet's: the study bench winds it by hand, and the director
+ * passes on the one it chose by. Every flow and ink must say what tension
+ * does to it, which `registry.test.ts` holds them to.
  *
  * `presence` is what the director fades a study in and out by, 0 to 1. A
  * study may read it like any other field when it wants to thin itself as it
  * arrives; what presence means beyond that is the implementation's business
  * and not the resolver's.
  */
-export const STUDY_FIELDS = [...AUDIO_FIELDS, 'tension', 'presence'] as const
-export type StudyField = AudioField | 'tension' | 'presence'
+export const STUDY_FIELDS = [...AUDIO_FIELDS, 'presence'] as const
+export type StudyField = AudioField | 'presence'
 
 /**
  * One row of a study's mapping, read exactly as a preset's is:

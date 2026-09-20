@@ -21,6 +21,7 @@ import { CAUSTICS_RANGES } from '../src/impls/caustics.params'
 import { DUST_RANGES } from '../src/impls/dust.params'
 import { HALO_RANGES } from '../src/impls/halo.params'
 import { RING_RANGES } from '../src/impls/rings.params'
+import { SPECTRUM_RANGES } from '../src/impls/spectrum.params'
 import { STREAK_RANGES } from '../src/impls/streaks.params'
 import { CANVAS_KNOBS, castStudyIds, MAX_INKS } from '../src/presets'
 import type {
@@ -143,11 +144,20 @@ const rangesOf = (impl: ImplId): Partial<Record<string, readonly [number, number
   if (impl === 'caustics') return CAUSTICS_RANGES
   if (impl === 'halo') return HALO_RANGES
   if (impl === 'rings') return RING_RANGES
+  if (impl === 'spectrum') return SPECTRUM_RANGES
   return RANGES
 }
 
 /** Knobs the slider must step in whole numbers, whatever the range implies. */
-const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity', 'ribbon.shape', 'burst'])
+const WHOLE = new Set([
+  'emitters',
+  'events',
+  'symmetry',
+  'complexity',
+  'ribbon.shape',
+  'burst',
+  'bars',
+])
 
 /** Four times the resting value, or 0 to 1 when it rests at zero. */
 function spanOf(name: string, value: number): readonly [number, number] {

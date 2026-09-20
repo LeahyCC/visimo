@@ -25,7 +25,13 @@ import { AUDIO_FIELDS } from '../presets/knobs'
 import { defaultCanvas, parseCast } from '../studies/cast'
 import { castOrDefault } from '../studies/casts/index'
 import frames from '../studies/casts/preset-frames.json'
-import { CAUSTICS_KNOBS, DUST_KNOBS, HALO_KNOBS, RINGS_KNOBS } from '../studies/impls'
+import {
+  CAUSTICS_KNOBS,
+  DUST_KNOBS,
+  HALO_KNOBS,
+  RINGS_KNOBS,
+  SPECTRUM_KNOBS,
+} from '../studies/impls'
 import type { ImplId } from '../studies/impls'
 import { STUDIES } from '../studies/registry'
 import type { LiveCast } from '../studies/resolve'
@@ -310,6 +316,26 @@ vi.mock('../impls/RingsInk', () => ({
     }
     dispose() {
       impls.disposed.rings = (impls.disposed.rings ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/SpectrumInk', () => ({
+  SpectrumInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.spectrum = (impls.built.spectrum ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('spectrum', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('spectrum')
+    }
+    dispose() {
+      impls.disposed.spectrum = (impls.disposed.spectrum ?? 0) + 1
     }
   },
 }))
@@ -1649,6 +1675,66 @@ describe('the study bench', () => {
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     expect(() => draw(1000)).not.toThrow()
     expect(impls.built.rings).toBeUndefined()
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('builds the spectrum ink for its study, hands it its numbers and draws it in cast order', async () => {
+    const { draw } = await start()
+    renderer.setBench({
+      live: live('ribbon', 'spectrum-ring', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.energy] = 0.5
+        packet[F.tension] = 0
+      },
+    })
+    draw(1000)
+    expect(impls.built.spectrum).toBe(1)
+    expect(impls.drawn).toEqual(['ribbon', 'spectrum'])
+    expect(impls.seen.spectrum?.presence).toBe(1)
+    expect(Object.keys(impls.seen.spectrum?.knobs ?? {}).sort()).toEqual([...SPECTRUM_KNOBS].sort())
+    expect(impls.seen.spectrum?.knobs.bars).toBeGreaterThan(0)
+    expect(impls.seen.spectrum?.knobs.intensity ?? 0).toBeGreaterThan(0.02)
+    const wide = impls.seen.spectrum?.knobs.radius ?? 0
+
+    // The study's tension row reaches the ink through the resolver: a build
+    // contracts the ring.
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.energy] = 0.5
+        packet[F.tension] = 1
+      },
+    })
+    draw(2000)
+    expect(impls.seen.spectrum?.knobs.radius ?? 1).toBeLessThan(wide - 0.05)
+  })
+
+  it('does not build the spectrum ink for a study that is faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('ribbon', 'spectrum-ring', 'clean-glass')
+    const ring = cast.studies[1]
+    if (!ring) throw new Error('the spectrum ring is in the cast')
+    ring.presence = 0
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.built.spectrum).toBeUndefined()
+    expect(impls.updates.spectrum).toBeUndefined()
+    ring.presence = 0.5
+    draw(2000)
+    expect(impls.built.spectrum).toBe(1)
+    expect(impls.seen.spectrum?.presence).toBe(0.5)
+  })
+
+  it('skips the spectrum ring on the WebGL2 path, which has no compute and draws the fractal alone', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('ribbon', 'spectrum-ring', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(1000)).not.toThrow()
+    expect(impls.built.spectrum).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

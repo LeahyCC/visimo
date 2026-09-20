@@ -247,7 +247,9 @@ export function Controls({
         <span />
       </label>
 
-      {scene === 'fluid' && (
+      {/* The grid is the fluid's, whether it is the scene or the flow a
+          preset asks for under another scene. */}
+      {(scene === 'fluid' || preset.flow === 'fluid') && (
         <label style={row}>
           <span>grid</span>
           <select

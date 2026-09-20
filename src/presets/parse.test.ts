@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_POST_PARAMS } from '../post/params'
 import { SCENE_IDS } from '../scenes/catalog'
 import drift from './drift.json'
+import { needsFlowSolver } from './flow'
 import { DEFAULT_PRESET_ID, findPreset, firstPresetOf, PRESETS, stepPreset } from './index'
 import { FLUID_KNOBS, SCENE_KNOBS } from './knobs'
+import melt from './melt.json'
 import { parsePreset } from './parse'
 import prism from './prism.json'
 import type { Preset } from './types'
@@ -63,6 +65,58 @@ describe('parsePreset', () => {
     const gain = preset.postParams.feedback.amount * preset.postParams.feedback.decay
     expect(gain).toBeGreaterThan(0.9)
     expect(gain).toBeLessThan(1)
+  })
+
+  it('takes a flow the package offers, and leaves the key off when none is asked for', () => {
+    const preset = parsePreset({ ...good(), flow: 'fluid' }, 'test.json')
+    expect(preset.flow).toBe('fluid')
+    const plain = parsePreset(good(), 'test.json')
+    expect(plain.flow).toBeUndefined()
+    // JSON has no undefined, so a key that is never written round trips.
+    expect('flow' in plain).toBe(false)
+  })
+
+  it('rejects a flow nothing solves', () => {
+    expect(() => parsePreset({ ...good(), flow: 'wind' }, 'b.json')).toThrow(
+      'b.json: flow is not a flow; they are fluid',
+    )
+    expect(() => parsePreset({ ...good(), flow: 7 }, 'b.json')).toThrow(/flow expected a name/)
+  })
+
+  it('takes the flow knobs a preset names and nothing else', () => {
+    const preset = parsePreset(
+      { ...good(), flow: 'fluid', flowParams: { vorticity: 20, force: 0.4 } },
+      'test.json',
+    )
+    expect(preset.flowParams).toEqual({ vorticity: 20, force: 0.4 })
+    expect(() =>
+      parsePreset({ ...good(), flow: 'fluid', flowParams: { symmetry: 6 } }, 'b.json'),
+    ).toThrow(/flowParams\.symmetry is not a knob of the fluid/)
+
+    expect(() =>
+      parsePreset({ ...good(), flow: 'fluid', flowParams: { vorticity: 'lots' } }, 'b.json'),
+    ).toThrow(/flowParams\.vorticity expected a finite number/)
+  })
+
+  it('refuses flow knobs with no flow to tune', () => {
+    expect(() => parsePreset({ ...good(), flowParams: { vorticity: 20 } }, 'b.json')).toThrow(
+      'b.json: flowParams needs a flow; add "flow": "fluid"',
+    )
+  })
+
+  it('reads the preset that draws one scene over another scene’s flow', () => {
+    const preset = parsePreset(melt, 'presets/melt.json')
+    expect(preset.scene).toBe('kaleidoscope')
+    expect(preset.flow).toBe('fluid')
+    expect(needsFlowSolver(preset.flow, preset.scene)).toBe(true)
+    // The trail is what the flow smears, so it has to be a long one, and the
+    // ceiling is what stops a gain this close to 1 running away to white.
+    const gain = preset.postParams.feedback.amount * preset.postParams.feedback.decay
+    expect(gain).toBeGreaterThan(0.9)
+    expect(gain).toBeLessThan(1)
+    expect(preset.postParams.feedback.carry).toBeGreaterThan(0)
+    expect(preset.postParams.feedback.ceiling).toBeGreaterThan(0)
+    expect(preset.postParams.feedback.floor).toBeGreaterThan(0)
   })
 
   it('names the path when a stage is given a field it does not have', () => {

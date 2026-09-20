@@ -20,6 +20,9 @@
  *
  * The velocity field is offered to the post stack as `flow`, so the feedback
  * pass can read the last frame back along the same current the dye rides.
+ * `simulate` is that solve on its own, without the dye being drawn: a preset
+ * whose scene solves no field of its own can ask for a fluid flow, and the
+ * renderer then keeps one of these beside the scene and only steps it.
  */
 import { F } from '../audio/FeatureExtractor'
 import type { Tuning } from '../presets/knobs'
@@ -315,7 +318,14 @@ export class Fluid implements Scene {
     gear.device.queue.writeBuffer(gear.uniform, 0, this.uniformData)
   }
 
-  render(encoder: GPUCommandEncoder, view: GPUTextureView) {
+  /**
+   * One step of the solver, and nothing drawn. The renderer runs this on its
+   * own when a preset asks for a fluid flow under another scene: that scene
+   * draws the picture and this only stirs the field the feedback pass carries
+   * it along. The dye advection stays in the list even then, since it is one
+   * dispatch and keeping it means one code path rather than two.
+   */
+  simulate(encoder: GPUCommandEncoder) {
     const gear = this.gear
     const sized = this.sized
     const context = this.context
@@ -362,7 +372,13 @@ export class Fluid implements Scene {
     this.velocity = side
     this.pressure = solve
     this.dye = other(this.dye)
+  }
 
+  render(encoder: GPUCommandEncoder, view: GPUTextureView) {
+    this.simulate(encoder)
+    const gear = this.gear
+    const sized = this.sized
+    if (!gear || !sized) return
     const draw = encoder.beginRenderPass({
       colorAttachments: [
         { view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' },

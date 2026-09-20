@@ -641,22 +641,37 @@ export const PALETTE_STOPS: readonly Stop[] = [
 
 const channel = (value: number) => Math.round(Math.min(1, Math.max(0, value)) * 255)
 
+/**
+ * The palette at one coordinate, as three floats from 0 to 1. The coordinate
+ * wraps like everything else that names a place in the palette, so 1 is 0 and
+ * a negative one counts back from the end. This is the one place the stops are
+ * interpolated: the lookup table below is built from it, and anything else that
+ * wants a colour of the fluid's asks here rather than keeping a palette of its
+ * own.
+ */
+export function paletteAt(coordinate: number): [number, number, number] {
+  const at = wrap(coordinate)
+  let next = 1
+  while (next < PALETTE_STOPS.length - 1 && (PALETTE_STOPS[next]?.at ?? 1) < at) next++
+  const from = PALETTE_STOPS[next - 1] ?? PALETTE_STOPS[0]
+  const to = PALETTE_STOPS[next] ?? from
+  if (!from || !to) return [0, 0, 0]
+  const span = to.at - from.at
+  const mix = span > 0 ? (at - from.at) / span : 0
+  const part = (index: number) =>
+    (from.colour[index] ?? 0) + ((to.colour[index] ?? 0) - (from.colour[index] ?? 0)) * mix
+
+  return [part(0), part(1), part(2)]
+}
+
 /** The palette as one row of `rgba8unorm` texels, ready for `writeTexture`. */
 export function paletteLut(size = PALETTE_SIZE): Uint8Array {
   const out = new Uint8Array(size * 4)
   for (let index = 0; index < size; index++) {
-    const at = size > 1 ? index / (size - 1) : 0
-    let next = 1
-    while (next < PALETTE_STOPS.length - 1 && (PALETTE_STOPS[next]?.at ?? 1) < at) next++
-    const from = PALETTE_STOPS[next - 1] ?? PALETTE_STOPS[0]
-    const to = PALETTE_STOPS[next] ?? from
-    if (!from || !to) continue
-    const span = to.at - from.at
-    const mix = span > 0 ? (at - from.at) / span : 0
-    for (let part = 0; part < 3; part++)
-      out[index * 4 + part] = channel(
-        (from.colour[part] ?? 0) + ((to.colour[part] ?? 0) - (from.colour[part] ?? 0)) * mix,
-      )
+    // The last texel is coordinate 1, which wraps to 0; the two are the same
+    // colour by construction, so the row still ends where it began.
+    const colour = paletteAt(size > 1 ? index / (size - 1) : 0)
+    for (let part = 0; part < 3; part++) out[index * 4 + part] = channel(colour[part] ?? 0)
     out[index * 4 + 3] = 255
   }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_POST_PARAMS } from '../post/params'
+import { DEFAULT_POST_PARAMS, postSummary } from '../post/params'
 import { SCENE_IDS } from '../scenes/catalog'
 import drift from './drift.json'
 import { needsFlowSolver } from './flow'
@@ -178,6 +178,59 @@ describe('parsePreset', () => {
     expect(() => parsePreset(broken, 'b.json')).toThrow(/postParams\.vignette is not a post stage/)
   })
 
+  it('takes the ribbon’s switch and its four numbers, and no others', () => {
+    const preset = parsePreset(
+      {
+        ...good(),
+        postParams: {
+          ribbon: { enabled: true, intensity: 0.4, width: 5, height: 0.3, shape: 1 },
+        },
+      },
+      'b.json',
+    )
+
+    expect(preset.postParams.ribbon).toEqual({
+      enabled: true,
+      intensity: 0.4,
+      width: 5,
+      height: 0.3,
+      shape: 1,
+    })
+
+    // Left out, it is off and the numbers are the stack's own.
+    expect(parsePreset(good(), 'b.json').postParams.ribbon).toEqual(DEFAULT_POST_PARAMS.ribbon)
+    expect(() =>
+      parsePreset({ ...good(), postParams: { ribbon: { colour: 1 } } }, 'b.json'),
+    ).toThrow(/postParams\.ribbon\.colour is not a field of ribbon/)
+
+    expect(() =>
+      parsePreset({ ...good(), postParams: { ribbon: { width: 'wide' } } }, 'b.json'),
+    ).toThrow(/postParams\.ribbon\.width expected a finite number/)
+
+    expect(() =>
+      parsePreset({ ...good(), postParams: { ribbon: { enabled: 1 } } }, 'b.json'),
+    ).toThrow(/postParams\.ribbon\.enabled expected true or false/)
+  })
+
+  it('takes a mapping onto each of the ribbon’s numbers', () => {
+    const to = ['ribbon.intensity', 'ribbon.width', 'ribbon.height', 'ribbon.shape']
+    const preset = parsePreset(
+      {
+        ...good(),
+        audioMapping: to.map((name) => ({ from: 'energy', to: name, gain: 0.5 })),
+      },
+      'b.json',
+    )
+
+    expect(preset.audioMapping.map((row) => row.to)).toEqual(to)
+    expect(() =>
+      parsePreset(
+        { ...good(), audioMapping: [{ from: 'energy', to: 'ribbon.enabled', gain: 1 }] },
+        'b.json',
+      ),
+    ).toThrow(/audioMapping\[0\]\.to is neither a knob/)
+  })
+
   it('takes three bloom weights and nothing else', () => {
     const preset = parsePreset(
       { ...good(), postParams: { bloom: { weights: [0.6, 0.3, 0.1] } } },
@@ -250,5 +303,39 @@ describe('the presets', () => {
 
   it('offers a first preset for every scene', () => {
     for (const scene of SCENE_IDS) expect(firstPresetOf(scene).scene).toBe(scene)
+  })
+
+  // `data-post` on the canvas is the summary, and a consumer's tests assert it.
+  // The ribbon is off in every preset that has not asked for it, so these three
+  // print what they printed before it existed.
+  it('print the stages they always did unless they turn the ribbon on', () => {
+    const prints = (id: string) => postSummary((findPreset(id) as Preset).postParams)
+    expect(prints('plume')).toBe('feedback bloom chroma tonemap grain')
+    expect(prints('wash')).toBe('feedback bloom chroma tonemap grain')
+    expect(prints('prism')).toBe('bloom tonemap')
+    for (const id of ['plume', 'wash', 'prism'])
+      expect((findPreset(id) as Preset).postParams.ribbon.enabled).toBe(false)
+  })
+
+  it('turn the ribbon on in Drift and Melt, modestly, driven by a fast feature', () => {
+    for (const id of ['drift', 'melt']) {
+      const preset = findPreset(id) as Preset
+      const ribbon = preset.postParams.ribbon
+      expect(ribbon.enabled).toBe(true)
+      expect(ribbon.intensity).toBeGreaterThan(0)
+      expect(ribbon.intensity).toBeLessThanOrEqual(0.5)
+      // A ribbon that sits at one brightness is static; the plan forbids that.
+      const rows = preset.audioMapping.filter((row) => row.to === 'ribbon.intensity')
+      expect(rows.length).toBeGreaterThan(0)
+      for (const row of rows) expect(['energy', 'beatPulse', 'lowEnd']).toContain(row.from)
+    }
+
+    expect(postSummary((findPreset('drift') as Preset).postParams)).toBe(
+      'ribbon feedback bloom chroma tonemap grain',
+    )
+
+    expect(postSummary((findPreset('melt') as Preset).postParams)).toBe(
+      'ribbon feedback bloom tonemap',
+    )
   })
 })

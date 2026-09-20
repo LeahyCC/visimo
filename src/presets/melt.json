@@ -40,6 +40,7 @@
     "colourDrift": 0.009
   },
   "postParams": {
+    "ribbon": { "enabled": true, "intensity": 0.3, "width": 3, "height": 0.12, "shape": 1 },
     "feedback": {
       "amount": 1,
       "decay": 0.95,
@@ -58,6 +59,7 @@
     { "from": "swell", "to": "depth", "gain": 0.15 },
     { "from": "harmonicChange", "to": "warp", "gain": 0.2 },
     { "from": "keyHue", "to": "colourShift", "gain": 1 },
-    { "from": "energy", "to": "intensity", "gain": 0.1 }
+    { "from": "energy", "to": "intensity", "gain": 0.1 },
+    { "from": "energy", "to": "ribbon.intensity", "gain": 0.4 }
   ]
 }

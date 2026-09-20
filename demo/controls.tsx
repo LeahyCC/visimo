@@ -58,6 +58,11 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'eventForce': [0, 3],
   'eventDye': [0, 6],
   'eventRadius': [0.001, 0.05],
+  'ribbon.intensity': [0, 3],
+  'ribbon.width': [0.5, 24],
+  'ribbon.height': [0, 0.5],
+  // 0 is the line and 1 the circle; the lane rounds anything between.
+  'ribbon.shape': [0, 1],
   'feedback.amount': [0, 1],
   'feedback.decay': [0, 1],
   'feedback.zoom': [0.9, 1.1],
@@ -76,7 +81,7 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
 }
 
 /** Knobs the slider must step in whole numbers, whatever the range implies. */
-const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity'])
+const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity', 'ribbon.shape'])
 
 /** Four times the resting value, or 0 to 1 when it rests at zero. */
 function spanOf(name: string, value: number): readonly [number, number] {

@@ -9,7 +9,7 @@
  * messages name the file and the path inside it, because a preset is a wall
  * of numbers and "expected a number" on its own is no help.
  */
-import { defaultPostParams, isPostKnob, POST_KNOBS, POST_LANES } from '../post/params'
+import { defaultPostParams, isPostKnob, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams, PostStage } from '../post/params'
 import { isSceneId, SCENE_IDS } from '../scenes/catalog'
 import { FLOW_IDS, isFlowId } from './flow'
@@ -17,8 +17,6 @@ import type { FlowId } from './flow'
 import { AUDIO_FIELDS, CURVES, FLUID_KNOBS, KALEIDOSCOPE_KNOBS } from './knobs'
 import type { AudioField, Curve, FluidKnob } from './knobs'
 import type { Mapping, Preset } from './types'
-
-const POST_STAGES: readonly PostStage[] = ['feedback', 'bloom', 'chromatic', 'tonemap', 'grain']
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)

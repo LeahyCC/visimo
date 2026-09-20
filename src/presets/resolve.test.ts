@@ -150,6 +150,25 @@ describe('resolvePost', () => {
     expect(out.bloom.weights).not.toBe(base.bloom.weights)
   })
 
+  it('carries the ribbon’s switch and its numbers, and adds a mapped row to its intensity', () => {
+    const base = defaultPostParams()
+    base.ribbon.enabled = true
+    base.ribbon.intensity = 0.2
+    base.ribbon.shape = 1
+    const out = defaultPostParams()
+    const mapping: Mapping<'vorticity'>[] = [
+      { from: 'energy', to: 'ribbon.intensity', gain: 0.3, curve: 'linear' },
+    ]
+    resolvePost(base, mapping, packet({ energy: 0.5 }), out)
+    expect(out.ribbon.enabled).toBe(true)
+    expect(out.ribbon.shape).toBe(1)
+    expect(out.ribbon.intensity).toBeCloseTo(0.35)
+    // The preset's own number is not written back to, and rests when the music does.
+    expect(base.ribbon.intensity).toBe(0.2)
+    resolvePost(base, mapping, packet({ energy: 0 }), out)
+    expect(out.ribbon.intensity).toBeCloseTo(0.2)
+  })
+
   it('adds a mapped lane on top of the preset', () => {
     const base = defaultPostParams()
     base.bloom.intensity = 0.3

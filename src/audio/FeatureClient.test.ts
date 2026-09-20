@@ -33,15 +33,26 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+/**
+ * The analyser as far as the client touches it. The waveform is a ramp that
+ * starts where the frame counter is, so a test can tell one read from the next.
+ */
+const analyser = (reads = { waveform: 0 }) =>
+  ({
+    context: { sampleRate: 48000 },
+    fftSize: 16,
+    frequencyBinCount: 8,
+    getFloatFrequencyData: (out: Float32Array) => out.fill(-20),
+    getFloatTimeDomainData: (out: Float32Array) => {
+      reads.waveform++
+      for (let index = 0; index < out.length; index++) out[index] = reads.waveform + index / 100
+    },
+  }) as unknown as AnalyserNode
+
 describe('audio frames consumed by the renderer', () => {
   const create = () => {
     vi.stubGlobal('Worker', TestWorker)
-    return new FeatureClient({
-      context: { sampleRate: 48000 },
-      fftSize: 16,
-      frequencyBinCount: 8,
-      getFloatFrequencyData: (out: Float32Array) => out.fill(-20),
-    } as unknown as AnalyserNode)
+    return new FeatureClient(analyser())
   }
 
   it('consumes a hit once while preserving levels and the public packet', () => {
@@ -129,14 +140,72 @@ describe('audio frames consumed by the renderer', () => {
         }
       },
     )
-    const client = new FeatureClient({
-      context: { sampleRate: 48000 },
-      fftSize: 16,
-      frequencyBinCount: 8,
-      getFloatFrequencyData: (out: Float32Array) => out.fill(-20),
-    } as unknown as AnalyserNode)
+    const client = new FeatureClient(analyser())
     client.pump(0.02)
     expect(client.packet[F.energy]).toBeGreaterThan(0)
     client.dispose()
+  })
+})
+
+describe('the waveform', () => {
+  const create = (reads = { waveform: 0 }) => {
+    vi.stubGlobal('Worker', TestWorker)
+    return new FeatureClient(analyser(reads))
+  }
+
+  it('is one buffer as long as the analyser window, read into on every pump', () => {
+    const client = create()
+    const buffer = client.waveform
+    expect(buffer).toHaveLength(16)
+    client.pump(0.01)
+    expect(client.waveform).toBe(buffer)
+    expect(buffer[0]).toBe(1)
+    expect(buffer[15]).toBeCloseTo(1.15)
+    client.pump(0.01)
+    // The same object again, now holding the second read: nothing was allocated.
+    expect(client.waveform).toBe(buffer)
+    expect(buffer[0]).toBe(2)
+    client.dispose()
+  })
+
+  it('stays fresh while the worker still holds the spectrum', () => {
+    const reads = { waveform: 0 }
+    const client = create(reads)
+    client.pump(0.01)
+    // The spectrum went away with that frame and no reply has brought it back,
+    // so this pump sends nothing, but the waveform is not the worker's.
+    client.pump(0.01)
+    client.pump(0.01)
+    expect(TestWorker.latest.messages.filter((message) => message.type === 'frame')).toHaveLength(1)
+    expect(reads.waveform).toBe(3)
+    expect(client.waveform[0]).toBe(3)
+    client.dispose()
+  })
+
+  it('is read on the main thread and never sent to the worker', () => {
+    const client = create()
+    client.pump(0.01)
+    const frame = TestWorker.latest.messages.find((message) => message.type === 'frame')
+    expect(Object.keys(frame ?? {}).sort()).toEqual(['dt', 'spectrum', 'type'])
+    client.dispose()
+  })
+
+  it('is read when the extractor has fallen back to the main thread too', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const client = create()
+    TestWorker.latest.failSend = true
+    client.pump(0.02)
+    expect(client.waveform[0]).toBe(1)
+    client.pump(0.02)
+    expect(client.waveform[0]).toBe(2)
+    client.dispose()
+  })
+
+  it('is left alone once the client is disposed', () => {
+    const reads = { waveform: 0 }
+    const client = create(reads)
+    client.dispose()
+    client.pump(0.1)
+    expect(reads.waveform).toBe(0)
   })
 })

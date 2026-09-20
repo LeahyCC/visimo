@@ -27,6 +27,7 @@
     "eventRadius": 0.011
   },
   "postParams": {
+    "ribbon": { "enabled": true, "intensity": 0.15, "width": 3, "height": 0.2, "shape": 0 },
     "feedback": {
       "amount": 1,
       "decay": 0.94,
@@ -59,6 +60,7 @@
     { "from": "harmonicChange", "to": "dye", "gain": 0.8 },
     { "from": "novelty", "to": "force", "gain": 0.6 },
     { "from": "novelty", "to": "hitDye", "gain": 0.5 },
-    { "from": "swell", "to": "spread", "gain": 0.2 }
+    { "from": "swell", "to": "spread", "gain": 0.2 },
+    { "from": "energy", "to": "ribbon.intensity", "gain": 0.3 }
   ]
 }

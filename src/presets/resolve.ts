@@ -13,7 +13,7 @@
  * runs on every animation frame and there is nothing here worth allocating.
  */
 import { F } from '../audio/FeatureExtractor'
-import { isPostKnob, POST_KNOBS, POST_LANES } from '../post/params'
+import { isPostKnob, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
 import type { AudioField, Curve, SceneValues, Tuning } from './knobs'
 import type { Mapping } from './types'
@@ -67,8 +67,7 @@ export function resolvePost(
   out: PostParams,
 ): PostParams {
   out.enabled = base.enabled
-  for (const stage of ['feedback', 'bloom', 'chromatic', 'tonemap', 'grain'] as const)
-    out[stage].enabled = base[stage].enabled
+  for (const stage of POST_STAGES) out[stage].enabled = base[stage].enabled
   out.bloom.weights = [base.bloom.weights[0], base.bloom.weights[1], base.bloom.weights[2]]
   for (const knob of POST_KNOBS) POST_LANES[knob].write(out, POST_LANES[knob].read(base))
   for (const row of mapping) {

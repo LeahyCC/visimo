@@ -3,12 +3,22 @@
  * that shuttles to the worker and back, so a frame costs no allocation, and
  * keeps the newest packet for the renderer to read. If the worker fails to
  * load or communicate, the same extractor runs locally so playback still draws.
+ *
+ * It also owns the analyser's waveform, which never goes near the worker: the
+ * extractor wants the spectrum and nothing else wants the waveform but the
+ * renderer, so it is read here on the main thread into a buffer that stays put.
  */
 import { BAND_COUNT, BAND_HIT, F, FeatureExtractor, PACKET_LENGTH } from './FeatureExtractor'
 import type { FromWorker } from './features.protocol'
 
 export class FeatureClient {
   readonly packet = new Float32Array(PACKET_LENGTH)
+  /**
+   * The newest `fftSize` samples of the sound, oldest first, as of the last
+   * `pump`. One buffer for the life of the client, so read it rather than
+   * keeping it; the next frame writes over it.
+   */
+  readonly waveform: Float32Array<ArrayBuffer>
   private worker: Worker | null = null
   private extractor: FeatureExtractor | null = null
   private spare: Float32Array<ArrayBuffer> | null
@@ -18,6 +28,7 @@ export class FeatureClient {
 
   constructor(private readonly analyser: AnalyserNode) {
     this.spare = new Float32Array(analyser.frequencyBinCount)
+    this.waveform = new Float32Array(analyser.fftSize)
     try {
       const worker = new Worker(new URL('./features.worker.ts', import.meta.url), {
         type: 'module',
@@ -44,6 +55,9 @@ export class FeatureClient {
   pump(dt: number) {
     if (this.disposed) return
     this.elapsed += Math.max(0, dt)
+    // Before the spectrum check: the worker holding the spectrum has no say
+    // over the waveform, so it is fresh on every tick the renderer pumps.
+    this.analyser.getFloatTimeDomainData(this.waveform)
     const spectrum = this.spare
     if (!spectrum) return
     this.spare = null

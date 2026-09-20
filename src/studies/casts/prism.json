@@ -1,0 +1,15 @@
+{
+  "id": "prism",
+  "name": "Prism",
+  "inks": ["fractal-glints"],
+  "look": "clean-glass",
+  "canvas": { "enabled": false },
+  "overrides": {
+    "fractal-glints": {
+      "mapping": [
+        { "from": "swell", "to": "intensity", "gain": -0.02, "curve": "square" },
+        { "from": "hardness", "to": "intensity", "gain": -0.02, "curve": "square" }
+      ]
+    }
+  }
+}

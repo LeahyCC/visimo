@@ -18,12 +18,15 @@ import { AUDIO_FIELDS, CURVES, FLUID_KNOBS, KALEIDOSCOPE_KNOBS } from './knobs'
 import type { AudioField, Curve, FluidKnob } from './knobs'
 import type { Mapping, Preset } from './types'
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
+// The seven helpers below are exported for the cast parser in `studies/`,
+// which reads its files the same way and should say the same things about a
+// bad one. They are generic narrowing and know nothing of either shape.
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
-const list = (values: readonly string[]) => values.join(', ')
+export const list = (values: readonly string[]) => values.join(', ')
 
-function describe(value: unknown): string {
+export function describe(value: unknown): string {
   if (value === null) return 'null'
   if (Array.isArray(value)) return 'an array'
   if (typeof value === 'string') return JSON.stringify(value)
@@ -33,22 +36,22 @@ function describe(value: unknown): string {
 
 // Declared rather than assigned, so TypeScript treats a call as the end of
 // the branch and narrows what follows it.
-function fail(source: string, path: string, message: string): never {
+export function fail(source: string, path: string, message: string): never {
   throw new Error(`${source}: ${path} ${message}`)
 }
 
-function readNumber(value: unknown, source: string, path: string): number {
+export function readNumber(value: unknown, source: string, path: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value))
     fail(source, path, `expected a finite number, got ${describe(value)}`)
   return value
 }
 
-function readBoolean(value: unknown, source: string, path: string): boolean {
+export function readBoolean(value: unknown, source: string, path: string): boolean {
   if (typeof value !== 'boolean') fail(source, path, `expected true or false`)
   return value
 }
 
-function readString(value: unknown, source: string, path: string): string {
+export function readString(value: unknown, source: string, path: string): string {
   if (typeof value !== 'string' || !value)
     fail(source, path, `expected a name, got ${describe(value)}`)
   return value

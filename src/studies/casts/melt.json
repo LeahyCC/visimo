@@ -1,0 +1,55 @@
+{
+  "id": "melt",
+  "name": "Melt",
+  "flow": "turbulent-fluid",
+  "inks": ["fractal-glints", "ribbon"],
+  "look": "clean-glass",
+  "canvas": {
+    "knobs": {
+      "feedback.amount": 1,
+      "feedback.decay": 0.94,
+      "feedback.zoom": 1,
+      "feedback.rotate": 0,
+      "feedback.carry": 1,
+      "feedback.floor": 0.03,
+      "feedback.ceiling": 1.2
+    },
+    "mapping": [
+      { "from": "swell", "to": "feedback.decay", "gain": -0.02 },
+      { "from": "beatPhase", "to": "feedback.zoom", "gain": 0.0015, "curve": "invert" },
+      { "from": "harmonicChange", "to": "feedback.rotate", "gain": 0.0015 },
+      { "from": "energy", "to": "feedback.carry", "gain": 0.2 },
+      { "from": "energy", "to": "feedback.floor", "gain": 0.05 },
+      { "from": "energy", "to": "feedback.ceiling", "gain": -0.12, "curve": "square" },
+      { "from": "swell", "to": "feedback.ceiling", "gain": -0.07, "curve": "square" },
+      { "from": "hardness", "to": "feedback.ceiling", "gain": -0.07, "curve": "square" }
+    ]
+  },
+  "overrides": {
+    "turbulent-fluid": {
+      "knobs": {
+        "velocityDecay": 0.35,
+        "vorticity": 16,
+        "viscosity": 0.12,
+        "spread": 0.46,
+        "force": 0.4,
+        "hitForce": 0.5,
+        "orbitSpeed": 0.14,
+        "emitters": 5,
+        "voice": 0.85,
+        "events": 20,
+        "eventLife": 0.8,
+        "eventForce": 0.5,
+        "eventRadius": 0.018
+      }
+    },
+    "fractal-glints": {
+      "knobs": { "intensity": 0.5 },
+      "mapping": [{ "from": "energy", "to": "intensity", "gain": -0.1, "curve": "square" }]
+    },
+    "ribbon": {
+      "knobs": { "ribbon.intensity": 0.3, "ribbon.height": 0.12, "ribbon.shape": 1 },
+      "mapping": [{ "from": "energy", "to": "ribbon.intensity", "gain": 0.1 }]
+    }
+  }
+}

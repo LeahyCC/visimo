@@ -537,6 +537,13 @@ const NOVELTY_RAMP_MS = 500
 // `rest` read nothing at all. Low enough that nothing audible reaches it,
 // and not zero, so that true silence is a number.
 const MOMENT_FLOOR = 1e-7
+// What the evidence for a build and for a drop reads when each is wholly
+// there, which is what the two rows are published against; `Moment.reading`
+// says why. A build on a real track peaked at 0.49 and the synthetic one at
+// 0.71; a real drop at 0.41, the synthetic one at 0.46 to 0.50, and `impact`
+// fires at 0.35. Tuned on one real track, and the first thing to move.
+const TENSION_FULL = 0.5
+const RELEASE_FULL = 0.4
 // Under this there is nothing to hear and the arms are held rather than
 // stepped. It sits 20 dB over the floor and some 50 dB under a mix that has
 // been turned down by 20, so a reverb tail is still music and a paused
@@ -1729,7 +1736,29 @@ export class Moment {
     this.impact *= Math.exp(-dt / IMPACT_DECAY_SECONDS)
     // Silence is the floor gone altogether, so rest climbs to the top.
     const rest = this.restRamp.step(1, dt)
-    return { tension: this.tension, release: clamp01(this.release), rest, impact: this.impact }
+    return this.reading(rest)
+  }
+
+  /**
+   * What goes in the packet. Inside this class tension and release are levels
+   * of evidence, and neither reaches 1 on music: `impact` fires when release
+   * crosses 0.35, and on the first real track a drop peaked at 0.41 and a
+   * build at 0.49. Published like that, everything downstream had to work
+   * round it, each in its own way. The director divided them back up. A study
+   * written so that a tension of 1 is the whole effect, which is how every
+   * one of them is written, ran at half strength through a real build. The
+   * shards' gate on release was shut a second after the drop. So the rows are
+   * published against the level that means the thing is wholly happening, and
+   * a consumer reads 0 to 1 and means it. Every threshold above is still on
+   * the evidence itself, which is why this is done on the way out.
+   */
+  private reading(rest: number): MomentReading {
+    return {
+      tension: clamp01(this.tension / TENSION_FULL),
+      release: clamp01(this.release / RELEASE_FULL),
+      rest,
+      impact: this.impact,
+    }
   }
 
   step(frame: MomentFrame, dt: number): MomentReading {
@@ -1936,7 +1965,7 @@ export class Moment {
       dt,
     )
 
-    return { tension: this.tension, release: clamp01(this.release), rest, impact: this.impact }
+    return this.reading(rest)
   }
 }
 

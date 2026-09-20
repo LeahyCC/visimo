@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../../src/audio/FeatureExtractor'
-import { BUILD_FULL } from '../../src/director/moment'
 import { MOMENTS } from '../../src/presets'
 import { overridePacket, overridesFor } from './packet'
 import { readingOf } from './reading'
@@ -26,8 +25,8 @@ describe('readingOf', () => {
 
   it('reads the moment the sliders set, and shares one whole frame between the six', () => {
     const { weights } = readingOf(packetWith({ tension: 0.3 }))
-    expect(weights.build).toBeCloseTo(0.3 / BUILD_FULL, 2)
-    expect(weights.groove).toBeCloseTo(1 - 0.3 / BUILD_FULL, 2)
+    expect(weights.build).toBeCloseTo(0.3, 2)
+    expect(weights.groove).toBeCloseTo(0.7, 2)
     expect(MOMENTS.reduce((sum, moment) => sum + weights[moment], 0)).toBeCloseTo(1, 6)
   })
 

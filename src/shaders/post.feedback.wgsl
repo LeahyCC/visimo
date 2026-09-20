@@ -66,8 +66,15 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
   let s = sin(angle);
   let c = cos(angle);
   let turned = vec2<f32>(centred.x * c - centred.y * s, centred.x * s + centred.y * c) / zoom;
-  let uv = clamp(turned / aspect + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
-  let old = textureSample(history, samp, uv).rgb * post.feedback.x * post.feedback.y;
+  let wanted = turned / aspect + vec2<f32>(0.5);
+  let uv = clamp(wanted, vec2<f32>(0.0), vec2<f32>(1.0));
+  // Off the edge of the last frame there is nothing to carry. Clamping alone
+  // repeats the border pixel for as far as the warp reaches, which drew long
+  // radial streaks round the rim whenever a zoom under 1 or the flow pulled
+  // the picture inward.
+  let off = max(abs(wanted - vec2<f32>(0.5)) - vec2<f32>(0.5), vec2<f32>(0.0));
+  let inside = select(0.0, 1.0, off.x + off.y <= 0.0);
+  let old = textureSample(history, samp, uv).rgb * post.feedback.x * post.feedback.y * inside;
   // Floor first, then ceiling: one holds the bottom of the trail and the
   // other the top, and neither can undo the other.
   return vec4<f32>(held(lowered(old, post.floor.x), post.flow.y), 1.0);

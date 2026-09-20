@@ -31,7 +31,7 @@
     "feedback": {
       "amount": 1,
       "decay": 0.93,
-      "zoom": 0.9985,
+      "zoom": 1.0015,
       "rotate": 0,
       "carry": 1,
       "floor": 0.018,

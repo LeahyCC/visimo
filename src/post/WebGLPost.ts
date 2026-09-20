@@ -60,8 +60,12 @@ void main() {
   vec2 centred = (uv - 0.5) * aspect;
   float s = sin(angle), c = cos(angle);
   vec2 turned = vec2(centred.x * c - centred.y * s, centred.x * s + centred.y * c) / zoom;
-  vec2 at = clamp(turned / aspect + 0.5, vec2(0.0), vec2(1.0));
-  vec3 old = texture(source, at).rgb * post[1].x * post[1].y;
+  vec2 wanted = turned / aspect + 0.5;
+  vec2 at = clamp(wanted, vec2(0.0), vec2(1.0));
+  // Nothing to carry from off the edge; see post.feedback.wgsl.
+  vec2 off = max(abs(wanted - 0.5) - 0.5, vec2(0.0));
+  float inside = off.x + off.y <= 0.0 ? 1.0 : 0.0;
+  vec3 old = texture(source, at).rgb * post[1].x * post[1].y * inside;
   // The brightest channel carries both limits and the other two follow it,
   // so a long trail loses brightness rather than colour.
   float peak = max(max(old.r, max(old.g, old.b)), 0.0);

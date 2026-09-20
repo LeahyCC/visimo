@@ -57,6 +57,8 @@ describe('parsePreset', () => {
     expect(preset.scene).toBe('fluid')
     expect(preset.postParams.feedback.carry).toBe(1)
     expect(preset.postParams.feedback.ceiling).toBeGreaterThan(0)
+    // The floor is what holds the background black under a gain this long.
+    expect(preset.postParams.feedback.floor).toBeGreaterThan(0)
     // The trail is the whole point of it, so the gain had better be long.
     const gain = preset.postParams.feedback.amount * preset.postParams.feedback.decay
     expect(gain).toBeGreaterThan(0.9)

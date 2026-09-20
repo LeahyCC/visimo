@@ -293,7 +293,7 @@ describe('carrying the history along a flow', () => {
     const before = write(defaultPostParams(), features)
     const after = write(carrying(), features, 1920, 1080, coverOf(1920, 1080))
     expect(Array.from(after.slice(0, 28))).toEqual(Array.from(before.slice(0, 28)))
-    expect(POST_UNIFORM_FLOATS).toBe(32)
+    expect(POST_UNIFORM_FLOATS).toBe(36)
   })
 
   it('makes the carry vanish with no flow, no carry or the stage off', () => {
@@ -354,5 +354,68 @@ describe('the cover a flow is measured against', () => {
     expect(flowCover(null)).toEqual([1, 1])
     expect(flowCover([0, 0.5])).toEqual([1, 0.5])
     expect(flowCover([Number.NaN, -1])).toEqual([1, 1])
+  })
+})
+
+describe('the floor under the trail', () => {
+  const REFERENCE = 1 / 60
+  const feedback = defaultPostParams().feedback
+  const lowering = (floor: number) => mergePostParams(defaultPostParams(), { feedback: { floor } })
+
+  it('takes nothing off the history by default', () => {
+    expect(feedback.floor).toBe(0)
+    // The whole block past the flow is the floor's, and it is off.
+    const out = write(defaultPostParams(), packet({ dt: REFERENCE }))
+    expect([out[32], out[33], out[34], out[35]]).toEqual([0, 0, 0, 0])
+    // Everything the uniform held before the floor was added is untouched.
+    const lowered = write(lowering(0.02), packet({ dt: REFERENCE }))
+    expect(Array.from(lowered.slice(0, 32))).toEqual(
+      Array.from(write(defaultPostParams(), packet({ dt: REFERENCE })).slice(0, 32)),
+    )
+  })
+
+  it('reads and writes as a lane', () => {
+    const params = defaultPostParams()
+    expect(POST_LANES['feedback.floor'].read(params)).toBe(0)
+    POST_LANES['feedback.floor'].write(params, 0.03)
+    expect(POST_LANES['feedback.floor'].read(params)).toBe(0.03)
+    expect(params.feedback.floor).toBe(0.03)
+  })
+
+  it('halves when the step halves, so it takes the same light off per second', () => {
+    const whole = feedbackStep({ ...feedback, floor: 0.02 }, REFERENCE)
+    const half = feedbackStep({ ...feedback, floor: 0.02 }, 1 / 120)
+    expect(whole.floor).toBeCloseTo(0.02, 9)
+    expect(half.floor).toBeCloseTo(whole.floor / 2, 9)
+    expect(feedbackStep({ ...feedback, floor: 0.02 }, 1 / 30).floor).toBeCloseTo(0.04, 9)
+  })
+
+  it('never adds light, whatever a mapping drives it to', () => {
+    expect(feedbackStep({ ...feedback, floor: -1 }, REFERENCE).floor).toBe(0)
+    expect(write(lowering(-1), packet({ dt: REFERENCE }))[32]).toBe(0)
+  })
+
+  it('writes a floor of zero when the stage is off, at any step', () => {
+    const off = mergePostParams(lowering(0.05), { feedback: { enabled: false } })
+    for (const dt of [0, 1 / 144, 0.5]) expect(write(off, packet({ dt }))[32]).toBe(0)
+    const stackOff = mergePostParams(lowering(0.05), { enabled: false })
+    expect(write(stackOff, packet({ dt: REFERENCE }))[32]).toBe(0)
+  })
+
+  it('settles a constant at (c - f) / (1 - gain), which is what a preset aims at', () => {
+    // The fluid adds 0.02 to every pixel, and Drift's floor is set against it.
+    const constant = 0.02
+    const settled = (floor: number, fps: number) => {
+      const step = feedbackStep({ ...feedback, amount: 1, decay: 0.94, floor }, 1 / fps)
+      return (constant * step.fresh - step.floor) / (1 - step.amount * step.decay)
+    }
+    expect(settled(0, 60)).toBeCloseTo(constant / (1 - 0.94), 6)
+    expect(settled(0.018, 60)).toBeCloseTo(0.002 / (1 - 0.94), 6)
+    // The floor scales with the step and the decay compounds with it, so the
+    // two only agree exactly as the gain approaches 1. At a gain of 0.94 a
+    // 144 Hz display settles a shade higher, which on an eight-bit canvas is
+    // a code value or two out of a background that is nearly black.
+    expect(Math.abs(settled(0.018, 144) - settled(0.018, 60))).toBeLessThan(0.01)
+    for (const fps of [30, 60, 144, 240]) expect(settled(0.018, fps)).toBeLessThan(0.06)
   })
 })

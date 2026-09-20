@@ -12,12 +12,25 @@
 // post.flow carries the rest: how far this frame's step moves the history
 // along the flow, the ceiling on what may be carried back, and the canvas to
 // grid scale. A scene that offers no field has a single zero texel bound and
-// a carry of zero, so there is one pipeline here and no branch.
+// a carry of zero, so there is one pipeline here and no branch. post.floor is
+// the light taken off the history, already scaled by the step.
 
 @group(0) @binding(0) var<uniform> post: PostParams;
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var history: texture_2d<f32>;
 @group(0) @binding(3) var flow: texture_2d<f32>;
+
+// Light taken off the carried history, so a constant a scene adds to every
+// pixel cannot sum to a haze: under gain g and floor f a constant c settles
+// at (c - f) / (1 - g) rather than c / (1 - g). It comes off the brightest
+// channel and the other two are scaled by the same fraction, for the reason
+// `held` gives. Being subtractive it takes faint light out sooner than
+// bright, which is what keeps the blacks black.
+fn lowered(colour: vec3<f32>, cut: f32) -> vec3<f32> {
+  let peak = max(max(colour.r, max(colour.g, colour.b)), 0.0);
+  let left = max(peak - cut, 0.0);
+  return colour * (left / max(peak, 1e-5));
+}
 
 // A soft limit that keeps the colour. Below half the ceiling nothing changes;
 // above it the brightest channel bends toward the ceiling and never reaches
@@ -55,5 +68,7 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
   let turned = vec2<f32>(centred.x * c - centred.y * s, centred.x * s + centred.y * c) / zoom;
   let uv = clamp(turned / aspect + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
   let old = textureSample(history, samp, uv).rgb * post.feedback.x * post.feedback.y;
-  return vec4<f32>(held(old, post.flow.y), 1.0);
+  // Floor first, then ceiling: one holds the bottom of the trail and the
+  // other the top, and neither can undo the other.
+  return vec4<f32>(held(lowered(old, post.floor.x), post.flow.y), 1.0);
 }

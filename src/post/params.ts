@@ -28,6 +28,21 @@ export type FeedbackParams = {
    */
   carry: number
   /**
+   * Light taken off the carried history every frame, 0 for none. A scene
+   * that adds a constant to every pixel, as the fluid's background colour
+   * is, sums that constant to `base / (1 - amount x decay)` under a long
+   * trail and the whole frame lifts into a haze. Subtracting a little more
+   * than the constant holds the blacks black, which is most of why
+   * MilkDrop's trails read as well as they do. It comes off the brightest
+   * channel and the other two are scaled by the same fraction, for the
+   * reason `ceiling` gives.
+   *
+   * It is subtractive, so faint light dies faster than bright light: a
+   * trail lasts roughly its own brightness divided by this, in frames, once
+   * the decay is near 1.
+   */
+  floor: number
+  /**
    * The most light one frame may carry back from the history. A trail near
    * gain 1 sums without bound otherwise, and half floats reach 65504 before
    * anything stops them. Below half of this nothing changes; above it the
@@ -37,11 +52,11 @@ export type FeedbackParams = {
    */
   ceiling: number
 }
-// The first four numbers above are what one frame does at 60 frames a
-// second. `feedbackStep` converts them by the real step, so a trail lasts and
-// travels the same number of seconds on any display. `carry` is per second
-// already, since the velocity it scales is, and `ceiling` is a brightness
-// and has no rate in it at all.
+// The first four numbers above, and `floor`, are what one frame does at 60
+// frames a second. `feedbackStep` converts them by the real step, so a trail
+// lasts and travels the same number of seconds on any display. `carry` is per
+// second already, since the velocity it scales is, and `ceiling` is a
+// brightness and has no rate in it at all.
 
 export type BloomParams = {
   enabled: boolean
@@ -118,9 +133,11 @@ export const DEFAULT_POST_PARAMS: PostParams = {
     decay: 0.72,
     zoom: 1.012,
     rotate: 0.002,
-    // Off: the pass is the zoom and turn it always was. The ceiling sits far
-    // above anything a scene draws, so the shipped presets never meet it.
+    // Off: the pass is the zoom and turn it always was. Nothing is taken off
+    // the history, and the ceiling sits far above anything a scene draws, so
+    // the shipped presets meet neither.
     carry: 0,
+    floor: 0,
     ceiling: 16,
   },
   bloom: {
@@ -163,6 +180,8 @@ export type FeedbackStep = {
   decay: number
   zoom: number
   rotate: number
+  /** Light taken off the history on this drawn frame. */
+  floor: number
   /** Weight on the frame the scene just drew, 1 at the reference rate. */
   fresh: number
 }
@@ -211,6 +230,10 @@ export function feedbackStep(feedback: FeedbackParams, dt: number): FeedbackStep
     // The shader divides by the zoom, so it never reaches zero or goes negative.
     zoom: Math.max(feedback.zoom, 0.001) ** frames,
     rotate: feedback.rotate * frames,
+    // Light per unit of time, so it scales with the step the way the rotation
+    // does rather than compounding the way the decay does. A negative one
+    // would add light instead of taking it, which is not what the knob means.
+    floor: Math.max(feedback.floor, 0) * frames,
   }
 }
 
@@ -225,7 +248,7 @@ export function freshWeight(params: PostParams, features: Float32Array): number 
 }
 
 /** Floats in the shared uniform; PostParams in post.common.wgsl must match. */
-export const POST_UNIFORM_FLOATS = 32
+export const POST_UNIFORM_FLOATS = 36
 
 /**
  * Canvas uv to a flow field's own uv, as `Flow.cover` in `scenes/Scene.ts`
@@ -323,6 +346,12 @@ export const POST_LANES = {
     read: (p: PostParams) => p.feedback.carry,
     write: (p: PostParams, value: number) => {
       p.feedback.carry = value
+    },
+  },
+  'feedback.floor': {
+    read: (p: PostParams) => p.feedback.floor,
+    write: (p: PostParams, value: number) => {
+      p.feedback.floor = value
     },
   },
   'feedback.ceiling': {
@@ -496,5 +525,12 @@ export function writePostUniform(
   const scale = flowCover(dragging ? cover : null)
   out[30] = scale[0]
   out[31] = scale[1]
+
+  // The floor wants a vec4 of its own, the flow one being full. Off is zero,
+  // which takes nothing off the history.
+  out[32] = trails ? step.floor : 0
+  out[33] = 0
+  out[34] = 0
+  out[35] = 0
   return out
 }

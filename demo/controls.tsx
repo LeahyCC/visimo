@@ -63,6 +63,7 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'feedback.zoom': [0.9, 1.1],
   'feedback.rotate': [-0.1, 0.1],
   'feedback.carry': [0, 2],
+  'feedback.floor': [0, 0.1],
   'feedback.ceiling': [0.05, 24],
   'bloom.threshold': [0, 4],
   'bloom.knee': [0, 2],

@@ -33,6 +33,7 @@
       "zoom": 1,
       "rotate": 0,
       "carry": 1,
+      "floor": 0.018,
       "ceiling": 1.8
     }
   },

@@ -4,22 +4,46 @@
  * code, and it must land on the same numbers. Anything else is a preset
  * quietly changing on the way through.
  *
- * Tension is zero throughout, which is what it is until the estimator lands,
- * and every study's tension row is written so that zero adds nothing.
+ * The presets themselves are gone, so what they resolved to was captured
+ * first: `preset-frames.json` beside the casts is the old path's own output,
+ * written by running it over the same five packets these tests use. It is a
+ * record of what shipped in 0.1 and nothing regenerates it.
+ *
+ * Tension is zero throughout, which is what every preset saw when the frames
+ * were recorded, and every study's tension row is written so that zero adds
+ * nothing.
  */
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
-import { findPreset } from '../presets/index'
+import { POST_KNOBS, POST_LANES, POST_STAGES, postSummary } from '../post/params'
+import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
-import { resolvePost, resolveScene } from '../presets/resolve'
 import { parseCast } from './cast'
-import { CASTS, findCast } from './casts/index'
+import { castOrDefault, CASTS, DEFAULT_CAST_ID, findCast, stepCast } from './casts/index'
 import melt from './casts/melt.json'
 import plume from './casts/plume.json'
+import frames from './casts/preset-frames.json'
 import prism from './casts/prism.json'
 import { castFrame, resolveCast } from './resolve'
+
+/**
+ * One captured frame of the preset path. The file is generated, so its own
+ * types are as loose as JSON is: the stack's bloom weights come back as a
+ * list rather than the triple the stack holds, which is the one thing this
+ * narrowing buys.
+ */
+type PresetFrame = {
+  preset: string
+  packet: string
+  level: number
+  swell: number
+  scene: Readonly<Record<string, number>>
+  flow: Readonly<Record<string, number>> | null
+  post: PostParams
+}
+
+const FRAMES = frames as unknown as readonly PresetFrame[]
 
 /** Every field a mapping can read at one level; `lowEnd` is derived and follows. */
 const packetAt = (level: number, swell: number) => {
@@ -29,58 +53,51 @@ const packetAt = (level: number, swell: number) => {
   return out
 }
 
-const PACKETS = [
-  { label: 'silence', packet: packetAt(0, 0) },
-  { label: 'a full packet', packet: packetAt(1, 1) },
-  { label: 'a quiet steady passage', packet: packetAt(0.3, 0.5) },
-  { label: 'a loud lifting passage', packet: packetAt(0.7, 0.8) },
-  { label: 'a middling passage dropping away', packet: packetAt(0.55, 0.2) },
-]
+const framesOf = (id: string) => FRAMES.filter((entry) => entry.preset === id)
 
 describe('a pinned cast resolves to its preset', () => {
-  for (const cast of CASTS) {
-    const preset = findPreset(cast.id)
+  // The capture has to cover the five, or a cast could pass by being compared
+  // against nothing at all.
+  it('has a captured frame for every cast at five packets', () => {
+    for (const cast of CASTS) expect(framesOf(cast.id).length, cast.name).toBe(5)
+  })
 
+  for (const cast of CASTS) {
     it(`${cast.name}: the scene knobs match at every packet`, () => {
-      if (!preset) throw new Error(`Expected the ${cast.id} preset`)
-      for (const { label, packet } of PACKETS) {
-        const scene: Record<string, number> = {}
-        resolveScene(preset.sceneParams, preset.audioMapping, packet, scene)
+      for (const golden of framesOf(cast.id)) {
+        const packet = packetAt(golden.level, golden.swell)
         const frame = resolveCast(cast, packet, 0, castFrame())
-        // Every knob the drawing scene has, wherever in the cast it now lives:
-        // the fluid presets split theirs between a flow and an ink.
+        // Every knob the drawing scene had, wherever in the cast it now
+        // lives: the fluid presets split theirs between a flow and an ink.
         const drawn: Record<string, number> = {}
         for (const knobs of frame.knobs.values())
-          for (const [knob, value] of Object.entries(knobs)) if (knob in scene) drawn[knob] = value
-        expect(Object.keys(drawn).sort(), `${cast.name} at ${label}`).toEqual(
-          Object.keys(scene).sort(),
+          for (const [knob, value] of Object.entries(knobs))
+            if (knob in golden.scene) drawn[knob] = value
+        expect(Object.keys(drawn).sort(), `${cast.name} at ${golden.packet}`).toEqual(
+          Object.keys(golden.scene).sort(),
         )
-        for (const [knob, value] of Object.entries(scene))
-          expect(drawn[knob], `${cast.name} ${knob} at ${label}`).toBeCloseTo(value, 10)
+        for (const [knob, value] of Object.entries(golden.scene))
+          expect(drawn[knob], `${cast.name} ${knob} at ${golden.packet}`).toBeCloseTo(value, 10)
       }
     })
 
     it(`${cast.name}: the whole post stack matches at every packet`, () => {
-      if (!preset) throw new Error(`Expected the ${cast.id} preset`)
-      for (const { label, packet } of PACKETS) {
-        const post = resolvePost(
-          preset.postParams,
-          preset.audioMapping,
-          packet,
-          defaultPostParams(),
-        )
-        const { post: mine } = resolveCast(cast, packet, 0, castFrame())
-        expect(mine.enabled, `${cast.name} enabled at ${label}`).toBe(post.enabled)
+      for (const golden of framesOf(cast.id)) {
+        const packet = packetAt(golden.level, golden.swell)
+        const { post } = resolveCast(cast, packet, 0, castFrame())
+        expect(post.enabled, `${cast.name} enabled at ${golden.packet}`).toBe(golden.post.enabled)
         for (const stage of POST_STAGES)
-          expect(mine[stage].enabled, `${cast.name} ${stage} at ${label}`).toBe(post[stage].enabled)
-        expect(mine.bloom.weights, `${cast.name} bloom weights at ${label}`).toEqual(
-          post.bloom.weights,
+          expect(post[stage].enabled, `${cast.name} ${stage} at ${golden.packet}`).toBe(
+            golden.post[stage].enabled,
+          )
+        expect(post.bloom.weights, `${cast.name} bloom weights at ${golden.packet}`).toEqual(
+          golden.post.bloom.weights,
         )
         for (const knob of POST_KNOBS)
-          expect(POST_LANES[knob].read(mine), `${cast.name} ${knob} at ${label}`).toBeCloseTo(
+          expect(
             POST_LANES[knob].read(post),
-            10,
-          )
+            `${cast.name} ${knob} at ${golden.packet}`,
+          ).toBeCloseTo(POST_LANES[knob].read(golden.post), 10)
       }
     })
   }
@@ -89,11 +106,58 @@ describe('a pinned cast resolves to its preset', () => {
   // the resting values that have to survive: as a study the fluid under the
   // fractal now answers the music, which a preset's flow never did.
   it('Melt keeps its flow at the numbers the preset set', () => {
-    const preset = findPreset('melt')
     const cast = findCast('melt')
-    if (!preset || !cast) throw new Error('Expected Melt')
+    const golden = framesOf('melt').find((entry) => entry.packet === 'silence')
+    if (!cast || !golden?.flow) throw new Error('Expected Melt')
     const frame = resolveCast(cast, packetAt(0, 0), 0, castFrame())
-    expect(frame.knobs.get('turbulent-fluid')).toEqual(preset.flowParams)
+    expect(frame.knobs.get('turbulent-fluid')).toEqual(golden.flow)
+  })
+})
+
+// `data-post` on the canvas is the summary, and a consumer's tests assert it,
+// so the five have to print exactly what they printed as presets.
+describe('the casts', () => {
+  const summaryOf = (id: string) => {
+    const cast = findCast(id)
+    if (!cast) throw new Error(`Expected the ${id} cast`)
+    return postSummary(resolveCast(cast, packetAt(0.3, 0.5), 0, castFrame()).post)
+  }
+
+  it('have unique ids and names', () => {
+    expect(new Set(CASTS.map((cast) => cast.id)).size).toBe(CASTS.length)
+    expect(new Set(CASTS.map((cast) => cast.name)).size).toBe(CASTS.length)
+  })
+
+  it('has a default that exists and is carried by a fluid', () => {
+    const cast = castOrDefault(DEFAULT_CAST_ID)
+    expect(cast.id).toBe(DEFAULT_CAST_ID)
+    expect(cast.flow).toBe('lazy-fluid')
+    // An id nobody recognises falls back rather than throwing.
+    expect(castOrDefault('gone').id).toBe(DEFAULT_CAST_ID)
+  })
+
+  it('steps both ways and wraps', () => {
+    const first = CASTS[0]
+    const last = CASTS[CASTS.length - 1]
+    if (!first || !last) throw new Error('Expected casts')
+    expect(stepCast(first.id, 1).id).toBe(CASTS[1]?.id)
+    expect(stepCast(first.id, -1).id).toBe(last.id)
+    expect(stepCast(last.id, 1).id).toBe(first.id)
+    // An id nobody recognises starts the walk from the top rather than off it.
+    expect(stepCast('gone', 1).id).toBe(CASTS[1]?.id)
+  })
+
+  it('print the stages they always did unless they hold the ribbon', () => {
+    expect(summaryOf('plume')).toBe('feedback bloom chroma tonemap grain')
+    expect(summaryOf('wash')).toBe('feedback bloom chroma tonemap grain')
+    expect(summaryOf('prism')).toBe('bloom tonemap')
+    expect(summaryOf('drift')).toBe('ribbon feedback bloom chroma tonemap grain')
+    expect(summaryOf('melt')).toBe('ribbon feedback bloom tonemap')
+  })
+
+  it('hold the ribbon in Drift and Melt and nowhere else', () => {
+    for (const cast of CASTS)
+      expect(cast.inks.includes('ribbon'), cast.name).toBe(['drift', 'melt'].includes(cast.id))
   })
 })
 
@@ -102,7 +166,7 @@ describe('parseCast', () => {
     const cast = parseCast(plume, 'plume.json')
     expect(cast.canvas.enabled).toBe(true)
     expect(cast.canvas.knobs['feedback.decay']).toBe(0.69)
-    expect(cast.canvas.knobs['feedback.amount']).toBe(defaultPostParams().feedback.amount)
+    expect(cast.canvas.knobs['feedback.amount']).toBe(0.22)
   })
 
   it('reads a cast with no flow at all', () => {

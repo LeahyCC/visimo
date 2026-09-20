@@ -16,9 +16,22 @@ import { POST_KNOBS } from '../post/params'
 import type { PostKnob, PostStage } from '../post/params'
 import { KALEIDOSCOPE_KNOBS } from '../presets/knobs'
 import type { FluidKnob, KaleidoscopeKnob } from '../presets/knobs'
+import type { SceneId } from '../scenes/catalog'
 
 export const IMPL_IDS = ['fluid', 'dye', 'fractal', 'ribbon', 'look'] as const
 export type ImplId = (typeof IMPL_IDS)[number]
+
+/**
+ * The scene an implementation used to be, for `data-scene`. That attribute is
+ * public API a consumer's tests assert on and a cast has no single scene, so
+ * the two implementations that were scenes keep their names: the dye is the
+ * fluid and the fractal is the kaleidoscope. `sceneOf` in `registry.ts` is
+ * what reads this.
+ */
+export const IMPL_SCENES: Readonly<Partial<Record<ImplId, SceneId>>> = {
+  dye: 'fluid',
+  fractal: 'kaleidoscope',
+}
 
 export const isImplId = (value: string): value is ImplId =>
   (IMPL_IDS as readonly string[]).includes(value)

@@ -1,7 +1,7 @@
 {
   "name": "visimo",
-  "version": "0.1.0",
-  "description": "A WebGPU music visualizer: a fluid scene, a post stack and an audio feature worker, driven by JSON presets.",
+  "version": "0.2.0",
+  "description": "A WebGPU music visualizer: one canvas drawn by studies, a post stack and an audio feature worker, driven by JSON casts.",
   "license": "MIT",
   "repository": {
     "type": "git",

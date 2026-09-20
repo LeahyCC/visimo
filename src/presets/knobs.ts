@@ -1,12 +1,13 @@
 /**
- * The vocabulary a preset is written in: which feature a mapping can read,
- * how it may bend it, and the named numbers each scene exposes. Like
- * `scenes/catalog.ts` this imports nothing, so the stage's top bar and the
- * preset parser can read it without pulling the WebGPU tree into the main
- * bundle, and the scenes' parameter files can import it without a cycle.
+ * The vocabulary a study is written in: which feature a mapping can read, how
+ * it may bend it, and the named numbers each implementation exposes. Like
+ * `scenes/catalog.ts` this imports nothing, so a host's picker and the cast
+ * parser can read it without pulling the WebGPU tree into the main bundle,
+ * and the parameter files can import it without a cycle.
  *
- * A knob is a plain identifier. A post target is dotted, `bloom.intensity`,
- * which is how the parser tells the two apart.
+ * It is still under `presets/` because the entry point a host imports is
+ * still `visimo/presets`. A knob is a plain identifier and a post target is
+ * dotted, `bloom.intensity`, which is how a cast tells the two apart.
  */
 
 /**
@@ -167,24 +168,12 @@ export type KaleidoscopeKnob = (typeof KALEIDOSCOPE_KNOBS)[number]
 
 export type SceneKnob = FluidKnob | KaleidoscopeKnob
 
-/** Every knob a scene offers, by scene id. The parser checks against this. */
-export const SCENE_KNOBS = {
-  fluid: FLUID_KNOBS,
-  kaleidoscope: KALEIDOSCOPE_KNOBS,
-} as const satisfies Record<string, readonly SceneKnob[]>
-
 /**
- * The resolved numbers a scene reads each frame. The renderer fills one of
- * these from the preset and its mapping before calling `update`, and each
- * scene's parameter file turns it into that scene's own typed object, falling
- * back to its defaults for anything the preset left out.
+ * The resolved numbers an implementation reads each frame. The renderer fills
+ * one of these from the studies that are live before calling `update`, and
+ * each parameter file turns it into its own typed object, falling back to its
+ * defaults for anything no live study named. Which knobs belong to which
+ * implementation is `studies/impls.ts`, since a study may hold half a set:
+ * a fluid flow brings the solver's and a dye ink the rest.
  */
 export type Tuning = Readonly<Partial<Record<SceneKnob, number>>>
-
-/**
- * A scene's resting numbers, seen from outside. The renderer holds a preset
- * whose scene it does not know at compile time, so what it hands the resolver
- * is this rather than one scene's own record; the parser has already made
- * sure the keys are that scene's.
- */
-export type SceneValues = Readonly<Record<string, number>>

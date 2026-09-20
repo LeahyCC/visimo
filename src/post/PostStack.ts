@@ -1,24 +1,28 @@
 /**
- * The post stack: everything between the scene and the swap chain.
+ * The post stack: everything between the inks and the swap chain.
  *
- *   scene ──► ribbon ──► history[current] ──► bright ──► blur x3 ──► composite ──► canvas
- *                              ▲  add                                    ▲
- *                              └── history[other], zoomed and decayed ────┘
+ *   clear ──► inks, ribbon among them ──► history[current] ──► bright ──► blur x3 ──► composite ──► canvas
+ *                                               ▲  add                                   ▲
+ *                                               └── history[other], zoomed and decayed ───┘
  *
- * The scene draws into one of two floating-point history textures instead of
- * the canvas, so its brightest pixels survive past 1 and the tonemap in the
- * composite has something to roll off. The ribbon, when a preset turns it on,
- * draws the sound as a line into that same texture, so it is fresh light like
- * the scene's and the trails carry it. The feedback pass adds the other
- * history texture back over both, warped a little, and the two swap each
- * frame. A scene that solves a velocity field may offer it as its `flow`, and
- * the warp then reads the last frame back along that current as well.
+ * The inks draw into one of two floating-point history textures instead of
+ * the canvas, so their brightest pixels survive past 1 and the tonemap in the
+ * composite has something to roll off. The feedback pass adds the other
+ * history texture back over them, warped a little, and the two swap each
+ * frame. A live flow offers a velocity field and the warp then reads the last
+ * frame back along that current as well.
  *
- * Like the scene, this belongs to the renderer singleton, so the pipelines,
- * the sampler and the parameters outlive every remount. The textures do not:
- * they are sized from the canvas and rebuilt whenever that size changes,
- * which a dock or popout move always does, so the trails start again from
- * black on each move while the simulation itself keeps running.
+ * The ribbon is an ink that happens to be drawn here, because the line wants
+ * the same uniform every other pass reads. Its pass belongs to the stack and
+ * is encoded by `impls/RibbonInk.ts` in ink order, which is why `prepare`
+ * exists: the uniform has to be written before any ink runs, and `render`
+ * only picks the frame up afterwards.
+ *
+ * Like the implementations, this belongs to the renderer singleton, so the
+ * pipelines, the sampler and the parameters outlive every remount. The
+ * textures do not: they are sized from the canvas and rebuilt whenever that
+ * size changes, which a dock or popout move always does, so the trails start
+ * again from black on each move while the field itself keeps running.
  */
 import { F } from '../audio/FeatureExtractor'
 import { levelWaveform } from '../audio/waveform'
@@ -29,6 +33,7 @@ import common from '../shaders/post.common.wgsl?raw'
 import composite from '../shaders/post.composite.wgsl?raw'
 import feedback from '../shaders/post.feedback.wgsl?raw'
 import ribbon from '../shaders/post.ribbon.wgsl?raw'
+import type { FlowCover } from './params'
 import {
   BLOOM_LEVELS,
   bloomLevelSize,
@@ -272,14 +277,65 @@ export class PostStack {
   }
 
   /**
-   * Where the scene should draw this frame, sizing the textures first. The
-   * scene always goes through the stack, even with every stage off, because
-   * the canvas is written in the composite and nowhere else.
+   * Where the inks should draw this frame, sizing the textures first. They
+   * always go through the stack, even with every stage off, because the
+   * canvas is written in the composite and nowhere else.
    */
   target(width: number, height: number): GPUTextureView | null {
     if (!this.gear) return null
     this.resize(width, height)
     return this.sized?.history[this.current].view ?? null
+  }
+
+  /**
+   * The shared target emptied, before any ink draws. Every ink adds light to
+   * what is there, so something has to start the frame at black; it is also
+   * what stops a frame in which no ink drew at all from being summed into
+   * itself by the feedback pass for ever.
+   */
+  clear(encoder: GPUCommandEncoder, view: GPUTextureView) {
+    encoder
+      .beginRenderPass({
+        colorAttachments: [{ view, clearValue: BLACK, loadOp: 'clear', storeOp: 'store' }],
+      })
+      .end()
+  }
+
+  /**
+   * The uniform every pass reads, written once a frame. It cannot wait for
+   * `render`, because the ribbon ink encodes its pass before that and reads
+   * the same block; `cover` is the live flow's, or null when nothing carries
+   * the picture.
+   */
+  prepare(features: Float32Array, cover: FlowCover | null = null) {
+    const gear = this.gear
+    const sized = this.sized
+    if (!gear || !sized) return
+    writePostUniform(this.settings, features, sized.width, sized.height, this.uniformData, cover)
+    gear.device.queue.writeBuffer(gear.uniform, 0, this.uniformData)
+  }
+
+  /**
+   * The waveform drawn as a line into the shared target, which is the ribbon
+   * ink's pass. It is here rather than in the ink because the line reads the
+   * stack's own uniform and its points buffer is made once at start-up; the
+   * ink decides when it runs and in what order. With no samples yet, or with
+   * the stage off, nothing is drawn and nothing is uploaded.
+   */
+  drawRibbon(
+    encoder: GPUCommandEncoder,
+    view: GPUTextureView,
+    features: Float32Array,
+    waveform: Float32Array | null,
+  ) {
+    const gear = this.gear
+    if (!gear || !waveform || !ribbonRuns(this.settings)) return
+    fillRibbonPoints(waveform, this.ribbonData)
+    // Levelled against its own recent peak, so the line is as tall at a
+    // tenth of the volume as at full.
+    this.ribbonPeak = levelWaveform(this.ribbonData, this.ribbonPeak, features[F.dt] ?? 0)
+    gear.device.queue.writeBuffer(gear.ribbonPoints, 0, this.ribbonData)
+    draw(encoder, gear.ribbon, gear.ribbonGroup, view, 'load', undefined, RIBBON_VERTICES)
   }
 
   /** Discard the old scene's trails without reallocating its textures. */
@@ -290,46 +346,21 @@ export class PostStack {
   private historyReady = false
 
   /**
-   * Run the stack over what the scene drew and write `view`. `flow` is the
-   * velocity field the scene is solving, if it solves one; it is passed in
-   * each frame rather than held, since which of a ping-pong pair it names
-   * alternates. `waveform` is the analyser's newest samples for the ribbon;
-   * with none, or with the ribbon off, nothing is drawn and nothing uploaded.
+   * Run the stack over what the inks drew and write `view`. `prepare` has
+   * already written the uniform this reads, because the ribbon ink needed it.
+   * `flow` is the field the live flows left, passed in each frame rather than
+   * held, since which of a ping-pong pair it names alternates.
    */
   render(
     encoder: GPUCommandEncoder,
     view: GPUTextureView,
     features: Float32Array,
     flow: Flow | null = null,
-    waveform: Float32Array | null = null,
   ) {
     const gear = this.gear
     const sized = this.sized
     if (!gear || !sized) return
     const other = this.current === 0 ? 1 : 0
-    const cover = flow?.cover ?? null
-    writePostUniform(this.settings, features, sized.width, sized.height, this.uniformData, cover)
-    gear.device.queue.writeBuffer(gear.uniform, 0, this.uniformData)
-
-    // Before the feedback pass, into the same texture as the scene: the pass
-    // adds the history to whatever is there, so the line is fresh light and
-    // rides the trail from this frame on.
-    if (waveform && ribbonRuns(this.settings)) {
-      fillRibbonPoints(waveform, this.ribbonData)
-      // Levelled against its own recent peak, so the line is as tall at a
-      // tenth of the volume as at full.
-      this.ribbonPeak = levelWaveform(this.ribbonData, this.ribbonPeak, features[F.dt] ?? 0)
-      gear.device.queue.writeBuffer(gear.ribbonPoints, 0, this.ribbonData)
-      draw(
-        encoder,
-        gear.ribbon,
-        gear.ribbonGroup,
-        sized.history[this.current].view,
-        'load',
-        undefined,
-        RIBBON_VERTICES,
-      )
-    }
 
     if (this.historyReady && stageEnabled(this.settings, 'feedback')) {
       const into = sized.history[this.current].view

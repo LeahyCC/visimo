@@ -379,19 +379,43 @@ const clone = (params: PostParams): PostParams => ({
 
 export const defaultPostParams = () => clone(DEFAULT_POST_PARAMS)
 
-/** A new object with the patch applied; neither argument is touched. */
-export function mergePostParams(base: PostParams, patch: PostPatch): PostParams {
-  const merged = clone(base)
-  if (patch.enabled !== undefined) merged.enabled = patch.enabled
-  Object.assign(merged.ribbon, patch.ribbon)
-  Object.assign(merged.feedback, patch.feedback)
-  Object.assign(merged.bloom, patch.bloom)
-  Object.assign(merged.chromatic, patch.chromatic)
-  Object.assign(merged.tonemap, patch.tonemap)
-  Object.assign(merged.grain, patch.grain)
-  if (patch.bloom?.weights) merged.bloom.weights = [...patch.bloom.weights]
-  return merged
+/**
+ * A patch applied in place. The renderer resolves the cast into one object it
+ * keeps and hands to the stack, so the development handle's override has to
+ * reach that object rather than a copy of it.
+ */
+export function patchPostParams(out: PostParams, patch: PostPatch): PostParams {
+  if (patch.enabled !== undefined) out.enabled = patch.enabled
+  Object.assign(out.ribbon, patch.ribbon)
+  Object.assign(out.feedback, patch.feedback)
+  Object.assign(out.bloom, patch.bloom)
+  Object.assign(out.chromatic, patch.chromatic)
+  Object.assign(out.tonemap, patch.tonemap)
+  Object.assign(out.grain, patch.grain)
+  if (patch.bloom?.weights) out.bloom.weights = [...patch.bloom.weights]
+  return out
 }
+
+/** A new object with the patch applied; neither argument is touched. */
+export const mergePostParams = (base: PostParams, patch: PostPatch): PostParams =>
+  patchPostParams(clone(base), patch)
+
+/**
+ * Two patches as one, stage by stage. A shallow spread would drop whatever
+ * the earlier patch said about a stage the later one also names, which for
+ * the development handle means switching one stage off and then moving a
+ * number in it puts it back on.
+ */
+export const mergePostPatch = (base: PostPatch, patch: PostPatch): PostPatch => ({
+  ...base,
+  ...patch,
+  ribbon: { ...base.ribbon, ...patch.ribbon },
+  feedback: { ...base.feedback, ...patch.feedback },
+  bloom: { ...base.bloom, ...patch.bloom },
+  chromatic: { ...base.chromatic, ...patch.chromatic },
+  tonemap: { ...base.tonemap, ...patch.tonemap },
+  grain: { ...base.grain, ...patch.grain },
+})
 
 export type PostStage = 'ribbon' | 'feedback' | 'bloom' | 'chromatic' | 'tonemap' | 'grain'
 

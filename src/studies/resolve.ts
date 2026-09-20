@@ -98,6 +98,18 @@ export type LiveStudy = {
   override?: CastOverride | undefined
 }
 
+/**
+ * What is live this frame: the studies with their fades, the canvas they all
+ * draw on, and how wound up the song is. This is what the renderer takes, and
+ * what the director will build fresh each frame as it fades studies in and
+ * out. A pinned cast is one of these with every presence at 1.
+ */
+export type LiveCast = {
+  studies: readonly LiveStudy[]
+  canvas: CastCanvas
+  tension: number
+}
+
 /** A cast resolved: every drawing study's knobs by id, and the whole post stack. */
 export type CastFrame = {
   knobs: Map<string, Record<string, number>>
@@ -305,3 +317,14 @@ export function resolveCast(
   for (const entry of live) entry.presence = presences?.get(entry.id) ?? 1
   return resolveLive(live, cast.canvas, features, tension, out)
 }
+
+/**
+ * A pinned cast as a live cast: every study wholly on, nothing wound up. It
+ * builds a list of its own rather than sharing the one above, because the
+ * renderer holds what it is given for as long as the cast is drawn.
+ */
+export const liveCast = (cast: Cast): LiveCast => ({
+  studies: castStudyIds(cast).map((id) => ({ id, presence: 1, override: cast.overrides[id] })),
+  canvas: cast.canvas,
+  tension: 0,
+})

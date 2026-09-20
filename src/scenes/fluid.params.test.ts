@@ -7,9 +7,9 @@ import {
   F,
   PACKET_LENGTH,
 } from '../audio/FeatureExtractor'
-import { presetOrDefault } from '../presets/index'
 import type { Tuning } from '../presets/knobs'
-import { resolveScene } from '../presets/resolve'
+import { castOrDefault } from '../studies/casts/index'
+import { castFrame, resolveCast } from '../studies/resolve'
 import { DEFAULT_FLUID_SIZE, SOFTWARE_FLUID_SIZE } from './catalog'
 import {
   BAND_GROUPS,
@@ -21,6 +21,7 @@ import {
   FLUID_DEFAULTS,
   fluidFrame,
   fluidParams,
+  fluidTuning,
   LAYOUT_BLEND_SECONDS,
   layoutMix,
   layoutOf,
@@ -48,13 +49,23 @@ const packet = (values: Partial<Record<keyof typeof F, number>> = {}) => {
 
 const square = { x: 0.5, y: 0.5 }
 
-// The shipped fluid preset, resolved the way the renderer resolves it, so
-// these read the behaviour the stage actually has rather than a bare default.
-const plume = (() => {
-  const preset = presetOrDefault('plume')
-  if (preset.scene !== 'fluid') throw new Error('Plume must use Fluid')
-  return preset
-})()
+// The shipped Plume cast, resolved the way the renderer resolves it and put
+// back together the way the solver reads it, so these read the behaviour the
+// stage actually has rather than a bare default.
+const plume = castOrDefault('plume')
+
+const plumeTuning = (features: Float32Array): Tuning => {
+  const resolved = resolveCast(plume, features, 0, castFrame())
+  return fluidTuning(
+    resolved.knobs.get('lazy-fluid') ?? {},
+    1,
+    resolved.knobs.get('dye-plumes') ?? null,
+    {},
+  )
+}
+
+/** Its resting numbers: nothing in the cast adds anything at a silent packet. */
+const plumeRest = fluidParams(plumeTuning(new Float32Array(PACKET_LENGTH)))
 
 const frame = (
   values: Partial<Record<keyof typeof F, number>> = {},
@@ -62,7 +73,7 @@ const frame = (
   visible = square,
 ) => {
   const features = packet(values)
-  const tuning = resolveScene(plume.sceneParams, plume.audioMapping, features, {})
+  const tuning = plumeTuning(features)
   return fluidFrame(fluidParams(tuning), features, dt, visible)
 }
 
@@ -115,7 +126,7 @@ describe('fluid frame', () => {
     // one that could push them off screen.
     for (const time of [0, 1.7, 5.3, 11, 23.5]) {
       const built = frame({ time, energy: 1 }, 1 / 60, wide)
-      expect(built.splats).toHaveLength(plume.sceneParams.emitters)
+      expect(built.splats).toHaveLength(plumeRest.emitters)
       for (const splat of built.splats) {
         expect(Math.abs(splat.x - 0.5)).toBeLessThanOrEqual(wide.x)
         expect(Math.abs(splat.y - 0.5)).toBeLessThanOrEqual(wide.y)
@@ -179,7 +190,7 @@ describe('fluid frame', () => {
 describe('layouts', () => {
   const at = (section: number, mix = 1, time = 7.3) => {
     const to = layoutOf(section)
-    return fluidFrame(fluidParams(plume.sceneParams), packet({ time }), 1 / 60, square, {
+    return fluidFrame(plumeRest, packet({ time }), 1 / 60, square, {
       from: layoutOf(1),
       to,
       mix,
@@ -206,7 +217,7 @@ describe('layouts', () => {
     const before = at(2, 0).splats
     const after = at(2, 1).splats
     const halfway = at(2, 0.5).splats
-    const still = fluidFrame(fluidParams(plume.sceneParams), packet({ time: 7.3 }), 1 / 60, square)
+    const still = fluidFrame(plumeRest, packet({ time: 7.3 }), 1 / 60, square)
     let moved = 0
     before.forEach((splat, index) => {
       // At mix 0 a change has not started: the same frame as no change.
@@ -228,7 +239,7 @@ describe('layouts', () => {
   it('keeps every emitter on screen in every layout at the loudest spread', () => {
     const wide = visibleExtent(1920, 1080)
     const features = packet({ time: 4.2, energy: 1, swell: 1 })
-    const tuning = resolveScene(plume.sceneParams, plume.audioMapping, features, {})
+    const tuning = plumeTuning(features)
     LAYOUTS.forEach((layout, index) => {
       const built = fluidFrame(fluidParams(tuning), features, 1 / 60, wide, {
         from: layout,
@@ -247,7 +258,7 @@ describe('layouts', () => {
     LAYOUTS.forEach((layout, index) => {
       for (let time = 0; time < 40; time += 0.37) {
         const packed = features(time)
-        const tuning = resolveScene(plume.sceneParams, plume.audioMapping, packed, {})
+        const tuning = plumeTuning(packed)
         const built = fluidFrame(fluidParams(tuning), packed, 1 / 60, square, {
           from: layout,
           to: layout,
@@ -264,7 +275,7 @@ describe('layouts', () => {
   it('never pushes in no direction, whatever the figure', () => {
     LAYOUTS.forEach((layout) => {
       for (const time of [0, 1.1, 3.7, 20]) {
-        const built = fluidFrame(fluidParams(plume.sceneParams), packet({ time }), 1 / 60, square, {
+        const built = fluidFrame(plumeRest, packet({ time }), 1 / 60, square, {
           from: layout,
           to: layout,
           mix: 1,
@@ -349,7 +360,7 @@ describe('sim uniform', () => {
 
   it('carries the saturation in the slot the shader reads it from', () => {
     const out = writeSimUniform(frame(), 512, square, new Float32Array(SIM_UNIFORM_FLOATS))
-    expect(out[11]).toBeCloseTo(plume.sceneParams.saturation, 6)
+    expect(out[11]).toBeCloseTo(plumeRest.saturation, 6)
   })
 
   it('never writes a radius the shader would divide by zero', () => {
@@ -496,7 +507,7 @@ describe('event pool', () => {
     out[BAND_HIT_WIDTH + band] = width
     return out
   }
-  const withEvents = (events: number) => fluidParams({ ...plume.sceneParams, events })
+  const withEvents = (events: number) => fluidParams({ ...plumeRest, events })
 
   it('spawns one event per band that hit and no more', () => {
     const pool = new EventPool()
@@ -543,7 +554,7 @@ describe('event pool', () => {
       low,
       high,
     ])
-    expect(built.splats).toHaveLength(plume.sceneParams.emitters + 2)
+    expect(built.splats).toHaveLength(plumeRest.emitters + 2)
     const [subBed, , , , trebleBed, lowSplat, highSplat] = built.splats
     expect(lowSplat?.x).toBe(subBed?.x)
     expect(highSplat?.x).toBe(trebleBed?.x)
@@ -573,7 +584,7 @@ describe('event pool', () => {
       for (let age = 0; age < 1; age += dt) {
         const event: LiveEvent = { band: 2, centre: 0.5, width: 0.1, strength: 1, age, life: 1 }
         const built = fluidFrame(params, packet({ time: 2 }), dt, square, STILL_LAYOUT, [event])
-        sum += built.splats[plume.sceneParams.emitters]?.dye ?? 0
+        sum += built.splats[plumeRest.emitters]?.dye ?? 0
       }
       return sum
     }
@@ -600,13 +611,49 @@ describe('event pool', () => {
       STILL_LAYOUT,
       events,
     )
-    expect(capped.splats).toHaveLength(plume.sceneParams.emitters + 2)
+    expect(capped.splats).toHaveLength(plumeRest.emitters + 2)
     const off = fluidFrame(withEvents(0), packet({ time: 2 }), 1 / 60, square, STILL_LAYOUT, events)
-    expect(off.splats).toHaveLength(plume.sceneParams.emitters)
+    expect(off.splats).toHaveLength(plumeRest.emitters)
   })
 
   it('sizes the uniform for the bed and the whole pool', () => {
     expect(MAX_EMITTERS).toBe(MAX_BED_EMITTERS + MAX_EVENTS)
     expect(SIM_UNIFORM_FLOATS).toBe(16 + MAX_EMITTERS * 8)
+  })
+})
+
+describe('fluidTuning', () => {
+  const solver = { velocityDecay: 0.1, force: 0.8, hitForce: 0.4, eventForce: 0.6, vorticity: 26 }
+  const ink = { dye: 1.6, hitDye: 1.1, intensity: 1.15 }
+
+  it('is the two halves as one, untouched at full presence', () => {
+    expect(fluidTuning(solver, 1, ink, {})).toEqual({ ...solver, ...ink })
+  })
+
+  // Presence scales what the flow puts into the field and nothing else; the
+  // dye is the ink's own light and is faded where the ink is drawn.
+  it('scales only what a flow pushes with', () => {
+    const half = fluidTuning(solver, 0.5, ink, {})
+    expect(half.force).toBeCloseTo(0.4, 12)
+    expect(half.hitForce).toBeCloseTo(0.2, 12)
+    expect(half.eventForce).toBeCloseTo(0.3, 12)
+    expect(half.velocityDecay).toBe(0.1)
+    expect(half.vorticity).toBe(26)
+    expect(half.dye).toBe(1.6)
+  })
+
+  // Melt is a flow with no dye ink on it: the ink's knobs are absent and the
+  // fluid falls back to its own defaults, which is what its preset was handed.
+  it('leaves the ink’s knobs out when no ink is live', () => {
+    const alone = fluidTuning(solver, 1, null, {})
+    expect(alone).toEqual(solver)
+    expect(fluidParams(alone).dye).toBe(FLUID_DEFAULTS.dye)
+  })
+
+  it('rewrites the object it is given rather than keeping the last frame', () => {
+    const out: Record<string, number> = {}
+    fluidTuning(solver, 1, ink, out)
+    fluidTuning({ vorticity: 3 }, 1, null, out)
+    expect(out).toEqual({ vorticity: 3 })
   })
 })

@@ -325,9 +325,13 @@ export const ribbonRuns = (params: PostParams) =>
  * brightest at 0.94, so left as they are the line would be about a third as
  * bright in one key as in another and `intensity` would mean a different
  * thing in each. Scaled, it is the peak brightness whatever the key.
+ *
+ * `offset` moves along the palette from the ribbon's own place in it, so the
+ * streaks can scatter their hues around the ribbon's without a palette of
+ * their own. At 0 it is the ribbon's colour exactly.
  */
-export function ribbonColour(features: Float32Array): [number, number, number] {
-  const [red, green, blue] = paletteAt((features[F.keyHue] ?? 0) + RIBBON_TINT)
+export function ribbonColour(features: Float32Array, offset = 0): [number, number, number] {
+  const [red, green, blue] = paletteAt((features[F.keyHue] ?? 0) + RIBBON_TINT + offset)
   const peak = Math.max(red, green, blue)
   // Written so that a NaN from a bad key falls through to white, not to NaN.
   return peak > 1e-4 ? [red / peak, green / peak, blue / peak] : [1, 1, 1]

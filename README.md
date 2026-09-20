@@ -456,6 +456,58 @@ presets/broken.json: audioMapping[0].to is neither a knob of this scene (velocit
 
 `presets/knobs.ts` holds the vocabulary and imports nothing, for the same reason `scenes/catalog.ts` does: a host's picker reads them without pulling the WebGPU tree into its main bundle.
 
+### Studies
+
+A preset names one scene and owns the whole picture. A study is smaller: one piece doing one job on the one shared canvas, so several of them run at once and the song can swap them as it goes. `src/studies/` holds the contract, and nothing there touches the GPU.
+
+```
+FLOW            INK                 LOOK
+how the         what is drawn       how it is
+picture moves   into it this frame  shown
+```
+
+A study is data, not code, because two things read it: the renderer that draws it and the director that picks it.
+
+```ts
+type Study = {
+  id
+  name
+  kind: 'flow' | 'ink' | 'look'
+  impl: ImplId // what draws it; two studies may share one
+  home: Character
+  reach: number // where in the song's character it belongs
+  moments: Moments // intro, groove, build, drop, rest, outro
+  knobs: Record<string, number> // resting values, its implementation's knobs
+  mapping: StudyMapping[] // what makes it move, tension included
+  cost: 'cheap' | 'medium' | 'heavy'
+  excludes?: string[] // studies it may not share a cast with
+  requires?: ImplId[] // implementations it needs beside it
+}
+```
+
+A mapping row reads what a preset's does, plus two fields that are not in the packet the renderer holds. `tension` is the song winding up, which will be a packet row of its own; the resolver takes it as an argument, so this layer works before that row exists. `presence` is what the director fades a study by, 0 to 1; a flow or an ink is handed it and decides for itself what fading in means. Two things are faded by the resolver instead. The ribbon is drawn by the post stack, which knows nothing of presence, so its intensity is scaled here. And looks are blended by presence, normalised, so one look alone is wholly itself and two at a half each land halfway. A stage only one of them has (grain, the split) fades by its strength knobs, `LOOK_STRENGTH_KNOBS`, so it thins to nothing before it switches off, while its other knobs are averaged only among the looks that have the stage.
+
+| Study             | Kind | Implementation | Moments | Cost   |
+| ----------------- | ---- | -------------- | ------- | ------ |
+| `lazy-fluid`      | flow | `fluid`        | I G R O | medium |
+| `turbulent-fluid` | flow | `fluid`        | G D     | medium |
+| `dye-plumes`      | ink  | `dye`          | I G R   | cheap  |
+| `ribbon`          | ink  | `ribbon`       | G B D   | cheap  |
+| `fractal-glints`  | ink  | `fractal`      | G D     | heavy  |
+| `warm-soft`       | look | `look`         | I G R O | cheap  |
+| `clean-glass`     | look | `look`         | G b D   | cheap  |
+| `hard-clean`      | look | `look`         | G b D   | cheap  |
+
+A capital is a strong fit and reads 1, a lower case one about a half, and a letter that is absent reads 0.
+
+A cast is what is live at once: one flow, one to three inks, one look, a patch over each of them, and the canvas they draw on. The feedback lives on the cast rather than in a look, because it is the picture itself: swapping a look must not throw away what the canvas holds. A pinned cast is a cast with an id and a name, for a host that wants a fixed look, and the five files in `src/studies/casts/` are Plume, Wash, Drift, Prism and Melt written that way. Each resolves to the same numbers its preset does, which `cast.test.ts` proves at five packets; the two deliberate differences are in that folder's header.
+
+A cast can only say one flow and one look, and the middle of a change has two of each. So the entry point for anything that fades is `resolveLive`, which takes a plain list of `{ id, presence, override }` and the canvas; `resolveCast` is that over a cast's own studies. A study at presence 0 is not resolved and is not in the output.
+
+`registry.test.ts` walks every study: a knob with no row driving it has to be on an allow list with a reason, every flow and ink has to say what tension does to it, no knob may leave its implementation's safe range at silence or at a full packet, and a full packet may not leave the light or the colour above rest.
+
+**The renderer does not draw a cast yet.** `PRESETS` is still what the stage renders, unchanged. This is the contract the renderer and the director are built against, and it ships beside the presets rather than in place of them.
+
 ### HUD
 
 `src/hud/Hud.ts`, a 2D canvas over the scene: the five band envelopes and energy as bars, the flux trace against its threshold with onset marks, beat, tempo, frame time, what the scene is doing, the adapter and which post stages run. It ships in the build, so a report from another machine can carry a screenshot. The host owns the key that toggles it; both the demo and Musimo use H.

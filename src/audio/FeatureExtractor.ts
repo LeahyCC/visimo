@@ -47,6 +47,10 @@
  *   45     beatPhase       0..1      where in the beat we are, 0 on the beat and rising to the next
  *   46     hardness        0..1      how abrupt and how saturated this track's hits are,
  *                                    averaged over twenty seconds; 0.5 before any
+ *   47     tension         0..1      something is winding up, over seconds
+ *   48     release         0..1      the payoff is happening; decays over a phrase
+ *   49     rest            0..1      the floor has dropped away, over seconds
+ *   50     impact          0..1      an event: 1 on the frame the payoff landed, then falling
  *
  * Each band detects its own onsets, against its own flux and its own adaptive
  * threshold, which is what lets one emitter answer the kick and another the
@@ -88,13 +92,23 @@
  * `onsetStrength` cannot stand in for it, since that grades a hit against
  * the loudest recent one and is therefore relative to the track.
  *
+ * Rows 47 to 50 are the moment. Rows 24 to 27 and 46 say what kind of track
+ * this is; these say where in it we are, which is what lets the picture tell
+ * the same story the song tells rather than reacting to the last few
+ * milliseconds of it. `tension`, `release` and `rest` are levels like any
+ * other, and groove is what is left when all three are low. `impact` is an
+ * event, read the way a hit is read. Every one of them is a difference
+ * between two arms of the same quantity rather than a level against a
+ * constant, which is what makes them loudness independent and what makes
+ * `tension` let go by itself when a build fizzles.
+ *
  * Nothing on the GPU binds this. Every consumer reads the Float32Array on the
  * CPU, so the layout is free of any vec4 alignment. Rows are only ever added
  * at the end: the indices are public API.
  */
 import { TEMPO_MAX_BPM, TEMPO_MIN_BPM, TempoTracker } from './TempoTracker'
 
-export const PACKET_LENGTH = 47
+export const PACKET_LENGTH = 51
 
 /** The five bands, in order. Band `i` is packet slot `i`. */
 export const BAND_NAMES = ['sub', 'bass', 'lowMid', 'highMid', 'treble'] as const
@@ -156,6 +170,10 @@ export const F = {
   tempoConfidence: 44,
   beatPhase: 45,
   hardness: 46,
+  tension: 47,
+  release: 48,
+  rest: 49,
+  impact: 50,
 } as const
 
 export type BandSpec = {
@@ -499,6 +517,126 @@ const STRUCTURE_CHROMA_WEIGHT = 1
 const STRUCTURE_HIGH_WEIGHT = 2
 const RECALL_RAMP_MS = 1000
 const NOVELTY_RAMP_MS = 500
+// The moment. Three arms on every quantity the estimator reads, and every
+// piece of evidence is one arm against another: a build is something moving,
+// so nothing here is a level compared with a constant. That is what makes it
+// loudness independent (a difference of dB is a ratio) and what makes it let
+// go on its own (a level that stops moving is caught by the slow arm within
+// the slow arm's time, so a riser that holds cannot hold tension up with it).
+// A peak follower on the low end rather than another mean: quick up, slow
+// down, so between kicks it holds what the last one reached. Two means with
+// different times both swing with the bar and rarely swing together, which
+// is how the first cut of `release` came to need a drop to land on the one
+// frame two oscillations happened to agree on.
+// The moment reads differences of dB and never a level, so it works to a
+// far lower floor than the -60 dB the rest of the file uses, and it has to.
+// The span's RMS as the analyser scales it sits near -47 dB on a mix at half
+// full scale, so the same mix 20 dB down is already under -60: through
+// `decibels` every quiet passage in it clamped to the same number as every
+// other, tension read two thirds of what it read at the louder level and
+// `rest` read nothing at all. Low enough that nothing audible reaches it,
+// and not zero, so that true silence is a number.
+const MOMENT_FLOOR = 1e-7
+// Under this there is nothing to hear and the arms are held rather than
+// stepped. It sits 20 dB over the floor and some 50 dB under a mix that has
+// been turned down by 20, so a reverb tail is still music and a paused
+// element, which the analyser reads as exact silence, is not.
+const MOMENT_SILENCE = 1e-6
+// Silence this long is the end of a track and not a break in one. The
+// longest break a track puts before a drop is a bar or two, a few seconds.
+const MOMENT_NEW_TRACK_SECONDS = 8
+// How long the arms go on being seeded for, from the loudest reading so far.
+// One beat at 60 BPM, the slowest tempo the tracker follows, so a kick is in it.
+const MOMENT_SEED_SECONDS = 1
+const MOMENT_PEAK_ATTACK_MS = 60
+const MOMENT_PEAK_RELEASE_MS = 600
+const MOMENT_RECENT_MS = 2000
+const MOMENT_MID_MS = 4000
+const MOMENT_SLOW_MS = 16000
+// The mid arm this far over the slow one, in dB, is a full piece of lift
+// evidence. Three because a build that has grown by twice its power is
+// plainly building and one that has grown by a tenth is not.
+const TENSION_LIFT_DB = 3
+// The high group this far over its slow arm, in dB, is a riser at full. It
+// is a wide range because the high group is a thin slice of the power in
+// most mixes, a ten thousandth of it in four to the floor, so anything that
+// fills the top at all moves it by tens of dB.
+const TENSION_RISER_DB = 12
+// And for each end of the spectrum's own level. The low group this far down
+// against its slow arm, with the high group not down, is the low end walking
+// out; a kick leaving a four to the floor takes the low group down by six.
+const TENSION_HOLLOW_DB = 4
+// The low group this far back up over its slow arm, read over a couple of
+// seconds, cancels tension outright.
+const TENSION_LOW_BACK_DB = 3
+// Struck sounds are counted twice, over three seconds and over twelve, and
+// what a roll shows is the ratio of the two. A rate against a fixed number
+// of hits a second could not tell a roll from a track that is simply busy.
+const MOMENT_HIT_FAST_SECONDS = 3
+const MOMENT_HIT_SLOW_SECONDS = 12
+// Added to both rates before the ratio, so a passage with almost no hits in
+// it cannot divide two of them by one and read as a roll.
+const BUSIER_FLOOR_PER_SECOND = 0.4
+const BUSIER_LOW = 1.15
+const BUSIER_HIGH = 1.7
+// Tension itself is smoothed asymmetrically: quicker to notice than to let
+// go, but both in seconds, because a build is a passage and not a frame.
+const TENSION_RISE_MS = 1500
+const TENSION_FALL_MS = 2500
+// The drop. The low end's recent peak this far over its slow arm is the low
+// end back hard. An ordinary kick in a groove clears it easily, which is
+// deliberate: what says this one is a drop is the arm, not the kick.
+const RELEASE_LOW_DB = 4
+// What a build that never empties the floor arms at, as a share of what one
+// that does arms at.
+const RELEASE_EMPTY_FLOOR = 0.3
+// Novelty is evidence and not a gate. A drop into a passage the track has
+// already played is still a drop, and `recall` says the structure knows it.
+const RELEASE_NOVELTY_FLOOR = 0.5
+// How long a build stays cashable. A payoff four seconds after the tension
+// has gone is a new passage starting, not this build's drop.
+const RELEASE_ARM_SECONDS = 4
+// Release decays over half a phrase, so one phrase after the drop it is at
+// a seventh of what it was. Two bars is the phrase, since four is longer
+// than most drops hold their own novelty.
+const RELEASE_PHRASE_BEATS = 8
+const RELEASE_PHRASE_MIN_SECONDS = 1.5
+const RELEASE_PHRASE_MAX_SECONDS = 6
+const RELEASE_PHRASE_DEFAULT_SECONDS = 3
+// Below this the beat is a guess, and a phrase measured off a wrong tempo is
+// worse than the default.
+const MOMENT_TEMPO_TRUSTED = 0.4
+// Impact fires on release crossing up through the first and rearms below the
+// second. A crossing and not a rise per frame: a rise per frame is how much
+// the signal moved in one step, which is smaller the finer the steps, and is
+// the shape of the bug `pace` had.
+const IMPACT_ON = 0.35
+const IMPACT_OFF = 0.12
+// The same fall as `beatPulse`, so a scene that reads impact reads it the way
+// it reads a hit.
+const IMPACT_DECAY_SECONDS = 0.18
+// Rest. This far under the loudest the track has lately been, in dB, is the
+// floor beginning to go, and this far is gone.
+const REST_QUIET_LOW_DB = 2
+const REST_QUIET_HIGH_DB = 8
+// And how fast that loudest is forgotten. Linear in dB rather than a half
+// life, so the memory of a drop fades at the same rate whatever it peaked
+// at: a third of a dB a second is ten dB over half a minute.
+const REST_FORGET_DB_PER_SECOND = 0.1
+// Hits a second at which a passage is too busy to be a rest, on the slow
+// count. Half of `PACE_FULL`, so a track at half its own bustle is not
+// resting.
+const REST_BUSY_PER_SECOND = 2
+// The share of the span's power under 250 Hz, in dB, at which the low end is
+// thin and at which it is full. A groove with a kick in it sits near the
+// top; a pad with no bass under it is fifteen dB down.
+const REST_THIN_LOW_DB = -6
+const REST_THIN_HIGH_DB = -1.5
+// What quiet alone is worth before the low end and the hit rate corroborate
+// it. Quiet is the headline and the other two are the witnesses, so a quiet
+// passage with drums still in it reads as rest a little and not as rest.
+const REST_CORROBORATION = 0.5
+const REST_RAMP_MS = 2500
 
 const decibels = (level: number) => 20 * Math.log10(Math.max(level, QUIET))
 
@@ -1203,6 +1341,14 @@ export class Hardness {
    * spread over.
    */
   settled = 0
+  /**
+   * 1 on the same step, whatever that hit scored. The moment estimator
+   * counts these rather than `settled` when what it wants is how often a
+   * sound is struck: a roll that doubles doubles the rate of struck sounds
+   * while each one of them is worth less than the last, since the bed the
+   * rise is measured over is the roll itself.
+   */
+  closed = 0
 
   /**
    * `loudness` is the raw RMS across the span, the same one `swell` reads,
@@ -1210,6 +1356,7 @@ export class Hardness {
    */
   step(hit: boolean, loudness: number, spread: number, dt: number): number {
     this.settled = 0
+    this.closed = 0
     // Nothing in the frame and no hit being measured: the mean is left
     // exactly where the last sound put it.
     if (loudness <= 0 && !hit && !this.open) return this.value()
@@ -1273,6 +1420,7 @@ export class Hardness {
     if (this.peak <= 0 || this.peakRise <= 0) return
     const presence = clamp01((this.peakRise / this.peak - LIFT_BURIED) / (LIFT_CLEAR - LIFT_BURIED))
     this.settled = presence
+    this.closed = 1
     if (this.frames < HARDNESS_MIN_FRAMES) return
     // Weighted by time and not by frame, so the window reads the same at any
     // frame rate.
@@ -1346,6 +1494,14 @@ export type Frame = {
  * the bins.
  */
 export class Song {
+  /**
+   * How audible the hit that settled on this step was, 0 to 1, and 0 on every
+   * other step. `pace` is a decayed count of it; the moment estimator counts
+   * it twice more, over two spans, for the same reason pace counts it at all.
+   */
+  hit = 0
+  /** 1 on the same step whatever that hit was worth; the moment counts these. */
+  struck = 0
   /** Onsets, each decaying away over `PACE_SECONDS`. */
   private paceCount = 0
   private readonly short = new Envelope(SWELL_SHORT_MS, SWELL_SHORT_MS)
@@ -1391,7 +1547,9 @@ export class Song {
     //
     // A decayed count rather than a rate measured between hits: it needs no
     // memory of when the last one was and it cannot spike on one close pair.
-    this.paceCount = this.paceCount * Math.exp(-dt / PACE_SECONDS) + this.hardness.settled
+    this.hit = this.hardness.settled
+    this.struck = this.hardness.closed
+    this.paceCount = this.paceCount * Math.exp(-dt / PACE_SECONDS) + this.hit
 
     const short = this.short.step(loudness, dt)
     this.long.step(loudness, dt)
@@ -1434,6 +1592,351 @@ export class Song {
   }
 }
 
+/** What one frame hands the moment estimator. */
+export type MomentFrame = {
+  /** The raw RMS across the span, the same one `swell` reads. */
+  loudness: number
+  /** The share of the span's power under 250 Hz. */
+  low: number
+  /** The share of it over 1 kHz. */
+  high: number
+  /** 1 on a frame a struck sound was settled on, 0 on every other frame. */
+  struck: number
+  novelty: number
+  harmonicChange: number
+  /** How long a beat lasts, or null while the tempo is not to be trusted. */
+  beatSeconds: number | null
+}
+
+/** Where in the song's shape we are, as four levels. */
+export type MomentReading = {
+  /** Something is winding up. */
+  tension: number
+  /** The payoff is happening. */
+  release: number
+  /** The floor has dropped away. */
+  rest: number
+  /** An event and not a level: 1 on the frame the payoff landed, then falling. */
+  impact: number
+}
+
+/**
+ * The moment: a build, its payoff, and the floor dropping away. The song
+ * rather than the frame answers what kind of track this is; this answers
+ * where in it we are, which is the other half of what a study picker needs.
+ * Groove has no row of its own: it is what is left when these three are low.
+ *
+ * Everything is a difference between two arms of the same quantity, never a
+ * level against a constant. Three things follow from that and they are the
+ * whole design.
+ *
+ * It is loudness independent for free, since a difference of dB is a ratio.
+ * It keeps a floor of its own, far under the -60 dB the rest of the file
+ * works to, because a normal mix 20 dB down is already under that one and
+ * every quiet passage in it clamped to the same number as every other.
+ *
+ * It is frame-rate independent for free, since every arm is `exp(-dt/tau)`
+ * and the hit counts are decayed counts of the windows `hardness` closes,
+ * which is what `pace` was changed to count and for the same reason: one
+ * struck sound is one hit however many bands it trips and however many
+ * frames they are spread over. Nothing here reads a per-frame difference.
+ * The one place that could have is `impact`, and it is a level crossing
+ * instead.
+ *
+ * And tension lets go on its own, which the handoff asks for and which no
+ * amount of decay would have given. A riser that climbs and then holds stops
+ * being evidence within the slow arm's time, because the slow arm catches
+ * up with the mid one; a build that fizzles therefore falls back whether or
+ * not anything notices it fizzled. The first cut measured levels against the
+ * track's own norms (loud for a build, bright for a build) and could not do
+ * this: a track that simply got louder and stayed there sat at full tension
+ * for the rest of the song.
+ *
+ * Tension takes the mean of its best two pieces of evidence out of four.
+ * Requiring all four rejected real builds, since a build that only rolls has
+ * no riser and one that is only a riser has no roll; a plain maximum fired
+ * on anything that moved, including the first bar after a section change.
+ * Two is the smallest number that asks a build to show itself in more than
+ * one way.
+ *
+ * The suppressors matter as much as the evidence. Loudness rising is a build
+ * and it is also a drop and it is also the groove returning after a
+ * breakdown, so tension is cut by however much the low end has come back,
+ * and by release outright. Without that the drop read as the loudest moment
+ * of the build and tension peaked after the thing it was predicting.
+ */
+export class Moment {
+  /** Loudness, the low group's level and the high group's, all in dB. */
+  private readonly loudMid = new Envelope(MOMENT_MID_MS, MOMENT_MID_MS)
+  private readonly loudSlow = new Envelope(MOMENT_SLOW_MS, MOMENT_SLOW_MS)
+  private readonly lowPeak = new Envelope(MOMENT_PEAK_ATTACK_MS, MOMENT_PEAK_RELEASE_MS)
+  private readonly lowRecent = new Envelope(MOMENT_RECENT_MS, MOMENT_RECENT_MS)
+  private readonly lowSlow = new Envelope(MOMENT_SLOW_MS, MOMENT_SLOW_MS)
+  private readonly highMid = new Envelope(MOMENT_MID_MS, MOMENT_MID_MS)
+  private readonly highSlow = new Envelope(MOMENT_SLOW_MS, MOMENT_SLOW_MS)
+  /** What share of the span's power is under 250 Hz, in dB: `rest` reads it. */
+  private readonly shareMid = new Envelope(MOMENT_MID_MS, MOMENT_MID_MS)
+  /**
+   * Decayed counts of the hits `hardness` settles, over two spans, each over
+   * a decayed count of the seconds that went into it. Dividing by the span
+   * itself would have read every track as a roll for its first ten seconds:
+   * a cold three-second count is most of the way to settled while a cold
+   * twelve-second one is a fifth of the way, so the ratio of the two opens
+   * near three and falls to one as the slow arm fills.
+   */
+  private hitFast = 0
+  private hitSlow = 0
+  private spanFast = 0
+  private spanSlow = 0
+  /** The loudest the track has lately been, in dB, forgotten linearly. */
+  private loudTop = -Infinity
+  private readonly tensionRamp = new Envelope(TENSION_RISE_MS, TENSION_FALL_MS)
+  private readonly restRamp = new Envelope(REST_RAMP_MS, REST_RAMP_MS)
+  /** The highest tension of the last few seconds: what a payoff cashes in. */
+  private armed = 0
+  private tension = 0
+  private release = 0
+  private impact = 0
+  private fired = false
+  private warm = false
+  private elapsed = 0
+  /** How long there has been nothing to hear, in seconds. */
+  private silentFor = 0
+
+  /**
+   * A step with nothing to hear in it: a pause, a seek, the gap between two
+   * tracks, or the bar of silence some tracks put before a drop. Every arm is
+   * held where the music left it rather than stepped, because the arms are
+   * means of dB and silence is a hundred dB down. Stepped through five
+   * seconds of it, the four-second arm sank so far that it took twenty more
+   * to climb back, and for all of that time a groove at full energy read as
+   * `rest` at a half and more, since it was quiet against nothing but its
+   * own arm. The hit counts are held for the same reason: left to decay, the
+   * quick count recovers first and the ratio of the two reads as a roll.
+   *
+   * Tension is held and not let go. The bar of silence before a drop is the
+   * top of the build, and what it was armed at still decays on its own
+   * clock, so a payoff that never comes is forgotten as it always was.
+   */
+  private hold(dt: number): MomentReading {
+    this.silentFor += dt
+    this.armed *= Math.exp(-dt / RELEASE_ARM_SECONDS)
+    this.release *= Math.exp(-dt / (RELEASE_PHRASE_DEFAULT_SECONDS / 2))
+    if (this.release < IMPACT_OFF) this.fired = false
+    this.impact *= Math.exp(-dt / IMPACT_DECAY_SECONDS)
+    // Silence is the floor gone altogether, so rest climbs to the top.
+    const rest = this.restRamp.step(1, dt)
+    return { tension: this.tension, release: clamp01(this.release), rest, impact: this.impact }
+  }
+
+  step(frame: MomentFrame, dt: number): MomentReading {
+    const { loudness, low, high, struck, novelty, harmonicChange, beatSeconds } = frame
+    if (loudness < MOMENT_SILENCE) return this.hold(dt)
+    // A gap this long is not a break in the music but the end of it, and
+    // what follows is another track with norms of its own. Every arm starts
+    // again from its first reading, as it did when this one began.
+    if (this.silentFor > MOMENT_NEW_TRACK_SECONDS) {
+      this.warm = false
+      this.elapsed = 0
+      this.hitFast = 0
+      this.hitSlow = 0
+      this.spanFast = 0
+      this.spanSlow = 0
+      this.armed = 0
+      this.tension = 0
+      this.tensionRamp.value = 0
+    }
+
+    this.silentFor = 0
+    const loud = 20 * Math.log10(Math.max(loudness, MOMENT_FLOOR))
+    // Each group's own level, in the same dB as the whole mix: the share of
+    // the power it holds, times the power there is. A share on its own will
+    // not do. A breakdown of pad and bass has no top at all, so its low
+    // share is the highest in the track, and a measure built on the share
+    // read the drums coming back afterwards as the low end leaving. What a
+    // build does is the low end falling while the top does not, and that is
+    // two levels and not one ratio. Both are absolute dB, so the same music
+    // 20 dB down shifts every arm of both by the same 20.
+    const lowLevel = loud + 10 * Math.log10(low + 1e-9)
+    const highLevel = loud + 10 * Math.log10(high + 1e-9)
+    const share = 10 * Math.log10(low + 1e-9)
+
+    // Every arm starts at its first real reading rather than at zero, because
+    // a cold envelope climbing from nothing runs ahead of a colder one and
+    // every track would open on a build.
+    if (!this.warm) {
+      this.warm = true
+      for (const arm of [this.loudMid, this.loudSlow]) arm.value = loud
+      for (const arm of [this.lowPeak, this.lowRecent, this.lowSlow]) arm.value = lowLevel
+      for (const arm of [this.highMid, this.highSlow]) arm.value = highLevel
+      this.shareMid.value = share
+      this.loudTop = loud
+    }
+
+    // The first reading is a poor seed when it is the front edge of a sound:
+    // the analyser's window is 85 ms long, so the first frame that is not
+    // silent after a gap, or the first of a track that fades in, holds a
+    // sliver of what is coming and reads fifty dB under it. Seeded from that,
+    // the four-second arm was still climbing when the slow arms were let go
+    // at sixteen seconds, and its last dB of climb read as lift: a tenth of
+    // tension and rising, on a steady groove. So for the first second each
+    // arm is lifted to the loudest reading so far. That seeds a few dB high,
+    // off a kick's peak, which the hold below has fifteen seconds to settle.
+    if (this.elapsed < MOMENT_SEED_SECONDS) {
+      for (const arm of [this.loudMid, this.loudSlow]) arm.value = Math.max(arm.value, loud)
+      for (const arm of [this.lowPeak, this.lowRecent, this.lowSlow])
+        arm.value = Math.max(arm.value, lowLevel)
+      for (const arm of [this.highMid, this.highSlow]) arm.value = Math.max(arm.value, highLevel)
+    }
+
+    this.elapsed += dt
+    const loudMid = this.loudMid.step(loud, dt)
+    const lowFast = this.lowPeak.step(lowLevel, dt)
+    const lowRecent = this.lowRecent.step(lowLevel, dt)
+    const highMid = this.highMid.step(highLevel, dt)
+    const thinness = this.shareMid.step(share, dt)
+    this.loudSlow.step(loud, dt)
+    this.lowSlow.step(lowLevel, dt)
+    this.highSlow.step(highLevel, dt)
+
+    // Until the slow arms have seen a full window there is nothing behind
+    // them for anything to be a change against, so each is held at its own
+    // mid arm and every difference reads zero. `swell` holds its long arm
+    // the same way and for the same reason. The price is that a build inside
+    // the first sixteen seconds of a track is not seen, which is the honest
+    // answer: nothing here knows yet what this track's steady state is.
+    if (this.elapsed < MOMENT_SLOW_MS / 1000) {
+      this.loudSlow.value = loudMid
+      // Held at whichever arm it is read against, and the low end is read
+      // against the two-second one. Held at the four-second arm instead it
+      // still differed from the two-second one while both were climbing out
+      // of the first bar, and every track opened on a quarter of a build.
+      this.lowSlow.value = lowRecent
+      this.highSlow.value = highMid
+      // And the same for the loudest the track has been, or the opening
+      // bar's transient is the norm every quiet passage is measured against.
+      this.loudTop = loudMid
+    }
+
+    const loudSlow = this.loudSlow.value
+    const lowSlow = this.lowSlow.value
+    const highSlow = this.highSlow.value
+
+    const decayFast = Math.exp(-dt / MOMENT_HIT_FAST_SECONDS)
+    const decaySlow = Math.exp(-dt / MOMENT_HIT_SLOW_SECONDS)
+    this.hitFast = this.hitFast * decayFast + struck
+    this.hitSlow = this.hitSlow * decaySlow + struck
+    this.spanFast = this.spanFast * decayFast + dt
+    this.spanSlow = this.spanSlow * decaySlow + dt
+    const fastRate = this.hitFast / Math.max(this.spanFast, 1e-3) + BUSIER_FLOOR_PER_SECOND
+    const slowRate = this.hitSlow / Math.max(this.spanSlow, 1e-3) + BUSIER_FLOOR_PER_SECOND
+
+    const lift = clamp01((loudMid - loudSlow) / TENSION_LIFT_DB)
+    // The top of the spectrum climbing, which is what a riser does to it.
+    // A chord change climbs too and is not a riser, and `harmonicChange`
+    // lifts for a couple of seconds when the notes move, so it is what tells
+    // the two apart. Read off the high group's own level and not off the
+    // centroid `weight` uses, for one reason: the centroid is held at NaN
+    // below the -60 dB floor, a mix at half full scale reads about -47 dB
+    // through the analyser's own scaling, and so the same mix 20 dB down has
+    // no centroid at all and every riser in it went unseen.
+    const riser = clamp01((highMid - highSlow) / TENSION_RISER_DB) * (1 - clamp01(harmonicChange))
+    const busier = clamp01((fastRate / slowRate - BUSIER_LOW) / (BUSIER_HIGH - BUSIER_LOW))
+    // The low end walking out, but only while the top is still there. The
+    // second half is what keeps a breakdown out: in a breakdown both ends
+    // fall, and a picture that wound up through every quiet passage would be
+    // wound up for most of the track.
+    const hollow =
+      clamp01((lowSlow - lowRecent) / TENSION_HOLLOW_DB) *
+      (1 - clamp01((highSlow - highMid) / TENSION_HOLLOW_DB))
+
+    // The mean of the best two of the four, which is their sum less the
+    // worst two. Found with four comparisons rather than a sort, since this
+    // runs on every frame and a sort would build an array to throw away.
+    const lowerA = Math.min(lift, riser)
+    const lowerB = Math.min(busier, hollow)
+    const upperA = Math.max(lift, riser)
+    const upperB = Math.max(busier, hollow)
+    const best = Math.max(upperA, upperB)
+    const second = Math.max(Math.min(upperA, upperB), Math.max(lowerA, lowerB))
+    const winding = (best + second) / 2
+
+    // The payoff is the low end coming back hard, and it is only a payoff if
+    // something was wound up for it to pay off. That split is what makes it
+    // work at all: the low end coming back hard is what a kick does four
+    // times a bar, so the arm carries all of the specificity and the peak
+    // follower carries all of the speed. Measuring the return itself
+    // strictly enough to stand alone was tried and cannot be done inside a
+    // beat: a mean slow enough not to swing with the bar is two seconds
+    // wide, and two seconds is four beats late.
+    //
+    // The arm is the tension of the last few seconds, weighted by how far
+    // the low end had got out from under it. A build that empties the floor
+    // before the drop is the clearest case there is; one that keeps its kick
+    // all the way through still arms, at a third, because plenty of tracks
+    // never clear the floor at all. The price of that third is a real one:
+    // its drop may not clear `IMPACT_ON` at all, which is the first thing to
+    // look at on a track whose drop the picture misses.
+    const emptied =
+      RELEASE_EMPTY_FLOOR +
+      (1 - RELEASE_EMPTY_FLOOR) * clamp01((lowSlow - lowRecent) / TENSION_HOLLOW_DB)
+    this.armed = Math.max(this.tension * emptied, this.armed * Math.exp(-dt / RELEASE_ARM_SECONDS))
+    const lowReturn = clamp01((lowFast - lowSlow) / RELEASE_LOW_DB)
+    const payoff =
+      this.armed *
+      lowReturn *
+      (RELEASE_NOVELTY_FLOOR + (1 - RELEASE_NOVELTY_FLOOR) * clamp01(novelty))
+    const phrase =
+      beatSeconds === null
+        ? RELEASE_PHRASE_DEFAULT_SECONDS
+        : Math.min(
+            RELEASE_PHRASE_MAX_SECONDS,
+            Math.max(RELEASE_PHRASE_MIN_SECONDS, beatSeconds * RELEASE_PHRASE_BEATS),
+          )
+    // A peak and a fall rather than an envelope: a drop is an arrival, and an
+    // attack time on it would put the top of the payoff after the moment
+    // everything on screen is there to answer.
+    this.release = Math.max(payoff, this.release * Math.exp(-dt / (phrase / 2)))
+
+    // A level crossing with a hysteresis, so one drop is one impact however
+    // long the release sits at the top, and the next cannot fire until this
+    // one has fallen away. A crossing and not a rise per frame: a rise per
+    // frame is how far the signal moved in one step, which is smaller the
+    // finer the steps, and is the shape of the bug `pace` had.
+    let landed = false
+    if (!this.fired && this.release >= IMPACT_ON) {
+      this.fired = true
+      landed = true
+    } else if (this.release < IMPACT_OFF) this.fired = false
+    this.impact = Math.max(landed ? 1 : 0, this.impact * Math.exp(-dt / IMPACT_DECAY_SECONDS))
+
+    // Loudness rising is a build and it is also a drop and it is also the
+    // groove coming back after a breakdown, so tension is cut by the low end
+    // returning and by the release outright. Without the first, the drums
+    // coming back read as a build for as long as the slow arm took to catch
+    // up, which is a quarter of a minute of winding up at the moment the
+    // track has just unwound. The low end is read over a couple of seconds
+    // here and not off the peak follower `release` reads, because one kick
+    // is not the low end coming back and the peak follower is there to fire
+    // on one kick.
+    const lowBack = clamp01((lowRecent - lowSlow) / TENSION_LOW_BACK_DB)
+    this.tension = this.tensionRamp.step(winding * (1 - lowBack) * (1 - clamp01(this.release)), dt)
+
+    this.loudTop = Math.max(loudMid, this.loudTop - REST_FORGET_DB_PER_SECOND * dt)
+    const quiet = clamp01(
+      (this.loudTop - loudMid - REST_QUIET_LOW_DB) / (REST_QUIET_HIGH_DB - REST_QUIET_LOW_DB),
+    )
+    const sparse = 1 - clamp01((slowRate - BUSIER_FLOOR_PER_SECOND) / REST_BUSY_PER_SECOND)
+    const thin = 1 - clamp01((thinness - REST_THIN_LOW_DB) / (REST_THIN_HIGH_DB - REST_THIN_LOW_DB))
+    const rest = this.restRamp.step(
+      quiet * (REST_CORROBORATION + (1 - REST_CORROBORATION) * 0.5 * (thin + sparse)),
+      dt,
+    )
+
+    return { tension: this.tension, release: clamp01(this.release), rest, impact: this.impact }
+  }
+}
+
 export class FeatureExtractor {
   readonly packet = new Float32Array(PACKET_LENGTH)
   readonly bands: readonly BandSpec[]
@@ -1471,6 +1974,8 @@ export class FeatureExtractor {
   private readonly logFrequencies: Float32Array
   /** The song-scale features, one step a frame off what the rest works out. */
   private readonly song = new Song()
+  /** Where in the song's shape we are, off the same frame the song reads. */
+  private readonly moment = new Moment()
   private readonly harmony = new Harmony()
   private readonly structure = new Structure()
   /** The tempo and the beat, off the bands' own flux. */
@@ -1555,6 +2060,13 @@ export class FeatureExtractor {
     // sweep. Both are weighted by how much of each bin the band owns, and
     // divided by those weights, so a wide band and a narrow one are on the
     // same scale and the bins on an edge count only for their share.
+    // The power in the low group and in the high group, kept raw. The moment
+    // reads the balance between them, and the packet's band levels cannot
+    // give it: each is divided by its own recent peak, so a band that goes
+    // quiet climbs back toward 1 within a couple of seconds and a low end
+    // walking out reads as a low end that stayed.
+    let lowSquares = 0
+    let highSquares = 0
     for (let band = 0; band < this.bands.length; band++) {
       const filter = this.filters[band]
       if (!filter) continue
@@ -1586,6 +2098,11 @@ export class FeatureExtractor {
         this.bandCentre[band] = centre
         this.bandWidth[band] = Math.sqrt(Math.max(0, riseSpread / rises - centre * centre))
       }
+      // The same two groups `weight` maps its centroid between: sub and bass
+      // against highMid and treble, with the lowMid left out of both so a
+      // mix that lives in the middle does not count as either end.
+      if (band < 2) lowSquares += squares
+      else if (band >= this.bands.length - 2) highSquares += squares
       // The root mean square, which is what the energy in a band is; the mean
       // of the magnitudes would divide one bright partial by the whole band.
       const level = Math.sqrt(squares / total)
@@ -1698,6 +2215,25 @@ export class FeatureExtractor {
     packet[F.recall] = structure.recall
     packet[F.novelty] = structure.novelty
     packet[F.section] = structure.section
+
+    // Last, because it reads the novelty the structure has just worked out
+    // as well as the loudness and the hits everything above it did.
+    const moment = this.moment.step(
+      {
+        loudness: rms,
+        low: squares > 0 ? lowSquares / squares : 0,
+        high: squares > 0 ? highSquares / squares : 0,
+        struck: this.song.struck,
+        novelty: structure.novelty,
+        harmonicChange: harmony.harmonicChange,
+        beatSeconds: beat.bpm > 0 && beat.confidence >= MOMENT_TEMPO_TRUSTED ? 60 / beat.bpm : null,
+      },
+      dt,
+    )
+    packet[F.tension] = moment.tension
+    packet[F.release] = moment.release
+    packet[F.rest] = moment.rest
+    packet[F.impact] = moment.impact
 
     this.time = now
     packet[F.time] = this.time

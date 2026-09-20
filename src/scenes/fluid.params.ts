@@ -520,6 +520,12 @@ export function fluidParams(tuning: Tuning): FluidParams {
  * under its band's emitter, at the height its pitch puts it (low sounds at
  * the bottom), sized by its band and its width, fading over its life.
  */
+/**
+ * How far from the middle an emitter may get, as a fraction of the way to the
+ * edge of the visible band. The rest is left for the plume to travel into.
+ */
+export const EMITTER_REACH = 0.78
+
 export function fluidFrame(
   params: FluidParams,
   features: Float32Array,
@@ -557,10 +563,14 @@ export function fluidFrame(
       y: mix(from.ahead.y, to.ahead.y, layout.mix),
     }
     const run = Math.hypot(ahead.x - here.x, ahead.y - here.y) || 1
-    // A wide layout on a loud passage can push a figure past the edge; the
-    // offset is held inside the visible band so nothing is injected off
-    // screen, whatever the spread and the layout add up to.
-    const inside = (offset: number) => Math.min(1, Math.max(-1, offset * params.spread))
+    // A wide layout on a loud passage can push a figure past the edge. A hard
+    // clamp kept it on screen but pinned it to the wall: the shipped presets
+    // reach a spread of 1 in a drop, every emitter then sat on the edge, and
+    // the dye piled up along a wall it could not leave. The offset is bent
+    // toward a reach short of the wall, so the figure keeps its shape, a loud
+    // passage still opens it out, and nothing ever gets there.
+    const inside = (offset: number) =>
+      EMITTER_REACH * Math.tanh((offset * params.spread) / EMITTER_REACH)
     splats.push({
       x: 0.5 + inside(here.x) * visible.x,
       y: 0.5 + inside(here.y) * visible.y,

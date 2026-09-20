@@ -45,7 +45,7 @@ import { CHARACTER_AXES } from '../studies/types'
 import type { Character, Cost, Study } from '../studies/types'
 import { CharacterReader } from './character'
 import { MomentReader } from './moment'
-import type { MomentWeights } from './moment'
+import type { MomentWeights, Playhead } from './moment'
 import { place, scoreStudy } from './score'
 
 /** What each cost is worth against the budget. */
@@ -418,13 +418,18 @@ export class Director {
     return this.current
   }
 
-  step(features: Float32Array, dt: number): LiveCast {
+  /**
+   * `playhead` is what a host that knows the position and the length can
+   * hand in. It is read by the moment alone, and a director given none reads
+   * a track as it always has, without knowing where in it we are.
+   */
+  step(features: Float32Array, dt: number, playhead?: Playhead): LiveCast {
     this.frame.tension = features[F.tension] ?? 0
     // Read even when a cast is pinned and nothing will be chosen by them: a
     // host saves the character for the next play of the track, and the
     // overlay shows both, under a pinned preset as much as under none.
     const character = this.reader.step(features, dt)
-    const weights = this.moment.step(features, dt)
+    const weights = this.moment.step(features, dt, playhead)
     if (this.pinned) return this.frame
     const settled = this.reader.settled
     if (this.trackSeed === undefined && settled >= 1) this.trackSeed = characterSeed(character)

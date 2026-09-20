@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { renderer } from './gpu/Renderer'
-import type { Live } from './gpu/Renderer'
+import type { Live, PlayheadSource } from './gpu/Renderer'
 import type { Character } from './studies/types'
 
 type Props = {
@@ -34,6 +34,17 @@ type Props = {
    */
   track?: string | number
   /**
+   * Where the track is and how long it is, for a host that plays files: a ref
+   * to anything with a `currentTime` and a `duration` in seconds, which is
+   * what `useRef<HTMLAudioElement>` already is. It is read on every frame and
+   * never changes as far as React is concerned, so it costs a host nothing to
+   * keep current and re-renders nothing. With it the last stretch of a track
+   * reads as an outro whatever the track is doing, and a short track has a
+   * short intro. Without it the director reads an ending from the shape of
+   * one, a long fall in loudness, and can see none in a track that ends loud.
+   */
+  playhead?: PlayheadSource
+  /**
    * The character, once the reading has settled and rarely after that, so a
    * host can save it and hand it back as `startCharacter` next time. It fires
    * under a pinned cast as much as under the director, because the song is
@@ -65,6 +76,7 @@ export default function VisualizerStage({
   fluidSize,
   startCharacter,
   track,
+  playhead,
   onCharacter,
   onUnsupported,
   onBackend,
@@ -124,6 +136,11 @@ export default function VisualizerStage({
     playing.current = track
     renderer.newTrack()
   }, [track])
+
+  useEffect(() => {
+    renderer.setPlayhead(playhead ?? null)
+    return () => renderer.setPlayhead(null)
+  }, [playhead])
   useEffect(() => renderer.setPreset(preset), [preset])
   useEffect(() => renderer.setFluidSize(fluidSize), [fluidSize])
   useEffect(() => {

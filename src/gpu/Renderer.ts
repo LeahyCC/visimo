@@ -30,7 +30,7 @@ import { audioGraph } from '../audio/AudioGraph'
 import { FeatureClient } from '../audio/FeatureClient'
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { Director } from '../director/director'
-import type { MomentWeights } from '../director/moment'
+import type { MomentWeights, Playhead } from '../director/moment'
 import { Hud } from '../hud/Hud'
 import { AnalyticFlow } from '../impls/analytic'
 import { CausticsInk } from '../impls/CausticsInk'
@@ -68,6 +68,13 @@ export type AttachResult = 'ok' | 'unsupported' | 'cancelled'
 
 /** What a host asks the stage to draw: a fixed cast, or the song's own choice. */
 export type Live = PinnedCast | 'auto'
+
+/**
+ * Where the playhead is read from: a ref, so a host hands it over once and
+ * the renderer reads it on every frame it draws. `useRef<HTMLAudioElement>`
+ * is one as it stands.
+ */
+export type PlayheadSource = { readonly current: Playhead | null }
 
 /**
  * What the demo's study bench hands the renderer. It is a development hook
@@ -237,6 +244,7 @@ class Renderer {
   private opening: Partial<Character> | undefined
   private onCharacter: ((character: Character) => void) | null = null
   private characterDue = 0
+  private playhead: PlayheadSource | null = null
   /** The development handle's override, over whatever the cast resolved to. */
   private postPatch: PostPatch | null = null
   // The live list split by kind, rebuilt only when what is live changes, so a
@@ -508,6 +516,18 @@ class Renderer {
   newTrack() {
     this.director = new Director({ start: this.opening })
     this.characterDue = 0
+  }
+
+  /**
+   * Where the track is and how long it is, for a host that plays files. It is
+   * a source read on every frame and not a value pushed to, so it costs the
+   * host nothing to keep current: the element's own `currentTime` is the
+   * position, and a new track brings its own `duration` without anyone
+   * telling the renderer. Kept across `newTrack`, since it is the host's and
+   * not the song's.
+   */
+  setPlayhead(source: PlayheadSource | null) {
+    this.playhead = source
   }
 
   /**
@@ -865,7 +885,7 @@ class Renderer {
     // saves one for the next play of the track and shows the other. What it
     // chose is what is live unless a host has pinned something.
     this.stepped = true
-    const chosen = this.director.step(this.packet, dt)
+    const chosen = this.director.step(this.packet, dt, this.playhead?.current ?? undefined)
     this.reportCharacter(dt)
     const shown = this.bench?.live ?? (this.pinned ? this.pinnedLive : chosen)
     const next = compatibility ? this.withoutCompute(shown) : shown

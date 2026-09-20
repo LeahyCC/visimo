@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { playSong, SONG_SECONDS } from '../director/song.fixture'
-import { POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
+import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import { defaultCanvas } from '../studies/cast'
@@ -37,7 +37,8 @@ type PresetFrame = {
   swell: number
   scene: Readonly<Record<string, number>>
   flow: Readonly<Record<string, number>> | null
-  post: PostParams
+  // The capture was taken before the grade stage existed, so it has none.
+  post: Omit<PostParams, 'grade'>
 }
 
 const FRAMES = frames as unknown as readonly PresetFrame[]
@@ -644,12 +645,15 @@ describe('a pinned cast reaches its implementations unchanged', () => {
     it(`${golden.preset} at ${golden.packet}: the stack gets the preset's numbers`, async () => {
       await drawWith(golden.preset, golden.level, golden.swell)
       const post = stack.params as PostParams
-      expect(post.enabled).toBe(golden.post.enabled)
+      // A stage that arrived after the capture is at the stack's default,
+      // off and neutral, which is what the preset path did without it.
+      const expected: PostParams = { ...defaultPostParams(), ...golden.post }
+      expect(post.enabled).toBe(expected.enabled)
       for (const stage of POST_STAGES)
-        expect(post[stage].enabled, `${golden.preset} ${stage}`).toBe(golden.post[stage].enabled)
+        expect(post[stage].enabled, `${golden.preset} ${stage}`).toBe(expected[stage].enabled)
       for (const knob of POST_KNOBS)
         expect(POST_LANES[knob].read(post), `${golden.preset} ${knob}`).toBeCloseTo(
-          POST_LANES[knob].read(golden.post),
+          POST_LANES[knob].read(expected),
           10,
         )
     })

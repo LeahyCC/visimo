@@ -600,7 +600,7 @@ const RELEASE_ARM_SECONDS = 4
 // a seventh of what it was. Two bars is the phrase, since four is longer
 // than most drops hold their own novelty.
 const RELEASE_PHRASE_BEATS = 8
-const RELEASE_PHRASE_MIN_SECONDS = 1.5
+export const RELEASE_PHRASE_MIN_SECONDS = 1.5
 const RELEASE_PHRASE_MAX_SECONDS = 6
 const RELEASE_PHRASE_DEFAULT_SECONDS = 3
 // Below this the beat is a guess, and a phrase measured off a wrong tempo is
@@ -609,9 +609,11 @@ const MOMENT_TEMPO_TRUSTED = 0.4
 // Impact fires on release crossing up through the first and rearms below the
 // second. A crossing and not a rise per frame: a rise per frame is how much
 // the signal moved in one step, which is smaller the finer the steps, and is
-// the shape of the bug `pace` had.
-const IMPACT_ON = 0.35
-const IMPACT_OFF = 0.12
+// the shape of the bug `pace` had. Exported with the shortest phrase above so
+// the flash look can work out the soonest one impact can follow another: it
+// is what its flash-rate test is built on, and a copy would drift.
+export const IMPACT_ON = 0.35
+export const IMPACT_OFF = 0.12
 // The same fall as `beatPulse`, so a scene that reads impact reads it the way
 // it reads a hit. Exported so the demo's bench fires one by hand with the
 // same fall, and does not keep a second copy that drifts.

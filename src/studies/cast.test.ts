@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { POST_KNOBS, POST_LANES, POST_STAGES, postSummary } from '../post/params'
+import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES, postSummary } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import { parseCast } from './cast'
@@ -31,7 +31,7 @@ import { castFrame, resolveCast } from './resolve'
  * One captured frame of the preset path. The file is generated, so its own
  * types are as loose as JSON is: the stack's bloom weights come back as a
  * list rather than the triple the stack holds, which is the one thing this
- * narrowing buys.
+ * narrowing buys. It was taken before the grade stage existed, so it has none.
  */
 type PresetFrame = {
   preset: string
@@ -40,10 +40,21 @@ type PresetFrame = {
   swell: number
   scene: Readonly<Record<string, number>>
   flow: Readonly<Record<string, number>> | null
-  post: PostParams
+  post: Omit<PostParams, 'grade'>
 }
 
 const FRAMES = frames as unknown as readonly PresetFrame[]
+
+/**
+ * What the preset path resolved to, as a whole stack. A stage that arrived
+ * after the capture is at the stack's own default, which is off and neutral:
+ * the preset path had no such stage, so that is what it did, and it is what
+ * the five casts must still do.
+ */
+const expectedPost = (golden: PresetFrame): PostParams => ({
+  ...defaultPostParams(),
+  ...golden.post,
+})
 
 /** Every field a mapping can read at one level; `lowEnd` is derived and follows. */
 const packetAt = (level: number, swell: number) => {
@@ -85,19 +96,20 @@ describe('a pinned cast resolves to its preset', () => {
       for (const golden of framesOf(cast.id)) {
         const packet = packetAt(golden.level, golden.swell)
         const { post } = resolveCast(cast, packet, 0, castFrame())
-        expect(post.enabled, `${cast.name} enabled at ${golden.packet}`).toBe(golden.post.enabled)
+        const expected = expectedPost(golden)
+        expect(post.enabled, `${cast.name} enabled at ${golden.packet}`).toBe(expected.enabled)
         for (const stage of POST_STAGES)
           expect(post[stage].enabled, `${cast.name} ${stage} at ${golden.packet}`).toBe(
-            golden.post[stage].enabled,
+            expected[stage].enabled,
           )
         expect(post.bloom.weights, `${cast.name} bloom weights at ${golden.packet}`).toEqual(
-          golden.post.bloom.weights,
+          expected.bloom.weights,
         )
         for (const knob of POST_KNOBS)
           expect(
             POST_LANES[knob].read(post),
             `${cast.name} ${knob} at ${golden.packet}`,
-          ).toBeCloseTo(POST_LANES[knob].read(golden.post), 10)
+          ).toBeCloseTo(POST_LANES[knob].read(expected), 10)
       }
     })
   }

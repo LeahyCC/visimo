@@ -27,7 +27,14 @@ import type { PostParams } from '../post/params'
 import { bend, feature } from '../presets/resolve'
 import { CANVAS_KNOBS, castStudyIds } from './cast'
 import type { Cast, CastCanvas, CastOverride } from './cast'
-import { COUNT_KNOBS, isLookStrength, LOOK_KNOBS, LOOK_STAGES, RIBBON_KNOBS } from './impls'
+import {
+  COUNT_KNOBS,
+  isLookStrength,
+  LOOK_KNOBS,
+  LOOK_NEUTRAL,
+  LOOK_STAGES,
+  RIBBON_KNOBS,
+} from './impls'
 import type { LookStage } from './impls'
 import { findStudy } from './registry'
 import { isLook } from './types'
@@ -228,11 +235,23 @@ function writeRibbon(knobs: Record<string, number>, presence: number, out: PostP
 const heldLooks: LookStudy[] = []
 const heldShare: number[] = []
 const heldKnobs: Record<string, number>[] = []
-const stageShare: Record<LookStage, number> = { bloom: 0, chromatic: 0, tonemap: 0, grain: 0 }
+const stageShare: Record<LookStage, number> = {
+  bloom: 0,
+  chromatic: 0,
+  grade: 0,
+  tonemap: 0,
+  grain: 0,
+}
 
 // Worked out once, since a prefix test per knob per frame builds strings.
 const KNOB_STAGE = new Map(
   LOOK_KNOBS.map((knob) => [knob, LOOK_STAGES.find((stage) => knob.startsWith(`${stage}.`))]),
+)
+
+// The neutral of every strength knob, and nothing for the rest, so the blend
+// tells the two apart with one lookup.
+const KNOB_NEUTRAL = new Map(
+  LOOK_KNOBS.map((knob) => [knob, isLookStrength(knob) ? LOOK_NEUTRAL[knob] : undefined]),
 )
 
 /**
@@ -245,9 +264,13 @@ const KNOB_STAGE = new Map(
  * slide one into the other without either knowing.
  *
  * A stage only one of them has is the case that needs care. Its strength
- * knobs (`LOOK_STRENGTH_KNOBS`) are weighted against every look, so grain
+ * knobs (`LOOK_STRENGTH_KNOBS`) are weighted against every look, the ones
+ * without the stage standing at the knob's neutral (`LOOK_NEUTRAL`), so grain
  * that belongs to the look that is leaving thins to nothing as it goes and
- * the stage switching off at the end is not seen. Its other knobs, a
+ * the stage switching off at the end is not seen. The neutral is not always
+ * 0: a saturation of 0 is grey, so a leaving look's drained colour heads
+ * back to 1 and never below what the look had, where a fade to 0 would drain
+ * it on the way out and snap it back at the end. Its other knobs, a
  * threshold or a knee, are averaged only among the looks that have the stage,
  * because the look without it has no opinion and its resting number would
  * drag the threshold about while the stage fades. The first cut of this faded
@@ -274,6 +297,7 @@ function blendLooks(count: number, out: PostParams) {
     const rest = lane.read(DEFAULT_POST_PARAMS)
     const stage = KNOB_STAGE.get(knob)
     const held = stage ? stageShare[stage] : 0
+    const neutral = KNOB_NEUTRAL.get(knob)
     let sum = 0
     for (let at = 0; at < count; at += 1) {
       const look = heldLooks[at]
@@ -281,9 +305,14 @@ function blendLooks(count: number, out: PostParams) {
       sum += (heldShare[at] ?? 0) * (heldKnobs[at]?.[knob] ?? rest)
     }
 
+    // A strength knob counts the looks without the stage at its neutral. At 0
+    // that adds nothing, which is what every one of them did before there was
+    // a neutral to name.
+    if (neutral !== undefined && held > 0) sum += Math.max(total - held, 0) * neutral
+
     // No look has the stage: it is off, and the number is kept only so a
     // pinned cast still reads back what its file says.
-    const over = held > 0 && !isLookStrength(knob) ? held : total
+    const over = held > 0 && neutral === undefined ? held : total
     lane.write(out, sum / over)
   }
 }

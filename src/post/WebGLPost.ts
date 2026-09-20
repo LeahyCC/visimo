@@ -15,6 +15,10 @@ void main() {
   uv = p;
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`
+// Seven of the uniform's eight vec4s. The eighth is the flow block, and
+// nothing on this path solves a velocity field, so it is left off the end
+// rather than declared and ignored; `data` below uploads only what a program
+// actually declares.
 const COMMON = `#version 300 es
 precision highp float;
 in vec2 uv;
@@ -42,6 +46,8 @@ void main() {
   sum += (texture(source, uv + farTap).rgb + texture(source, uv - farTap).rgb) * 0.0702702703;
   result = vec4(sum, 1.0);
 }`
+// The zoom and the turn, and nothing else: with no fluid here the carry is
+// always zero, so the flow term and its ceiling would both be the identity.
 const FEEDBACK = `
 void main() {
   float zoom = max(post[1].z, 0.001), angle = -post[1].w;
@@ -95,7 +101,12 @@ type Pass = {
   data: Float32Array
 }
 
-/** The same bloom and composite maths as PostStack, for browsers without a WebGPU adapter. */
+/**
+ * The same bloom and composite maths as PostStack, for browsers without a
+ * WebGPU adapter. Kaleidoscope is the only scene that reaches it and there is
+ * no compute here to solve a fluid with, so the feedback pass carries nothing
+ * along a flow; `feedback.carry` reads as zero whatever a preset asks for.
+ */
 export class WebGLPost {
   readonly supportsFeedback = true
   readonly hdr: boolean

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_POST_PARAMS } from '../post/params'
 import { SCENE_IDS } from '../scenes/catalog'
+import drift from './drift.json'
 import { DEFAULT_PRESET_ID, findPreset, firstPresetOf, PRESETS, stepPreset } from './index'
 import { FLUID_KNOBS, SCENE_KNOBS } from './knobs'
 import { parsePreset } from './parse'
@@ -49,6 +50,24 @@ describe('parsePreset', () => {
     expect(preset.postParams.feedback).toEqual(DEFAULT_POST_PARAMS.feedback)
     // The defaults are handed out fresh, not shared with the next preset.
     expect(preset.postParams.bloom.weights).not.toBe(DEFAULT_POST_PARAMS.bloom.weights)
+  })
+
+  it('reads the preset that carries the history along the flow', () => {
+    const preset = parsePreset(drift, 'presets/drift.json')
+    expect(preset.scene).toBe('fluid')
+    expect(preset.postParams.feedback.carry).toBe(1)
+    expect(preset.postParams.feedback.ceiling).toBeGreaterThan(0)
+    // The trail is the whole point of it, so the gain had better be long.
+    const gain = preset.postParams.feedback.amount * preset.postParams.feedback.decay
+    expect(gain).toBeGreaterThan(0.9)
+    expect(gain).toBeLessThan(1)
+  })
+
+  it('names the path when a stage is given a field it does not have', () => {
+    const broken = { ...good(), postParams: { feedback: { carrry: 1 } } }
+    expect(() => parsePreset(broken, 'presets/broken.json')).toThrow(
+      /presets\/broken\.json: postParams\.feedback\.carrry is not a field of feedback/,
+    )
   })
 
   it('names the file and the path when a knob is missing', () => {

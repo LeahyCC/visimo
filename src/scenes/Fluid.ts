@@ -17,6 +17,9 @@
  * not filterable, so each would need a bind group layout of its own; one
  * format means one layout, and any three fields can go to any step. Curl is
  * read before divergence is written, so both live in the scratch field.
+ *
+ * The velocity field is offered to the post stack as `flow`, so the feedback
+ * pass can read the last frame back along the same current the dye rides.
  */
 import { F } from '../audio/FeatureExtractor'
 import type { Tuning } from '../presets/knobs'
@@ -40,7 +43,7 @@ import {
   writeSimUniform,
 } from './fluid.params'
 import type { Extent, Layout } from './fluid.params'
-import type { Scene, SceneContext } from './Scene'
+import type { Flow, Scene, SceneContext } from './Scene'
 
 const FIELD_FORMAT: GPUTextureFormat = 'rgba16float'
 const WORKGROUP = 8
@@ -137,6 +140,21 @@ export class Fluid implements Scene {
   /** One line for the debug overlay and the canvas dataset. */
   get detail() {
     return `${this.simSize} fluid`
+  }
+
+  /**
+   * The velocity field for the post stack to carry the last frame along. It
+   * is whichever half of the ping-pong pair the gradient step wrote, which
+   * alternates, so this is read each frame rather than held; `cover` is the
+   * same crop `fluid.render.wgsl` draws the dye through.
+   */
+  get flow(): Flow | null {
+    const sized = this.sized
+    if (!sized) return null
+    return {
+      view: sized.velocity[this.velocity].view,
+      cover: [this.visible.x * 2, this.visible.y * 2] as const,
+    }
   }
 
   init(context: SceneContext) {

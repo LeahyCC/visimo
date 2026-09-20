@@ -376,7 +376,9 @@ class Renderer {
       const offscreen = post.target(this.drawWidth, this.drawHeight)
       if (!offscreen) return
       scene.render(encoder, offscreen)
-      post.render(encoder, context.getCurrentTexture().createView(), this.packet)
+      // The flow is read after the scene has drawn, because the field it
+      // names is whichever half of a ping-pong pair this frame wrote.
+      post.render(encoder, context.getCurrentTexture().createView(), this.packet, scene.flow)
       gpu.device.queue.submit([encoder.finish()])
     }
 

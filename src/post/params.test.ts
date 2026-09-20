@@ -1,20 +1,23 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { visibleExtent } from '../scenes/fluid.params'
 import {
   BLOOM_LEVELS,
   bloomLevelSize,
   bloomSourceSize,
   defaultPostParams,
   feedbackStep,
+  flowCover,
   freshWeight,
   mergePostParams,
+  POST_LANES,
   POST_UNIFORM_FLOATS,
   postIsActive,
   postSummary,
   writePostUniform,
 } from './params'
-import type { PostParams } from './params'
+import type { FlowCover, PostParams } from './params'
 
 const packet = (values: Partial<Record<keyof typeof F, number>> = {}) => {
   const out = new Float32Array(PACKET_LENGTH)
@@ -22,8 +25,19 @@ const packet = (values: Partial<Record<keyof typeof F, number>> = {}) => {
   return out
 }
 
-const write = (params: PostParams, features = packet(), width = 1920, height = 1080) =>
-  writePostUniform(params, features, width, height, new Float32Array(POST_UNIFORM_FLOATS))
+const write = (
+  params: PostParams,
+  features = packet(),
+  width = 1920,
+  height = 1080,
+  cover: FlowCover | null = null,
+) => writePostUniform(params, features, width, height, new Float32Array(POST_UNIFORM_FLOATS), cover)
+
+/** The cover a canvas of this shape gives, as the fluid scene reports it. */
+const coverOf = (width: number, height: number): FlowCover => {
+  const visible = visibleExtent(width, height)
+  return [visible.x * 2, visible.y * 2]
+}
 
 describe('post parameters', () => {
   it('applies a patch without touching the object it was given', () => {
@@ -255,5 +269,90 @@ describe('feedback per second', () => {
     const bad = feedbackStep({ ...feedback, amount: -1, decay: -1 }, 1 / 144)
     expect(Number.isNaN(bad.amount)).toBe(false)
     expect(Number.isNaN(bad.decay)).toBe(false)
+  })
+})
+
+describe('carrying the history along a flow', () => {
+  const carrying = (patch = {}) =>
+    mergePostParams(defaultPostParams(), { feedback: { carry: 1, ceiling: 2, ...patch } })
+
+  it('reads and writes the two new numbers as lanes', () => {
+    const params = defaultPostParams()
+    expect(POST_LANES['feedback.carry'].read(params)).toBe(0)
+    expect(POST_LANES['feedback.ceiling'].read(params)).toBe(defaultPostParams().feedback.ceiling)
+    POST_LANES['feedback.carry'].write(params, 0.75)
+    POST_LANES['feedback.ceiling'].write(params, 3)
+    expect(params.feedback.carry).toBe(0.75)
+    expect(params.feedback.ceiling).toBe(3)
+    // The lanes are what a preset may name, so the parser sees them too.
+    expect(POST_LANES['feedback.amount'].read(params)).toBe(defaultPostParams().feedback.amount)
+  })
+
+  it('leaves every float the stack already had exactly where it was', () => {
+    const features = packet({ dt: 1 / 144, time: 7.5, beatPulse: 0.4 })
+    const before = write(defaultPostParams(), features)
+    const after = write(carrying(), features, 1920, 1080, coverOf(1920, 1080))
+    expect(Array.from(after.slice(0, 28))).toEqual(Array.from(before.slice(0, 28)))
+    expect(POST_UNIFORM_FLOATS).toBe(32)
+  })
+
+  it('makes the carry vanish with no flow, no carry or the stage off', () => {
+    const features = packet({ dt: 1 / 60 })
+    const cover = coverOf(1920, 1080)
+    // A flow is offered but the preset asks for none of it.
+    expect(write(carrying({ carry: 0 }), features, 1920, 1080, cover)[28]).toBe(0)
+    // The preset asks for it but the scene solves no field.
+    expect(write(carrying(), features)[28]).toBe(0)
+    const off = mergePostParams(carrying(), { feedback: { enabled: false } })
+    expect(write(off, features, 1920, 1080, cover)[28]).toBe(0)
+    // And with the carry gone the cover it would have scaled is the identity.
+    expect([write(off, features, 1920, 1080, cover)[30], write(carrying(), features)[31]]).toEqual([
+      1, 1,
+    ])
+  })
+
+  it('writes the carry as the canvas uv one unit of velocity moves this frame', () => {
+    const cover = coverOf(1920, 1080)
+    const at = (dt: number, carry = 1) =>
+      write(carrying({ carry }), packet({ dt }), 1920, 1080, cover)[28] ?? 0
+    expect(at(1 / 60)).toBeCloseTo(1 / 60, 6)
+    expect(at(1 / 120)).toBeCloseTo(1 / 120, 6)
+    expect(at(1 / 60, 0.5)).toBeCloseTo(0.5 / 60, 6)
+    // A missing step reads as one reference frame and a stall is held short,
+    // so neither flings the history across the canvas.
+    expect(at(0)).toBeCloseTo(1 / 60, 6)
+    expect(at(30)).toBeCloseTo(0.1, 6)
+  })
+
+  it('never lets the ceiling or the cover the shader divides by reach zero', () => {
+    const features = packet({ dt: 1 / 60 })
+    for (const ceiling of [0, -4, Number.NaN]) {
+      const out = write(carrying({ ceiling }), features, 1920, 1080, coverOf(1920, 1080))
+      expect(out[29]).toBeGreaterThan(0)
+    }
+    // A canvas with no area gives a cover of zero, and the identity beats a
+    // warp a thousand screens wide.
+    const none = write(carrying(), features, 1920, 1080, [0, 0])
+    expect([none[30], none[31]]).toEqual([1, 1])
+  })
+})
+
+describe('the cover a flow is measured against', () => {
+  it('is the identity on a square canvas and the band on any other', () => {
+    expect(flowCover(coverOf(600, 600))).toEqual([1, 1])
+    // Wide: the whole grid across, a band of it down.
+    const wide = flowCover(coverOf(1920, 1080))
+    expect(wide[0]).toBeCloseTo(1, 6)
+    expect(wide[1]).toBeCloseTo(1080 / 1920, 6)
+    // Tall is the same the other way round.
+    const tall = flowCover(coverOf(1080, 1920))
+    expect(tall[0]).toBeCloseTo(1080 / 1920, 6)
+    expect(tall[1]).toBeCloseTo(1, 6)
+  })
+
+  it('falls back to the identity rather than a nonsense scale', () => {
+    expect(flowCover(null)).toEqual([1, 1])
+    expect(flowCover([0, 0.5])).toEqual([1, 0.5])
+    expect(flowCover([Number.NaN, -1])).toEqual([1, 1])
   })
 })

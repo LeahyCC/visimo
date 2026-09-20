@@ -20,10 +20,28 @@ export type FeedbackParams = {
   zoom: number
   /** Radians of rotation applied to the history. */
   rotate: number
+  /**
+   * How far the scene's own velocity field drags the history, 0 for none.
+   * At 1 the last frame is read back exactly one step along the flow, so
+   * every part of the screen bends its own way instead of the whole picture
+   * turning about the middle. A scene that solves no field ignores it.
+   */
+  carry: number
+  /**
+   * The most light one frame may carry back from the history. A trail near
+   * gain 1 sums without bound otherwise, and half floats reach 65504 before
+   * anything stops them. Below half of this nothing changes; above it the
+   * brightest channel bends toward the ceiling and never reaches it, and the
+   * other two follow it, because limiting each channel on its own bleaches
+   * the colour toward white.
+   */
+  ceiling: number
 }
-// The four numbers above are what one frame does at 60 frames a second.
-// `feedbackStep` converts them by the real step, so a trail lasts and travels
-// the same number of seconds on any display.
+// The first four numbers above are what one frame does at 60 frames a
+// second. `feedbackStep` converts them by the real step, so a trail lasts and
+// travels the same number of seconds on any display. `carry` is per second
+// already, since the velocity it scales is, and `ceiling` is a brightness
+// and has no rate in it at all.
 
 export type BloomParams = {
   enabled: boolean
@@ -94,7 +112,17 @@ export const BLOOM_LEVELS = 3
  */
 export const DEFAULT_POST_PARAMS: PostParams = {
   enabled: true,
-  feedback: { enabled: true, amount: 0.22, decay: 0.72, zoom: 1.012, rotate: 0.002 },
+  feedback: {
+    enabled: true,
+    amount: 0.22,
+    decay: 0.72,
+    zoom: 1.012,
+    rotate: 0.002,
+    // Off: the pass is the zoom and turn it always was. The ceiling sits far
+    // above anything a scene draws, so the shipped presets never meet it.
+    carry: 0,
+    ceiling: 16,
+  },
   bloom: {
     enabled: true,
     threshold: 0.85,
@@ -118,6 +146,16 @@ export const REFERENCE_FPS = 60
  */
 const MIN_FEEDBACK_DT = 1 / 480
 const MAX_FEEDBACK_DT = 0.1
+
+/**
+ * The step this stage trusts, in seconds. Both the per-frame conversion and
+ * the distance the flow drags the history take their time from here, so a
+ * stalled tab cannot fling either of them across the canvas.
+ */
+function feedbackSeconds(dt: number): number {
+  const step = Number.isFinite(dt) && dt > 0 ? dt : 1 / REFERENCE_FPS
+  return Math.min(Math.max(step, MIN_FEEDBACK_DT), MAX_FEEDBACK_DT)
+}
 
 /** What the feedback pass applies to the history on one drawn frame. */
 export type FeedbackStep = {
@@ -154,8 +192,7 @@ const MAX_FRESH_FRAMES = 2
  * Pure and GPU free: it is the only place the frame rate enters the stack.
  */
 export function feedbackStep(feedback: FeedbackParams, dt: number): FeedbackStep {
-  const step = Number.isFinite(dt) && dt > 0 ? dt : 1 / REFERENCE_FPS
-  const frames = Math.min(Math.max(step, MIN_FEEDBACK_DT), MAX_FEEDBACK_DT) * REFERENCE_FPS
+  const frames = feedbackSeconds(dt) * REFERENCE_FPS
   // A base above 1 would grow without bound over a long step, so it is held
   // at what one reference frame gives. Below 1 the power is at most 1 already.
   const keep = (base: number) => {
@@ -188,7 +225,37 @@ export function freshWeight(params: PostParams, features: Float32Array): number 
 }
 
 /** Floats in the shared uniform; PostParams in post.common.wgsl must match. */
-export const POST_UNIFORM_FLOATS = 28
+export const POST_UNIFORM_FLOATS = 32
+
+/**
+ * Canvas uv to a flow field's own uv, as `Flow.cover` in `scenes/Scene.ts`
+ * gives it: the field is square and covers the canvas with the overflow
+ * cropped, so the short side sees a band of it.
+ */
+export type FlowCover = readonly [number, number]
+
+/**
+ * The cover the feedback pass is handed. It both multiplies by it, to find
+ * the grid point under a pixel, and divides by it, to turn a velocity in grid
+ * widths per second into canvas uv per second, so a zero from a canvas with
+ * no area would take the whole warp with it. No flow is the identity, which
+ * costs nothing since the carry beside it is then zero.
+ */
+export function flowCover(cover: FlowCover | null): [number, number] {
+  const axis = (value: number | undefined) =>
+    Number.isFinite(value) && (value ?? 0) > MIN_COVER ? (value as number) : 1
+  if (!cover) return [1, 1]
+  return [axis(cover[0]), axis(cover[1])]
+}
+
+/**
+ * Below this a canvas has no area worth drawing and the cover is meaningless;
+ * the identity is a better answer than a warp a thousand screens wide.
+ */
+const MIN_COVER = 1e-4
+
+/** The ceiling divides in the shader, so nothing may write it as zero. */
+const MIN_CEILING = 1e-4
 
 const clone = (params: PostParams): PostParams => ({
   enabled: params.enabled,
@@ -250,6 +317,18 @@ export const POST_LANES = {
     read: (p: PostParams) => p.feedback.rotate,
     write: (p: PostParams, value: number) => {
       p.feedback.rotate = value
+    },
+  },
+  'feedback.carry': {
+    read: (p: PostParams) => p.feedback.carry,
+    write: (p: PostParams, value: number) => {
+      p.feedback.carry = value
+    },
+  },
+  'feedback.ceiling': {
+    read: (p: PostParams) => p.feedback.ceiling,
+    write: (p: PostParams, value: number) => {
+      p.feedback.ceiling = value
     },
   },
   'bloom.threshold': {
@@ -354,6 +433,7 @@ export function writePostUniform(
   width: number,
   height: number,
   out: Float32Array,
+  cover: FlowCover | null = null,
 ): Float32Array {
   const beat = features[F.beatPulse] ?? 0
   out[0] = width
@@ -403,5 +483,18 @@ export function writePostUniform(
   out[25] = (features[F.time] ?? 0) % 1000
   out[26] = 0
   out[27] = 0
+
+  // The flow, last, so everything above sits where it always has. The carry
+  // is written as the canvas uv one unit of velocity moves in this frame, so
+  // the pass never sees a frame rate; with no flow offered, or the stage off,
+  // it is zero and the cover beside it is the identity.
+  const dragging = trails && !!cover
+  out[28] = dragging ? feedback.carry * feedbackSeconds(features[F.dt] ?? 0) : 0
+  out[29] = Number.isFinite(feedback.ceiling)
+    ? Math.max(feedback.ceiling, MIN_CEILING)
+    : MIN_CEILING
+  const scale = flowCover(dragging ? cover : null)
+  out[30] = scale[0]
+  out[31] = scale[1]
   return out
 }

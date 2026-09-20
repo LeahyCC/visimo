@@ -469,7 +469,7 @@ type Study = {
 }
 ```
 
-A mapping row reads what a preset's does, plus two fields that are not in the packet the renderer holds. `tension` is the song winding up, which will be a packet row of its own; the resolver takes it as an argument, so this layer works before that row exists. `presence` is what the director fades a study by, 0 to 1; a flow or an ink is handed it and decides for itself what fading in means, while a look contributes that fraction of its distance from the stack's defaults, which is what lets two looks cross-fade.
+A mapping row reads what a preset's does, plus two fields that are not in the packet the renderer holds. `tension` is the song winding up, which will be a packet row of its own; the resolver takes it as an argument, so this layer works before that row exists. `presence` is what the director fades a study by, 0 to 1; a flow or an ink is handed it and decides for itself what fading in means. Two things are faded by the resolver instead. The ribbon is drawn by the post stack, which knows nothing of presence, so its intensity is scaled here. And looks are blended by presence, normalised, so one look alone is wholly itself and two at a half each land halfway. A stage only one of them has (grain, the split) fades by its strength knobs, `LOOK_STRENGTH_KNOBS`, so it thins to nothing before it switches off, while its other knobs are averaged only among the looks that have the stage.
 
 | Study             | Kind | Implementation | Moments | Cost   |
 | ----------------- | ---- | -------------- | ------- | ------ |
@@ -485,6 +485,8 @@ A mapping row reads what a preset's does, plus two fields that are not in the pa
 A capital is a strong fit and reads 1, a lower case one about a half, and a letter that is absent reads 0.
 
 A cast is what is live at once: one flow, one to three inks, one look, a patch over each of them, and the canvas they draw on. The feedback lives on the cast rather than in a look, because it is the picture itself: swapping a look must not throw away what the canvas holds. A pinned cast is a cast with an id and a name, for a host that wants a fixed look, and the five files in `src/studies/casts/` are Plume, Wash, Drift, Prism and Melt written that way. Each resolves to the same numbers its preset does, which `cast.test.ts` proves at five packets; the two deliberate differences are in that folder's header.
+
+A cast can only say one flow and one look, and the middle of a change has two of each. So the entry point for anything that fades is `resolveLive`, which takes a plain list of `{ id, presence, override }` and the canvas; `resolveCast` is that over a cast's own studies. A study at presence 0 is not resolved and is not in the output.
 
 `registry.test.ts` walks every study: a knob with no row driving it has to be on an allow list with a reason, every flow and ink has to say what tension does to it, no knob may leave its implementation's safe range at silence or at a full packet, and a full packet may not leave the light or the colour above rest.
 

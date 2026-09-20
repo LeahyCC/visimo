@@ -21,8 +21,8 @@ export type { PostParams } from './post/params'
 // yet; this is the contract the renderer and the director are built against.
 export { STUDIES, findStudy, studiesOfKind } from './studies/registry'
 export { CASTS, findCast } from './studies/casts/index'
-export { parseCast, castStudyIds, CANVAS_KNOBS, isCanvasKnob } from './studies/cast'
-export { castFrame, resolveCast, resolveLook, resolveStudy, studyFeature } from './studies/resolve'
+export { parseCast, castStudyIds, CANVAS_KNOBS, isCanvasKnob, MAX_INKS } from './studies/cast'
+export { castFrame, resolveCast, resolveLive, resolveStudy, studyFeature } from './studies/resolve'
 export {
   IMPL_IDS,
   IMPL_KNOBS,
@@ -31,11 +31,12 @@ export {
   isImplKnob,
   LOOK_KNOBS,
   LOOK_STAGES,
+  LOOK_STRENGTH_KNOBS,
   RIBBON_KNOBS,
 } from './studies/impls'
 export { CHARACTER_AXES, COSTS, MOMENTS, STUDY_FIELDS, STUDY_KINDS, isLook } from './studies/types'
 export type { Cast, CastCanvas, CastOverride, CanvasKnob, PinnedCast } from './studies/cast'
-export type { CastFrame } from './studies/resolve'
+export type { CastFrame, LiveStudy } from './studies/resolve'
 export type { ImplId, ImplKnob, LookStage } from './studies/impls'
 export type {
   Character,

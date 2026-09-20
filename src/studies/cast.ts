@@ -87,6 +87,12 @@ export type PinnedCast = Cast & { id: string; name: string }
 export const castStudyIds = (cast: Cast): readonly string[] =>
   cast.flow ? [cast.flow, ...cast.inks, cast.look] : [...cast.inks, cast.look]
 
+/**
+ * The most inks one cast may hold. The frame budget is drawn up for three,
+ * and past that the inks stop reading as separate things on the canvas.
+ */
+export const MAX_INKS = 3
+
 const KEYS = ['id', 'name', 'flow', 'inks', 'look', 'canvas', 'overrides']
 const CANVAS_KEYS = ['enabled', 'knobs', 'mapping']
 const OVERRIDE_KEYS = ['knobs', 'mapping']
@@ -262,6 +268,8 @@ export function parseCast(value: unknown, source: string): PinnedCast {
   if (!Array.isArray(value.inks))
     fail(source, 'inks', `expected an array of study ids, got ${describe(value.inks)}`)
   if (value.inks.length === 0) fail(source, 'inks', 'is empty; a cast draws at least one ink')
+  if (value.inks.length > MAX_INKS)
+    fail(source, 'inks', `names ${value.inks.length} inks; a cast draws at most ${MAX_INKS}`)
   const inks = value.inks.map((entry: unknown, index: number) =>
     readStudy(entry, source, `inks[${index}]`, 'ink'),
   )

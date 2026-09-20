@@ -92,6 +92,23 @@ export const LOOK_KNOBS: readonly PostKnob[] = POST_KNOBS.filter((knob) =>
   lookStages.some((stage) => knob.startsWith(`${stage}.`)),
 )
 
+/**
+ * The knobs that say how much of a stage there is, as opposed to how it is
+ * shaped: at zero the stage draws nothing. When one look has a stage and the
+ * look it is fading against does not, these are what carry the fade, so the
+ * stage thins to nothing before it is switched off. The tonemap has none; it
+ * has no amount, only a curve.
+ */
+export const LOOK_STRENGTH_KNOBS = [
+  'bloom.intensity',
+  'chromatic.amount',
+  'chromatic.beat',
+  'grain.amount',
+] as const satisfies readonly PostKnob[]
+
+export const isLookStrength = (knob: string): boolean =>
+  (LOOK_STRENGTH_KNOBS as readonly string[]).includes(knob)
+
 export type ImplKnob = FluidKnob | KaleidoscopeKnob | PostKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */

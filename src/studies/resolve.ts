@@ -10,8 +10,8 @@
  *
  * Presence is passed through rather than acted on. A flow or an ink is handed
  * it and its implementation decides what fading in means, because thinning a
- * fluid is not the same operation as thinning a line. A look is the one
- * exception, and `resolveLook` says why.
+ * fluid is not the same operation as thinning a line. The looks and the
+ * ribbon are the two exceptions, and `blendLooks` and `writeRibbon` say why.
  *
  * Everything writes into an object the caller owns and keeps, because this
  * runs on every animation frame and there is nothing here worth allocating.
@@ -26,8 +26,9 @@ import {
 import type { PostParams } from '../post/params'
 import { bend, feature } from '../presets/resolve'
 import { CANVAS_KNOBS, castStudyIds } from './cast'
-import type { Cast, CastOverride } from './cast'
-import { LOOK_KNOBS, RIBBON_KNOBS } from './impls'
+import type { Cast, CastCanvas, CastOverride } from './cast'
+import { isLookStrength, LOOK_KNOBS, LOOK_STAGES, RIBBON_KNOBS } from './impls'
+import type { LookStage } from './impls'
 import { findStudy } from './registry'
 import { isLook } from './types'
 import type { LookStudy, Study, StudyField, StudyMapping } from './types'
@@ -86,43 +87,18 @@ export function resolveStudy(
 }
 
 /**
- * Consumed before the next call, so one of these serves every look in a
- * frame and no frame allocates.
+ * One study as it is live this frame. This is what the director hands over:
+ * a list of these, which unlike a `Cast` may hold two flows or two looks at
+ * once, because that is what the middle of a change looks like.
  */
-const lookKnobs: Record<string, number> = {}
-
-/**
- * A look written into a stack the caller has already put at the post stack's
- * defaults. Unlike a flow or an ink, a look acts on presence here: at
- * presence p it contributes p of its distance from those defaults, and it
- * adds rather than overwrites. Two looks at a half then land halfway between
- * them, which is what lets the director cross-fade one into another without
- * either of them knowing about the other.
- *
- * A stage is switched on by any look that is present at all. A look at
- * presence 0 contributes nothing and leaves its stages alone.
- */
-export function resolveLook(
-  look: LookStudy,
-  overrides: CastOverride | undefined,
-  features: Float32Array,
-  tension: number,
-  presence: number,
-  out: PostParams,
-): PostParams {
-  if (presence <= 0) return out
-  resolveStudy(look, overrides, features, tension, presence, lookKnobs)
-  for (const stage of look.stages) out[stage].enabled = true
-  for (const knob of LOOK_KNOBS) {
-    const lane = POST_LANES[knob]
-    const rest = lane.read(DEFAULT_POST_PARAMS)
-    lane.write(out, lane.read(out) + presence * ((lookKnobs[knob] ?? rest) - rest))
-  }
-
-  return out
+export type LiveStudy = {
+  id: string
+  /** The director's fade, 0 to 1. At 0 the study is not resolved at all. */
+  presence: number
+  override?: CastOverride | undefined
 }
 
-/** A cast resolved: every study's knobs by id, and the whole post stack. */
+/** A cast resolved: every drawing study's knobs by id, and the whole post stack. */
 export type CastFrame = {
   knobs: Map<string, Record<string, number>>
   post: PostParams
@@ -132,8 +108,9 @@ export const castFrame = (): CastFrame => ({ knobs: new Map(), post: defaultPost
 
 /**
  * The stack back at its own defaults, with every stage off. What runs is then
- * decided by the cast alone: the canvas switches the feedback on, a ribbon
- * ink switches the ribbon on, and the look switches on the stages it names.
+ * decided by what is live alone: the canvas switches the feedback on, a
+ * ribbon ink switches the ribbon on, and the looks switch on the stages they
+ * name.
  */
 function restPost(out: PostParams) {
   out.enabled = true
@@ -148,10 +125,15 @@ function restPost(out: PostParams) {
 }
 
 /** The canvas: the feedback's resting numbers and the rows the cast puts on them. */
-function resolveCanvas(cast: Cast, features: Float32Array, tension: number, out: PostParams) {
-  out.feedback.enabled = cast.canvas.enabled
-  for (const knob of CANVAS_KNOBS) POST_LANES[knob].write(out, cast.canvas.knobs[knob])
-  for (const row of cast.canvas.mapping) {
+function resolveCanvas(
+  canvas: CastCanvas,
+  features: Float32Array,
+  tension: number,
+  out: PostParams,
+) {
+  out.feedback.enabled = canvas.enabled
+  for (const knob of CANVAS_KNOBS) POST_LANES[knob].write(out, canvas.knobs[knob])
+  for (const row of canvas.mapping) {
     const lane = POST_LANES[row.to]
     // The canvas is not a study and has no presence of its own: it is the
     // picture every study is drawing on.
@@ -163,12 +145,149 @@ function resolveCanvas(cast: Cast, features: Float32Array, tension: number, out:
 }
 
 /**
- * A whole cast for this frame. The renderer does not draw one of these yet;
- * what it is for today is the proof that a pinned cast resolves to the same
- * numbers its preset does.
+ * The ribbon ink's knobs are post lanes, so they go straight into the stack.
+ * The post stack is the ribbon's implementation and it knows nothing of
+ * presence, so this is the one ink whose fade has to happen here: its light
+ * is scaled by presence, or it would arrive and leave at full strength while
+ * every other ink glides.
+ */
+function writeRibbon(knobs: Record<string, number>, presence: number, out: PostParams) {
+  out.ribbon.enabled = true
+  for (const knob of RIBBON_KNOBS) {
+    const value = knobs[knob]
+    if (value !== undefined) POST_LANES[knob].write(out, value)
+  }
+
+  out.ribbon.intensity *= presence
+}
+
+// The looks live this frame, gathered by `resolveLive` and consumed by
+// `blendLooks` before it returns, so these serve every frame and none
+// allocates once the lists have grown to the most looks ever live at once.
+const heldLooks: LookStudy[] = []
+const heldShare: number[] = []
+const heldKnobs: Record<string, number>[] = []
+const stageShare: Record<LookStage, number> = { bloom: 0, chromatic: 0, tonemap: 0, grain: 0 }
+
+// Worked out once, since a prefix test per knob per frame builds strings.
+const KNOB_STAGE = new Map(
+  LOOK_KNOBS.map((knob) => [knob, LOOK_STAGES.find((stage) => knob.startsWith(`${stage}.`))]),
+)
+
+/**
+ * The looks written into the stack, weighted by presence.
  *
- * `presences` is the director's fade per study id, 1 where it says nothing,
- * which is every study of a pinned cast.
+ * Presences are normalised first, so a look on its own is wholly itself at
+ * any presence: a look has nothing to fade against but another look, and a
+ * half-applied tonemap is not a softer picture, only a wrong one. Two looks
+ * at a half each land halfway between them, which is what lets the director
+ * slide one into the other without either knowing.
+ *
+ * A stage only one of them has is the case that needs care. Its strength
+ * knobs (`LOOK_STRENGTH_KNOBS`) are weighted against every look, so grain
+ * that belongs to the look that is leaving thins to nothing as it goes and
+ * the stage switching off at the end is not seen. Its other knobs, a
+ * threshold or a knee, are averaged only among the looks that have the stage,
+ * because the look without it has no opinion and its resting number would
+ * drag the threshold about while the stage fades. The first cut of this faded
+ * every knob toward the post stack's defaults instead, which made a leaving
+ * look's grain and split grow toward the default strength and then snap off.
+ *
+ * The tonemap has no strength to fade by, so a change between a look with it
+ * and one without is a step. Every look in the registry has it.
+ */
+function blendLooks(count: number, out: PostParams) {
+  let total = 0
+  for (let at = 0; at < count; at += 1) total += heldShare[at] ?? 0
+  if (total <= 0) return
+  for (const stage of LOOK_STAGES) {
+    let share = 0
+    for (let at = 0; at < count; at += 1)
+      if (heldLooks[at]?.stages.includes(stage)) share += heldShare[at] ?? 0
+    stageShare[stage] = share
+    out[stage].enabled = share > 0
+  }
+
+  for (const knob of LOOK_KNOBS) {
+    const lane = POST_LANES[knob]
+    const rest = lane.read(DEFAULT_POST_PARAMS)
+    const stage = KNOB_STAGE.get(knob)
+    const held = stage ? stageShare[stage] : 0
+    let sum = 0
+    for (let at = 0; at < count; at += 1) {
+      const look = heldLooks[at]
+      if (!look || (held > 0 && stage && !look.stages.includes(stage))) continue
+      sum += (heldShare[at] ?? 0) * (heldKnobs[at]?.[knob] ?? rest)
+    }
+
+    // No look has the stage: it is off, and the number is kept only so a
+    // pinned cast still reads back what its file says.
+    const over = held > 0 && !isLookStrength(knob) ? held : total
+    lane.write(out, sum / over)
+  }
+}
+
+/**
+ * Whatever is live, resolved for this frame: each drawing study's knobs by
+ * id, and the whole post stack. This is the entry point the director feeds.
+ * A study at presence 0 is not resolved and is not in the output, so the
+ * renderer never touches it.
+ */
+export function resolveLive(
+  live: readonly LiveStudy[],
+  canvas: CastCanvas,
+  features: Float32Array,
+  tension: number,
+  out: CastFrame,
+): CastFrame {
+  // Deleting from a Map while walking its keys is safe, and spares the copy.
+  for (const id of out.knobs.keys()) {
+    let kept = false
+    for (const entry of live) if (entry.id === id && entry.presence > 0) kept = true
+    if (!kept) out.knobs.delete(id)
+  }
+
+  restPost(out.post)
+  resolveCanvas(canvas, features, tension, out.post)
+  let looks = 0
+  for (const entry of live) {
+    if (entry.presence <= 0) continue
+    // The parser and the director name registry entries; a list built by
+    // hand may not, and a missing study draws nothing.
+    const study = findStudy(entry.id)
+    if (!study) continue
+    if (isLook(study)) {
+      const knobs = (heldKnobs[looks] ??= {})
+      resolveStudy(study, entry.override, features, tension, entry.presence, knobs)
+      heldLooks[looks] = study
+      heldShare[looks] = entry.presence
+      looks += 1
+      continue
+    }
+
+    let knobs = out.knobs.get(entry.id)
+    if (!knobs) {
+      knobs = {}
+      out.knobs.set(entry.id, knobs)
+    }
+
+    resolveStudy(study, entry.override, features, tension, entry.presence, knobs)
+    if (study.impl === 'ribbon') writeRibbon(knobs, entry.presence, out.post)
+  }
+
+  blendLooks(looks, out.post)
+  return out
+}
+
+// A cast's studies as a live list, built once per cast and kept, so resolving
+// a pinned cast every frame allocates nothing. Keyed weakly so a cast a host
+// parsed and dropped takes its list with it.
+const pinned = new WeakMap<Cast, LiveStudy[]>()
+
+/**
+ * A whole cast for this frame, which is `resolveLive` over the cast's own
+ * studies. `presences` is a fade per study id, 1 where it says nothing, which
+ * is every study of a pinned cast.
  */
 export function resolveCast(
   cast: Cast,
@@ -177,38 +296,12 @@ export function resolveCast(
   out: CastFrame,
   presences?: ReadonlyMap<string, number>,
 ): CastFrame {
-  const presenceOf = (id: string) => presences?.get(id) ?? 1
-  const drawing = castStudyIds(cast).filter((id) => id !== cast.look)
-  for (const id of [...out.knobs.keys()]) if (!drawing.includes(id)) out.knobs.delete(id)
-  restPost(out.post)
-  resolveCanvas(cast, features, tension, out.post)
-  for (const id of drawing) {
-    // A cast from the parser or the director names registry entries; one
-    // built by hand may not, and a missing study draws nothing.
-    const study = findStudy(id)
-    if (!study) continue
-    let knobs = out.knobs.get(id)
-    if (!knobs) {
-      knobs = {}
-      out.knobs.set(id, knobs)
-    }
-
-    const presence = presenceOf(id)
-    resolveStudy(study, cast.overrides[id], features, tension, presence, knobs)
-    if (study.impl === 'ribbon') writeRibbon(knobs, presence, out.post)
+  let live = pinned.get(cast)
+  if (!live) {
+    live = castStudyIds(cast).map((id) => ({ id, presence: 1, override: cast.overrides[id] }))
+    pinned.set(cast, live)
   }
 
-  const look = findStudy(cast.look)
-  if (look && isLook(look))
-    resolveLook(look, cast.overrides[cast.look], features, tension, presenceOf(cast.look), out.post)
-  return out
-}
-
-/** The ribbon ink's knobs are post lanes, so they go straight into the stack. */
-function writeRibbon(knobs: Record<string, number>, presence: number, out: PostParams) {
-  out.ribbon.enabled = presence > 0
-  for (const knob of RIBBON_KNOBS) {
-    const value = knobs[knob]
-    if (value !== undefined) POST_LANES[knob].write(out, value)
-  }
+  for (const entry of live) entry.presence = presences?.get(entry.id) ?? 1
+  return resolveLive(live, cast.canvas, features, tension, out)
 }

@@ -357,7 +357,11 @@ export const STUDIES: readonly Study[] = [
   HARD_CLEAN,
 ]
 
-export const findStudy = (id: string): Study | undefined => STUDIES.find((study) => study.id === id)
+// The resolver looks every live study up on every frame, and this list is
+// headed for forty entries, so the lookup is by key and not a walk.
+const BY_ID = new Map(STUDIES.map((study) => [study.id, study]))
+
+export const findStudy = (id: string): Study | undefined => BY_ID.get(id)
 
 export const studiesOfKind = (kind: Study['kind']): readonly Study[] =>
   STUDIES.filter((study) => study.kind === kind)

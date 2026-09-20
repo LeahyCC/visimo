@@ -136,6 +136,13 @@ describe('parseCast', () => {
     expect(() => parseCast({ ...plume, inks: [] }, 'bad')).toThrow(/at least one ink/)
   })
 
+  // The cap is on the count and is checked before the names, so it holds
+  // however large the registry grows.
+  it('refuses a fourth ink', () => {
+    const inks = ['dye-plumes', 'ribbon', 'dye-plumes', 'ribbon']
+    expect(() => parseCast({ ...plume, inks }, 'bad')).toThrow(/bad: inks names 4 inks.*at most 3/)
+  })
+
   it('refuses two studies that exclude each other', () => {
     expect(() => parseCast({ ...melt, inks: ['fractal-glints', 'dye-plumes'] }, 'bad')).toThrow(
       /may not share a cast/,

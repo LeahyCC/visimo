@@ -19,6 +19,7 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES, postSummary } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
+import { glintLevel, kaleidoscopeParams } from '../scenes/kaleidoscope.params'
 import { parseCast } from './cast'
 import { castOrDefault, CASTS, DEFAULT_CAST_ID, findCast, stepCast } from './casts/index'
 import melt from './casts/melt.json'
@@ -65,6 +66,9 @@ const packetAt = (level: number, swell: number) => {
 }
 
 const framesOf = (id: string) => FRAMES.filter((entry) => entry.preset === id)
+
+/** One band sustained and driving, so a threshold that is on is not zero. */
+const LOUD_BANDS = Float32Array.from({ length: 20 }, (_, slot) => (slot === 0 ? 1 : 0))
 
 describe('a pinned cast resolves to its preset', () => {
   // The capture has to cover the five, or a cast could pass by being compared
@@ -113,6 +117,53 @@ describe('a pinned cast resolves to its preset', () => {
       }
     })
   }
+
+  /**
+   * The captures above are walked by the knobs they recorded, so a knob that
+   * did not exist in 0.1 is invisible to them: `glint` and `glintKnee` are
+   * not in `preset-frames.json` and nothing regenerates that file, because it
+   * is a record of what shipped and not a list of what exists. So the two new
+   * knobs are pinned here instead, at every packet the captures use.
+   *
+   * Prism has to resolve `glint` to exactly 0, or its picture is not the one
+   * it has always drawn: its canvas is off, nothing carries, and the ink was
+   * never the thing filling it. The study rests above 0 and rises with the
+   * music, so Prism's cast sets the rest to 0 and carries a row against each
+   * of the study's own. Subtracting the same product it added lands on 0 to
+   * the bit, and this is what holds a row added later to doing the same.
+   *
+   * The two gains cancel to the last bit rather than to nothing, so what is
+   * pinned is the level the shader is handed: `glintLevel` treats a knob
+   * under a ten-thousandth as off, and that is what Prism lands on.
+   *
+   * Melt is the other way round and is the one preset this change is meant to
+   * alter: it draws on a canvas that keeps 94 percent of itself, and without
+   * a threshold its drop filled edge to edge. Its cast names a glint of its
+   * own, above the study's rest, and that number is recorded here.
+   */
+  it('pins the threshold the captures cannot see', () => {
+    const prism = findCast('prism')
+    const melt = findCast('melt')
+    if (!prism || !melt) throw new Error('Expected Prism and Melt')
+    for (const golden of framesOf('prism')) {
+      const packet = packetAt(golden.level, golden.swell)
+      const knobs = resolveCast(prism, packet, 0, castFrame()).knobs.get('fractal-glints')
+      const params = kaleidoscopeParams(knobs ?? {})
+      expect(knobs?.glint, `Prism glint at ${golden.packet}`).toBeCloseTo(0, 12)
+      expect(knobs?.glintKnee, `Prism knee at ${golden.packet}`).toBe(0.35)
+      // What the shader is handed, which is the number that decides the frame.
+      expect(glintLevel(params, LOUD_BANDS), `Prism level at ${golden.packet}`).toBe(0)
+    }
+
+    for (const golden of framesOf('melt')) {
+      const packet = packetAt(golden.level, golden.swell)
+      const knobs = resolveCast(melt, packet, 0, castFrame()).knobs.get('fractal-glints')
+      expect(knobs?.glint, `Melt glint at ${golden.packet}`).toBeCloseTo(
+        0.38 + 0.3 * golden.level + 0.25 * golden.level,
+        7,
+      )
+    }
+  })
 
   // Melt's flow is the one number the port does not leave alone, and it is
   // the resting values that have to survive: as a study the fluid under the

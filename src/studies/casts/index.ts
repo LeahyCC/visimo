@@ -7,7 +7,7 @@
  *
  * Each of these resolves to exactly the numbers its preset does, which
  * `cast.test.ts` checks at a silent packet, a full one and three mixed ones.
- * Two things are deliberately not the same:
+ * Three things are deliberately not the same:
  *
  * - Melt's flow moves. Today its `flowParams` sit still, because nothing in a
  *   preset's mapping reaches the flow; as a study it carries Turbulent
@@ -17,6 +17,15 @@
  *   rather than lazy because Melt's flow rests at a thin viscosity, 0.12
  *   against Plume's 0.2, and the lazy fluid gives the treble 0.18 of it,
  *   which from 0.12 is a negative viscosity and no solve at all.
+ * - Melt has a brightness threshold, which changes how it looks on a drop.
+ *   That is the point: the fractal is a full-frame ink and Melt's canvas keeps
+ *   94 percent of itself, so a drop filled edge to edge with no black in it.
+ *   The ink now has a `glint` knob, Melt's cast names 0.38 of it, and the dim
+ *   body of the fractal is dropped before the canvas ever sums it. Prism goes
+ *   the other way and takes the threshold back off, because its canvas is
+ *   switched off and there was never anything to wash out. Neither number is
+ *   in `preset-frames.json`, which records what 0.1 drew; both are pinned by a
+ *   test of their own.
  * - Every study carries a `tension` row, and the renderer reads tension from
  *   the packet for a pinned cast as for any other. With nothing winding up,
  *   which is most of a track, tension is 0 and these are the presets exactly;

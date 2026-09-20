@@ -140,11 +140,15 @@ Things to get right:
 - **The first thirty seconds.** Character needs 10 to 30 s to settle, so open on a neutral cast and drift. Add an optional host prop for a starting character (a genre tag, or the values saved from the last play of this track).
 - **Variety without randomness.** With a big library, several studies will score close. Rotate among the top few by section rank, so the second verse is a cousin of the first and not a copy, while a returning section still recalls its own cast.
 
-## Known problem to fix first: Melt washes out on a drop
+## Fixed: Melt washed out on a drop
 
-Card F added the easing on loud passages that Colin asked for, and it helps, but Melt still fills the frame with flat colour on a drop. Preset numbers cannot fix it. The cause is that the Kaleidoscope scene is a full-frame image: on a loud passage every band is lit, the fractal covers nearly every pixel, and the canvas sums it. Floor and ceiling only trim the result.
+Card F added the easing on loud passages that Colin asked for, and it helped, but Melt still filled the frame with flat colour on a drop. Preset numbers could not fix it. The cause was that the Kaleidoscope scene is a full-frame image: on a loud passage every band is lit, the fractal covers nearly every pixel, and the canvas sums it. Floor and ceiling only trimmed the result.
 
-The fix belongs in the ink, which is why "fractal glints" is listed below as bright parts only. When Prism is ported to a study, give it an ink threshold of its own: only light above a level enters the canvas, the level rises with `energy`, and the rest is dropped before the feedback pass ever sees it. The same rule holds for every ink: state its worst-case coverage of the frame and keep it sparse.
+The fix was the ink threshold this section asked for, and it is in: `glint` and `glintKnee` on the `fractal` implementation. The ink drops its own dim body before it leaves the shader, so only its bright parts enter the canvas at all, and Fractal glints is now the thing the catalogue below calls it. The level is not absolute, which was the part worth thinking about: it is a share of `intensity × 2.2 × drive`, where `drive` is the loudest band's own gain clamped where the shader's mix weight clamps, so it is the factor the brightest pixel of the frame is scaled by. An absolute level would take a loud frame whole, which is exactly where it has to be sparse, and take a quiet one to black. `energy` and `release` raise the share on top of that, so a drop gives the most back. Measured on an RTX 5080 at a full packet, the ink lights 22.8 percent of the worst frame there is against 83.6 percent before; on the reference track's second drop, Melt went from 2.3 percent of the frame near black to 63.6 percent. Melt carries a `glint` of its own and looks different on a drop now, deliberately. Prism takes the threshold back off, because its canvas is switched off and nothing was ever summing it.
+
+What it does not measure against is how much of the frame the fractal is covering, which the CPU cannot know: that follows the zoom sweep, and at the sweep's inward extreme the camera is inside the fold and nearly every pixel is a fully lit surface. A threshold on brightness thins that frame rather than making it sparse, and the same knob lights 22.8 percent at that extreme and 4 percent at the other. A study that wants an even coverage needs the frame measured and fed back, which is a card of its own.
+
+The same rule holds for every ink: state its worst-case coverage of the frame and keep it sparse.
 
 ## The catalogue
 

@@ -44,7 +44,7 @@
       }
     },
     "fractal-glints": {
-      "knobs": { "intensity": 0.5 },
+      "knobs": { "intensity": 0.5, "glint": 0.38 },
       "mapping": [{ "from": "energy", "to": "intensity", "gain": -0.1, "curve": "square" }]
     },
     "ribbon": {

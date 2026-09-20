@@ -7,7 +7,7 @@ layout(std140) uniform Params {
   vec4 form;
   vec4 detail;
   vec4 colour;
-  vec4 response;
+  vec4 response; // band gain, software adapter, glint level, glint knee
   vec4 bands[5];
 } p;
 
@@ -15,6 +15,7 @@ layout(location = 0) out vec4 fragColour;
 const float TAU = 6.28318530718;
 const float LOD_LOW = 0.05;
 const float LOD_HIGH = 0.25;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 vec2 rotate(vec2 v, float a) {
   return mat2(cos(a), sin(a), -sin(a), cos(a)) * v;
@@ -104,6 +105,16 @@ vec3 surface(vec3 point, vec3 normal, vec3 ray, float occlusion) {
   return colour;
 }
 
+// The same threshold the WGSL path applies, off the same two uniform floats,
+// so this path is a glint where that one is. `kaleidoscope.params.ts` works
+// the level out against the brightest the frame can be and says why.
+float glintScale(vec3 light) {
+  float level = p.response.z;
+  if (level <= 0.0) return 1.0;
+  float soft = max(1.0e-5, level * p.response.w);
+  return smoothstep(level - soft, level + soft, dot(light, LUMA));
+}
+
 vec4 sampleScene(vec2 pixel) {
   float energy = 0.0;
   for (int b = 0; b < 5; b++) energy = max(energy, p.bands[b].x);
@@ -143,8 +154,9 @@ vec4 sampleScene(vec2 pixel) {
     colour = surface(point, normal, rd, occlusion);
   }
   colour = max(vec3(0.0), colour - vec3(min(colour.r, min(colour.g, colour.b)) * 0.7));
-  float grey = dot(colour, vec3(0.2126, 0.7152, 0.0722));
-  return vec4(max(vec3(0.0), mix(vec3(grey), colour, p.colour.z)) * p.colour.y * 2.2, 1.0);
+  float grey = dot(colour, LUMA);
+  vec3 light = max(vec3(0.0), mix(vec3(grey), colour, p.colour.z)) * p.colour.y * 2.2;
+  return vec4(light * glintScale(light), 1.0);
 }
 
 vec4 spatialSamples(vec2 pixel) {

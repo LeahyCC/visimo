@@ -164,6 +164,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     bassLift: 'off in both casts; it lifts the whole image, which is what washes a frame out',
     sparkle: 'a little grit on the ridges, at a fixed level',
     colourDrift: 'the palette drifts on a clock of its own; the key moves where it drifts from',
+    glintKnee: 'how soft the threshold’s edge is; the level it sits at is what moves',
   },
   'warm-soft': {
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',

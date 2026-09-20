@@ -9,6 +9,8 @@
  * the canvas, so its brightest pixels survive past 1 and the tonemap in the
  * composite has something to roll off. The feedback pass adds the other
  * history texture back over it, warped a little, and the two swap each frame.
+ * A scene that solves a velocity field may offer it as its `flow`, and the
+ * warp then reads the last frame back along that current as well.
  *
  * Like the scene, this belongs to the renderer singleton, so the pipelines,
  * the sampler and the parameters outlive every remount. The textures do not:
@@ -16,6 +18,7 @@
  * which a dock or popout move always does, so the trails start again from
  * black on each move while the simulation itself keeps running.
  */
+import type { Flow } from '../scenes/Scene'
 import blur from '../shaders/post.blur.wgsl?raw'
 import bright from '../shaders/post.bright.wgsl?raw'
 import common from '../shaders/post.common.wgsl?raw'
@@ -62,6 +65,15 @@ type Gear = {
   sampler: GPUSampler
   uniform: GPUBuffer
   feedback: GPURenderPipeline
+  /**
+   * Named rather than derived, because the feedback group is rebuilt every
+   * frame and a derived layout holds only the bindings the shader happens to
+   * read; see "Adding a scene" in the README for what that cost last time.
+   */
+  feedbackLayout: GPUBindGroupLayout
+  /** One zero texel, bound as the flow when the scene offers none. */
+  still: GPUTextureView
+  stillTexture: GPUTexture
   bright: GPURenderPipeline
   blur: GPURenderPipeline
   composite: GPURenderPipeline
@@ -72,8 +84,6 @@ type Sized = {
   height: number
   history: Pair<Target>
   levels: Level[]
-  /** Indexed by the history the scene drew into; reads the other one. */
-  feedback: Pair<GPUBindGroup>
   bright: Pair<GPUBindGroup>
   composite: Pair<GPUBindGroup>
 }
@@ -98,15 +108,43 @@ export class PostStack {
       return shader
     }
 
-    const pipeline = (code: string, target: GPUColorTargetState) => {
+    const pipeline = (code: string, target: GPUColorTargetState, group?: GPUBindGroupLayout) => {
       const shader = module(code)
       return device.createRenderPipeline({
-        layout: 'auto',
+        layout: group ? device.createPipelineLayout({ bindGroupLayouts: [group] }) : 'auto',
         vertex: { module: shader, entryPoint: 'vs' },
         fragment: { module: shader, entryPoint: 'fs', targets: [target] },
         primitive: { topology: 'triangle-list' },
       })
     }
+
+    // The flow view alternates every frame, so this group cannot be built
+    // once per resize the way the others are. Naming its layout means the
+    // group survives the shader ever dropping a binding it reads.
+    const texture = { sampleType: 'float' } as const
+    const feedbackLayout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture },
+        { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture },
+      ],
+    })
+
+    // One zero texel for the scenes that solve no field. Half floats, like
+    // every flow, so one bind group layout covers both cases; zeroed by hand
+    // rather than by trusting the implicit clear.
+    const stillTexture = device.createTexture({
+      size: { width: 1, height: 1 },
+      format: SCENE_FORMAT,
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    })
+    device.queue.writeTexture(
+      { texture: stillTexture },
+      new Uint8Array(8),
+      { bytesPerRow: 8 },
+      { width: 1, height: 1 },
+    )
 
     this.gear = {
       device,
@@ -125,13 +163,20 @@ export class PostStack {
       // The scene has already drawn into the target, so the history is added
       // to it rather than read back and mixed. The constant is the weight on
       // that new frame, which keeps the sum the same at any frame rate.
-      feedback: pipeline(feedback, {
-        format: SCENE_FORMAT,
-        blend: {
-          color: { srcFactor: 'one', dstFactor: 'constant', operation: 'add' },
-          alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+      feedback: pipeline(
+        feedback,
+        {
+          format: SCENE_FORMAT,
+          blend: {
+            color: { srcFactor: 'one', dstFactor: 'constant', operation: 'add' },
+            alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+          },
         },
-      }),
+        feedbackLayout,
+      ),
+      feedbackLayout,
+      still: stillTexture.createView(),
+      stillTexture,
       bright: pipeline(bright, { format: SCENE_FORMAT }),
       blur: pipeline(blur, { format: SCENE_FORMAT }),
       composite: pipeline(composite, { format }),
@@ -174,19 +219,42 @@ export class PostStack {
 
   private historyReady = false
 
-  /** Run the stack over what the scene drew and write `view`. */
-  render(encoder: GPUCommandEncoder, view: GPUTextureView, features: Float32Array) {
+  /**
+   * Run the stack over what the scene drew and write `view`. `flow` is the
+   * velocity field the scene is solving, if it solves one; it is passed in
+   * each frame rather than held, since which of a ping-pong pair it names
+   * alternates.
+   */
+  render(
+    encoder: GPUCommandEncoder,
+    view: GPUTextureView,
+    features: Float32Array,
+    flow: Flow | null = null,
+  ) {
     const gear = this.gear
     const sized = this.sized
     if (!gear || !sized) return
     const other = this.current === 0 ? 1 : 0
-    writePostUniform(this.settings, features, sized.width, sized.height, this.uniformData)
+    const cover = flow?.cover ?? null
+    writePostUniform(this.settings, features, sized.width, sized.height, this.uniformData, cover)
     gear.device.queue.writeBuffer(gear.uniform, 0, this.uniformData)
 
     if (this.historyReady && stageEnabled(this.settings, 'feedback')) {
       const into = sized.history[this.current].view
       const fresh = freshWeight(this.settings, features)
-      draw(encoder, gear.feedback, sized.feedback[this.current], into, 'load', fresh)
+      // One bind group a frame, because the flow alternates and the history
+      // it reads does too. It is four bindings and no allocation on the GPU,
+      // which is well under what the pass itself costs.
+      const group = gear.device.createBindGroup({
+        layout: gear.feedbackLayout,
+        entries: [
+          { binding: 0, resource: { buffer: gear.uniform } },
+          { binding: 1, resource: gear.sampler },
+          { binding: 2, resource: sized.history[other].view },
+          { binding: 3, resource: flow?.view ?? gear.still },
+        ],
+      })
+      draw(encoder, gear.feedback, group, into, 'load', fresh)
     }
 
     if (stageEnabled(this.settings, 'bloom')) {
@@ -261,9 +329,12 @@ export class PostStack {
     }
 
     // One bind group per history texture the scene might have drawn into.
-    const forHistory = (
-      build: (drawn: Target, previous: Target) => GPUBindGroup,
-    ): Pair<GPUBindGroup> => [build(history[0], history[1]), build(history[1], history[0])]
+    // The feedback pass is not among them; its group is built per frame,
+    // above, because the flow it also reads alternates.
+    const forHistory = (build: (drawn: Target) => GPUBindGroup): Pair<GPUBindGroup> => [
+      build(history[0]),
+      build(history[1]),
+    ]
 
     const bloomViews = levels.map((level, index) => ({
       binding: 3 + index,
@@ -275,16 +346,6 @@ export class PostStack {
       height,
       history,
       levels,
-      feedback: forHistory((_, previous) =>
-        gear.device.createBindGroup({
-          layout: gear.feedback.getBindGroupLayout(0),
-          entries: [
-            { binding: 0, resource: { buffer: gear.uniform } },
-            { binding: 1, resource: gear.sampler },
-            { binding: 2, resource: previous.view },
-          ],
-        }),
-      ),
       bright: forHistory((drawn) =>
         gear.device.createBindGroup({
           layout: gear.bright.getBindGroupLayout(0),
@@ -326,6 +387,7 @@ export class PostStack {
   dispose() {
     this.release()
     this.gear?.uniform.destroy()
+    this.gear?.stillTexture.destroy()
     this.gear = null
   }
 }

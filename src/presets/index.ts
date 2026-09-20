@@ -7,6 +7,7 @@
  * Nothing here touches the GPU or WGSL, so the stage's top bar can import it
  * for the picker without pulling the visualizer into the main bundle.
  */
+import drift from './drift.json'
 import { parsePreset } from './parse'
 import plume from './plume.json'
 import prism from './prism.json'
@@ -17,6 +18,7 @@ import wash from './wash.json'
 export const PRESETS: readonly Preset[] = [
   parsePreset(plume, 'presets/plume.json'),
   parsePreset(wash, 'presets/wash.json'),
+  parsePreset(drift, 'presets/drift.json'),
   parsePreset(prism, 'presets/prism.json'),
 ]
 

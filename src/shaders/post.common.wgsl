@@ -11,6 +11,8 @@ struct PostParams {
   chroma: vec4<f32>,    // split, 0, 0, 0
   tone: vec4<f32>,      // exposure, shoulder, on, 0
   grain: vec4<f32>,     // amount, clock, 0, 0
+  flow: vec4<f32>,      // carry this frame, ceiling, cover x and y
+  floor: vec4<f32>,     // light taken off the history this frame, 0, 0, 0
 }
 
 struct Blit {

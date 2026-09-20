@@ -15,11 +15,15 @@ void main() {
   uv = p;
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`
+// All nine of the uniform's vec4s. The eighth is the flow block and nothing
+// on this path solves a velocity field, so it is uploaded and never read; the
+// ninth is the floor, which the feedback pass below does use. `data` uploads
+// as many of them as the program it belongs to declares live.
 const COMMON = `#version 300 es
 precision highp float;
 in vec2 uv;
 out vec4 result;
-uniform vec4 post[7];
+uniform vec4 post[9];
 uniform sampler2D source;
 `
 const BRIGHT = `
@@ -42,6 +46,11 @@ void main() {
   sum += (texture(source, uv + farTap).rgb + texture(source, uv - farTap).rgb) * 0.0702702703;
   result = vec4(sum, 1.0);
 }`
+// The zoom and the turn, then the floor and the ceiling, which is everything
+// the WGSL pass does except the carry: with no fluid here there is no
+// velocity field to read the last frame back along, so that term is the
+// identity whatever a preset asks for. The floor and the ceiling depend on
+// nothing but the history, so both are the same maths as post.feedback.wgsl.
 const FEEDBACK = `
 void main() {
   float zoom = max(post[1].z, 0.001), angle = -post[1].w;
@@ -50,7 +59,15 @@ void main() {
   float s = sin(angle), c = cos(angle);
   vec2 turned = vec2(centred.x * c - centred.y * s, centred.x * s + centred.y * c) / zoom;
   vec2 at = clamp(turned / aspect + 0.5, vec2(0.0), vec2(1.0));
-  result = vec4(texture(source, at).rgb * post[1].x * post[1].y, 1.0);
+  vec3 old = texture(source, at).rgb * post[1].x * post[1].y;
+  // The brightest channel carries both limits and the other two follow it,
+  // so a long trail loses brightness rather than colour.
+  float peak = max(max(old.r, max(old.g, old.b)), 0.0);
+  float left = max(peak - post[8].x, 0.0);
+  float knee = max(post[7].y, 1e-4) * 0.5;
+  float over = max(left - knee, 0.0);
+  float rolled = min(left, knee) + knee * over / (over + knee);
+  result = vec4(old * (rolled / max(peak, 1e-5)), 1.0);
 }`
 const COMPOSITE = `
 uniform sampler2D bloom0;
@@ -95,7 +112,14 @@ type Pass = {
   data: Float32Array
 }
 
-/** The same bloom and composite maths as PostStack, for browsers without a WebGPU adapter. */
+/**
+ * The same bloom and composite maths as PostStack, for browsers without a
+ * WebGPU adapter. Kaleidoscope is the only scene that reaches it and there is
+ * no compute here to solve a fluid with, so the feedback pass carries nothing
+ * along a flow; `feedback.carry` reads as zero whatever a preset asks for.
+ * `feedback.floor` and `feedback.ceiling` need no flow, so both apply here
+ * exactly as they do on the WebGPU path.
+ */
 export class WebGLPost {
   readonly supportsFeedback = true
   readonly hdr: boolean

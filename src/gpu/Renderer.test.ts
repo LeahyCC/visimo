@@ -18,7 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { HARDSTYLE, playSong, SONG_SECONDS } from '../director/song.fixture'
+import { HARDSTYLE, METAL, playSong, SONG_SECONDS } from '../director/song.fixture'
 import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
@@ -980,6 +980,34 @@ describe('the director drives the cast', () => {
     second.renderer.dispose()
     expect(second.trace).toEqual(first.trace)
     expect(first.trace.at(-1)).not.toBe('')
+  })
+
+  // A host hands over a ref once and keeps writing to it, as it would to an
+  // audio element's own `currentTime`: no call is made per frame, and a
+  // renderer with none reads a track that ends loud as no outro at all.
+  it('reads the playhead a host gave from the ref on every frame', async () => {
+    vi.resetModules()
+    impls.reset()
+    const fresh = (await import('./Renderer')).renderer
+    const { element, draw } = sizedCanvas(1280, 720)
+    audio.attached = true
+    const source = { current: { currentTime: 0, duration: METAL.seconds } }
+    fresh.setPlayhead(source)
+    fresh.setPreset('auto')
+    await fresh.attach(element, canvas(), vi.fn())
+    let now = 0
+    for (const frame of playSong(FPS, undefined, undefined, METAL)) {
+      audio.packet = frame.features
+      source.current.currentTime = frame.time
+      now += 1000 / FPS
+      draw(now)
+    }
+
+    expect(fresh.moments.outro).toBeGreaterThan(0.9)
+    fresh.setPlayhead(null)
+    draw((now += 1000 / FPS))
+    expect(fresh.moments.outro).toBe(0)
+    fresh.dispose()
   })
 
   it('prints auto and the live study ids on the canvas', async () => {

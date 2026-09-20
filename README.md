@@ -85,6 +85,7 @@ Both canvases are `position: absolute; inset: 0`, so **give them a positioned pa
 | `fluidSize`      | yes      | the fluid's grid, from `FLUID_SIZES`. One control, every fluid                                |
 | `startCharacter` | no       | where the character reader opens, as a partial of the five axes                               |
 | `track`          | no       | any value that changes with the track, an id or a url. The director starts again when it does |
+| `playhead`       | no       | a ref to anything with `currentTime` and `duration`, such as your `<audio>`. See below        |
 | `onCharacter`    | no       | the character once it settles and rarely after, to save for next time                         |
 | `onUnsupported`  | yes      | nothing can start or recover on an available backend: show artwork                            |
 | `onBackend`      | no       | `webgpu` or `webgl2`, after attachment                                                        |
@@ -92,6 +93,15 @@ Both canvases are `position: absolute; inset: 0`, so **give them a positioned pa
 | `hudClassName`   | no       | goes on the HUD canvas                                                                        |
 
 Everything optional is new in 0.2 and nothing about it changes what a host that leaves it out already gets.
+
+**Telling it where the track is.** A host that plays a file knows the position and the length, and the director cannot: it hears the music a frame at a time. Hand the stage the same ref you put on your `<audio>` and it reads `currentTime` and `duration` itself on every frame it draws:
+
+```tsx
+const audio = useRef<HTMLAudioElement>(null)
+<Stage playhead={audio} ... />
+```
+
+It is a ref and not a number for one reason: a position changes several times a second, and a prop that changed that often would re-render the host and the stage for a value only the renderer reads. The ref is handed over once, nothing is called per frame, and it follows a seek and a new track without anyone saying so. A host with no element passes a ref to any object that has the two fields, in seconds. A `duration` that is not a length (`NaN` before the metadata loads, `Infinity` for a stream) is read as none given. With it the last stretch of a track reads as an outro whatever it is doing, and a short track has a short intro; see [The director](#the-director). Leave it out and both are read as they were.
 
 `onUnsupported` fires when nothing in the chosen cast can start or recover on an available backend. `hasWebGpu()` only checks whether the WebGPU API exists; it neither guarantees an adapter nor detects the WebGL2 fallback. Do not use it to block loading Prism. The optional `onBackend` callback reports `webgpu` or `webgl2` after attachment.
 
@@ -194,7 +204,7 @@ How `pace` got to counting hits, and what is left. It used to count the frames w
 
 What `pace` still cannot do is hear a regular train of hats reliably. The onset threshold is the mean plus 2.5 deviations of a band's own last second and a half, and a train of equal hits raises both, so for a flat-topped hit that fills more than about a seventh of the time the threshold sits above every peak and nothing fires, which is probably why hardstyle's ten hats a second never reach its treble detector. A train just under that limit clears the threshold by a percent or two, and whether a frame lands on the peak decides it: lo-fi's treble band fires on 68 of its 133 hats at 60 frames a second and on all 133 at 120 and 144. The weighting keeps that out of `pace` for hats under a pad, and the worst spread measured on variants of the three tracks (other tempos, other hat levels) is 0.013, but a track of regular hats with nothing over them is where two frame rates could still part. The whole-spectrum detector, which `onset` and `beatPulse` come from, has the same trouble: on hardstyle it fires on 3 of 62 kicks at 60 frames a second and on 62 at 120.
 
-Four more rows say where in the song we are rather than what kind of song it is: the moment. Groove has no row, because it is what is left when the other three are low, and there is no intro or outro row either; those come from `rest` and where we are in the track, which is a later piece of work. Every one of them is a difference between two arms of the same quantity, never a level against a fixed number, and three things follow. They are loudness independent, since a difference of dB is a ratio. They are frame-rate independent, since every arm is a span of time and the hits are counted the way `pace` counts them. And `tension` falls back by itself when a build fizzles, because a riser that climbs and then holds stops being a change within the slow arm's sixteen seconds whether or not anything notices it fizzled. The first cut read levels against the track's norms and could not do that: a track that got louder and stayed there sat at full tension for the rest of the song.
+Four more rows say where in the song we are rather than what kind of song it is: the moment. Groove has no row, because it is what is left when the other three are low, and there is no intro or outro row either: those are about where we are in the track and not about the sound, so `moment.ts` reads them from how much has been heard and, when the host gives it, the playhead. See [The director](#the-director). Every one of them is a difference between two arms of the same quantity, never a level against a fixed number, and three things follow. They are loudness independent, since a difference of dB is a ratio. They are frame-rate independent, since every arm is a span of time and the hits are counted the way `pace` counts them. And `tension` falls back by itself when a build fizzles, because a riser that climbs and then holds stops being a change within the slow arm's sixteen seconds whether or not anything notices it fizzled. The first cut read levels against the track's norms and could not do that: a track that got louder and stayed there sat at full tension for the rest of the song.
 
 The figures below are measured on one synthesised story, in `synthetic.ts`: twenty-four seconds of four to the floor at 128, sixteen of breakdown, sixteen of the groove again, then `build()`, which is a snare roll doubling from quarters to eighths to sixteenths under a riser climbing from 200 Hz to 2.6 kHz with the kick out for the last bar, and then the drop.
 
@@ -870,9 +880,9 @@ between boundaries:
    tension is passed on for every live study to read
 ```
 
-Three pieces feed it. `character.ts` is where the song sits in the five axes, smoothed over tens of seconds from `pace` and `tempo`, `weight`, `keyClarity`, `tempoConfidence` and `hardness`, and it says how settled that reading is. `moment.ts` is where in the song we are, as six weights that always sum to 1: build from `tension`, drop from `release`, rest from `rest`, groove from what is left, and intro and outro split out of rest by position. `score.ts` is the one line above, and both halves have to be positive for a study to be cast.
+Three pieces feed it. `character.ts` is where the song sits in the five axes, smoothed over tens of seconds from `pace` and `tempo`, `weight`, `keyClarity`, `tempoConfidence` and `hardness`, and it says how settled that reading is. `moment.ts` is where in the song we are, as six weights that always sum to 1: build from `tension`, drop from `release`, rest from `rest`, groove from what is left, and intro and outro taken out of groove and rest by position, never out of build or drop. `score.ts` is the one line above, and both halves have to be positive for a study to be cast.
 
-The rules, each with a test in `director.test.ts`:
+The rules, each with a test in `director.test.ts` (the two about intro and outro have theirs in `moment.test.ts`):
 
 - **Changes land on the music.** A cast is picked on a change of `section` or on `impact`, never on a timer. The extractor confirms a section about six seconds late, so a `novelty` spike starts a fade toward a challenger and the confirmed section settles it.
 - **The drop is a cut.** On `impact` the new cast is whole inside a tenth of a second. Everything else glides over seconds. The trigger sits at a half and not near the top: `impact` is 1 for a single frame, and one packet read late at 30 frames a second already sees 0.83, so a trigger at 0.9 lost the drop to one janky frame.
@@ -888,6 +898,8 @@ The rules, each with a test in `director.test.ts`:
 - **The first thirty seconds.** Until the character has settled, the score reads a study's `reach` in place of its closeness, so a track opens on the studies whose welcome is widest and drifts into its own.
 - **A study at presence 0 is not in the output at all**, so the renderer never touches one that is off.
 - **A pinned cast turns the director off.** Given one it returns that cast at presence 1 and nothing else, and still passes tension through. It still reads the character and the moment, since a host saves the character for the next play of the track and the overlay shows both. The stage pins at its own level rather than through this option, because a host builds a fresh cast object for every knob it changes and rebuilding the director around each of those would restart the reading every time a slider moved.
+- **An intro is where the track is, not how quiet it is.** It used to be a quiet passage early on, so a track that opens at full energy, which is most heavy music, had no intro and its opening read as groove. Now it is read off how much has been heard and how many sections have been confirmed, and it is taken out of groove as well as rest: full at the first sound, one for the first 8 seconds, and gone by 30, since intros run from about 8 seconds to about 30 and the clock has to end one that never confirms a change. The sections end it sooner: the first confirmed change is the sign the track has started, and a passage that comes back is a certain one and cuts it off outright. Both are eased and not stepped, so nothing jumps as a boundary is confirmed. Build and drop are never cut by it, so a track that opens on a build or fires an impact in its first seconds still reads one. It counts sound only, so silence before the first note is not intro time used up. With a playhead and a duration, the spans scale by the track's length against a typical three minutes, down to a quarter, so a one minute track has a count-in and not thirty seconds of intro; and the clock is then the later of the seconds heard and the position, so a seek into the middle of a track is not read as its opening.
+- **An outro is where the track ends, when it can be told.** With a playhead and a duration, the last tenth of the track (between 4 and 30 seconds) is an outro, leaning in over its first half. It is taken out of groove as well as rest, so a track that ends loud has one, and it is cut by tension, so a track that ends on a build does not have one while it is still winding up. Without them the outro is read as it always was, off the shape of an ending; see the end of this section.
 - **Frame rate independence.** Ninety seconds of packets at 60 and at 144 frames a second produce the same cast changes at the same times, within one frame.
 
 The options, all of them on the constructor:
@@ -903,7 +915,7 @@ The options, all of them on the constructor:
 | `studies`      | the registry  | anything that is a `Study`                              |
 | `pinned`       | none          | a fixed cast, which turns the choosing off              |
 
-Two things it cannot do. It never learns how long the track is, so **outro** is read off the shape an ending has rather than off the position: a long fall in loudness with no tension under it, in a track that has already run a minute and a half. That catches a fade-out and a track that thins out over its last chorus, and it cannot tell either from a long quiet passage two thirds of the way through a long mix. It never sees one in a track that ends at full energy on the last beat, which is most of dance music. And **the first thirty seconds** are a guess: the character needs 10 to 30 seconds of sound before it means anything, so the opening cast is the widest-welcome one rather than the track's own. A host that knows the track can hand in `start` and skip the drift, though the reading still counts as unsettled until the music has been heard.
+Two things it cannot do. **Outro, for a host that gives no playhead and duration.** The director is never told how long the track is, so it reads an outro off the shape an ending has rather than off the position: a long fall in loudness with no tension under it, in a track that has already run a minute and a half. That catches a fade-out and a track that thins out over its last chorus, and it cannot tell either from a long quiet passage two thirds of the way through a long mix. It never sees one in a track that ends at full energy on the last beat, which is most of dance music, or in a track under a minute and a half. A host that gives the playhead (the `playhead` prop, under [Use](#use)) has the last two solved, and the first stays, since the shape is still read beside the position and is not gated by it. And **the first thirty seconds** are a guess: the character needs 10 to 30 seconds of sound before it means anything, so the opening cast is the widest-welcome one rather than the track's own. A host that knows the track can hand in `start` and skip the drift, though the reading still counts as unsettled until the music has been heard.
 
 **Turning it on.** The stage's `preset` prop says what is on screen, and `"auto"` is the director:
 
@@ -932,6 +944,8 @@ const [saved, setSaved] = useState<Partial<Character> | undefined>(() => load(tr
 `track` is what makes it work for a second song. Everything the director holds is about one track: how settled its character is, which cast each section had, and the seed its rotation counts from. Left running into the next song, the opening thirty seconds are never a guess again, a section is handed the cast another track's section of the same number had, and the new track's `startCharacter` is never read. So when `track` changes the director starts again, from `startCharacter` as it stands at that moment. The canvas is not emptied: one track into the next is a change of cast like any other. A host that passes no `track` gets a session read as one long song.
 
 `onCharacter` is the other end of it: the character once the reading has settled, and once every thirty seconds after that, which is the slowest of the reader's own smoothers and so the soonest a number is worth writing down. It hands over a copy, since the reader writes one object in place every frame. It fires under a pinned cast as much as under the director, because the song is read either way: pin Plume for a whole track and the next play can still open where that track actually sits.
+
+**A playhead.** `step(features, dt, playhead?)` takes the position and the length as an optional third argument, anything with `currentTime` and `duration` in seconds. The renderer passes the stage's `playhead` ref on every frame, so it is read fresh and follows a seek; it is the host's and not the song's, so `track` changing does not clear it.
 
 The renderer steps the director on every frame whatever is drawing, and what it chose is drawn only when nothing is pinned. That is also why turning Auto on mid-track lands on a cast already chosen for the song rather than on an opening guess.
 
@@ -1013,13 +1027,14 @@ The renderer's side of it is one method, `renderer.setBench(bench | null)`, sepa
 | `PostStack.render`             | no longer writes the uniform or draws the ribbon; call `prepare`, `clear` and `drawRibbon` around it |
 | `SCENE_IDS` and `SCENE_LABELS` | unchanged, and still what `data-scene` prints                                                        |
 
-**What was added:** `data-cast` on the canvas, listing the live study ids in cast order; `STUDIES`, `findStudy`, `sceneOf` and the whole studies vocabulary in `visimo/presets`; `liveCast` and `blendKnobs` beside it; and four optional things on the stage, none of which changes what a host that leaves them out already gets.
+**What was added:** `data-cast` on the canvas, listing the live study ids in cast order; `STUDIES`, `findStudy`, `sceneOf` and the whole studies vocabulary in `visimo/presets`; `liveCast` and `blendKnobs` beside it; and five optional things on the stage, none of which changes what a host that leaves them out already gets.
 
 | Added              | What it is                                                                       |
 | ------------------ | -------------------------------------------------------------------------------- |
 | `preset="auto"`    | the song chooses the cast. `preset` still takes a `PinnedCast` and still pins it |
 | `startCharacter`   | where the character reader opens, as a partial of the five axes                  |
 | `track`            | changes when the track does, and the director starts again from `startCharacter` |
+| `playhead`         | a ref to the `<audio>`, or anything with `currentTime` and `duration`            |
 | `onCharacter`      | the character once settled and rarely after, to save for the next play           |
 | `Live` in `visimo` | the type of `preset`: `PinnedCast \| 'auto'`                                     |
 

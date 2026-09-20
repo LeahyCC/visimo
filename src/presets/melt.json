@@ -42,12 +42,12 @@
   "postParams": {
     "feedback": {
       "amount": 1,
-      "decay": 0.972,
+      "decay": 0.95,
       "zoom": 1,
       "rotate": 0,
       "carry": 1,
-      "floor": 0.0012,
-      "ceiling": 0.4
+      "floor": 0.03,
+      "ceiling": 1.2
     },
     "bloom": { "threshold": 0.8, "intensity": 0.15 },
     "chromatic": { "enabled": false },

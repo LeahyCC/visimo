@@ -267,6 +267,57 @@ describe('hardness on synthesised hits', () => {
   }, 60000)
 })
 
+describe('pace on whole tracks', () => {
+  // The same three tracks as hardness below. Pace is a property of the song, so
+  // a listener on a 144 Hz display has to read what one on a 60 Hz display does.
+  // It did not: one struck sound trips several bands a few frames apart, and
+  // pace counted the frames, so the same kick was worth more the finer the
+  // frames. Twenty-five seconds of each read 0.24, 0.17 and 0.25 at 60 and
+  // 0.38, 0.32 and 0.38 at 144.
+  const seconds = 25
+  const LOUD = 0.5
+  const RATES = [60, 120, 144]
+  const tracks = {
+    hardstyle: kit(150, 'hardKick', 0.3),
+    house: kit(124, 'kick', 0.3, 0.2),
+    lofi: kit(80, 'pulse', 0.1, 0.6),
+  }
+  const heard = (pattern: Pattern, frameRate: number) =>
+    run(atLevel(synthesize([{ pattern, seconds }], SAMPLE_RATE), LOUD), frameRate).at(-1)?.[
+      F.pace
+    ] ?? 0
+
+  it('reads each of the three the same at 60, 120 and 144 frames a second', () => {
+    for (const pattern of Object.values(tracks)) {
+      const paces = RATES.map((rate) => heard(pattern, rate))
+      expect(Math.max(...paces) - Math.min(...paces)).toBeLessThan(0.03)
+    }
+  }, 180000)
+
+  // A kick every 0.4 seconds at 150 BPM, and nothing else the detectors hear
+  // over it: the count is of hits, so 2.5 a second over 25 seconds of a
+  // half-minute decay, at 12 a second for full.
+  it('counts a hardstyle kick once, at any frame rate', () => {
+    const expected = (2.5 * (1 - Math.exp(-seconds / 30))) / 12
+    for (const rate of RATES)
+      expect(Math.abs(heard(tracks.hardstyle, rate) - expected)).toBeLessThan(0.015)
+  }, 180000)
+
+  // 80 BPM with quiet hats over a pad against 150 BPM with loud ones. The
+  // detectors hear the lo-fi hats, each band being measured against its own
+  // history, and do not hear hardstyle's dense loud ones, so counting every
+  // onset as one put lo-fi at twice hardstyle. A hit is worth how far it
+  // stands above what is under it, and a hat under a pad is under it.
+  it('reads lo-fi clearly slower than hardstyle at every frame rate', () => {
+    for (const rate of RATES) {
+      const hardstyle = heard(tracks.hardstyle, rate)
+      const lofi = heard(tracks.lofi, rate)
+      expect(lofi).toBeLessThan(hardstyle * 0.85)
+      expect(lofi).toBeLessThan(heard(tracks.house, rate))
+    }
+  }, 180000)
+})
+
 describe('hardness on whole tracks', () => {
   // Three tracks that differ only in the voice on the beat, the weight of the
   // hats and the pad under them. This is the case the feature exists for, and

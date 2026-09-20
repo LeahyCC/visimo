@@ -18,7 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { HARDSTYLE, playSong, SONG_SECONDS } from '../director/song.fixture'
+import { LOFI, playSong, SONG_SECONDS } from '../director/song.fixture'
 import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
@@ -940,17 +940,19 @@ describe('the director drives the cast', () => {
   // track rather than over one change: a glide must not empty the canvas,
   // and a fade between two studies of one solver must not build a second.
   //
-  // The solver is no longer live for the whole song. Implode is a flow of
+  // The solver is no longer live for the whole song. The tunnel is a flow of
   // another implementation entirely and wins this song's build outright, for
   // long enough that the fluid's grace runs out and it is released, so what
   // is held to here is the invariant rather than the count: one solver per
   // stretch in which a fluid study is live, stepped once on each of those
   // frames whichever of the two studies is fading into the other.
   it('never empties the canvas and never builds a second solver', async () => {
-    // The hardstyle song, because it is the one that fades lazy fluid into
-    // turbulent fluid: two studies of one solver live at once, which is the
-    // case a second solver would be built for.
-    const song = await playThrough('auto', HARDSTYLE)
+    // The lo-fi song, because it is the one that still fades one fluid study
+    // into the other (turbulent into lazy at the breakdown): two studies of
+    // one solver live at once, which is the case a second solver would be
+    // built for. The hardstyle song did until the beat pump took its groove
+    // and its drop, and it never has a fluid now.
+    const song = await playThrough('auto', LOFI)
     expect(stack.reset).toBe(0)
     const stirring = liveFrames(song.trace, 'fluid')
     const frames = stirring.filter(Boolean).length

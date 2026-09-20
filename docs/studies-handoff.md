@@ -161,7 +161,7 @@ A starting list, deliberately long. It is a menu, not a contract: build the ones
 | lazy fluid      | today's solver, low vorticity, slow emitters                  | I G R O | soft, slow     | slows further, pulls emitters in  |
 | turbulent fluid | high vorticity, fast emitters, fine filaments                 | G D     | fast, bright   | vorticity climbs                  |
 | beat pump       | zoom pulse that lands on the predicted beat (`beatPhase`)     | G D     | steady, hard   | pulse depth grows                 |
-| tunnel          | steady inward travel                                          | G B     | steady         | accelerates toward the drop       |
+| tunnel          | steady travel, built outward (see the README)                 | G B     | steady         | accelerates toward the drop       |
 | implode         | everything pulled to the centre                               | B       | any            | pull strength is the tension      |
 | radial burst    | outward push from the centre on hits                          | D       | hard           | none; fires on impact             |
 | vortex          | one big swirl about the middle                                | B R     | tonal          | spins up                          |

@@ -247,6 +247,18 @@ const ALLOWED: Record<string, Record<string, string>> = {
     twist: 'the same, and a twist that varies with radius is the polar twist study',
     ...UNUSED_CURL,
   },
+  'beat-pump': {
+    swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
+    twist: 'the same, and a twist that varies with radius is the polar twist study',
+    ...UNUSED_CURL,
+  },
+  'tunnel': {
+    falloff:
+      'a plain zoom about the middle, which is what reads as travel; a peak nearer the middle would read as a burst',
+    twist:
+      'a twist that varies with radius is the polar twist study, and the swirl is this one’s turn',
+    ...UNUSED_CURL,
+  },
   'curl-drift': {
     radial: 'this flow is the curl term alone; a pull to the middle is the implode study',
     falloff: 'the shape of the radial term, which this flow does not use',

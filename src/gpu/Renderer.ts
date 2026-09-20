@@ -37,6 +37,7 @@ import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
 import { RibbonInk } from '../impls/RibbonInk'
+import { StreaksInk } from '../impls/StreaksInk'
 import { mergePostPatch, patchPostParams, postSummary } from '../post/params'
 import type { PostParams, PostPatch } from '../post/params'
 import { PostStack, SCENE_FORMAT } from '../post/PostStack'
@@ -592,6 +593,7 @@ class Renderer {
       return this.post
         ? new RibbonInk(this.post, () => this.bench?.waveform?.() ?? this.client?.waveform ?? null)
         : null
+    if (impl === 'streaks') return new StreaksInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

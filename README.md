@@ -323,6 +323,7 @@ Both are handed a `presence`, 0 to 1, with their knobs. At 0 a study is not in t
 | `dye`      | `impls/fluid.ts`, `DyeInk`          | ink  |
 | `fractal`  | `scenes/Kaleidoscope.ts`            | ink  |
 | `ribbon`   | `impls/RibbonInk.ts`                | ink  |
+| `streaks`  | `impls/StreaksInk.ts`               | ink  |
 | `look`     | nothing; a look is `PostParams`     | look |
 
 **Every ink adds light.** The renderer clears the shared target once a frame and each ink then draws over what is there, blended as its own colour times the presence, with the alpha left where the clear put it (`INK_BLEND`). For one ink at presence 1 that is exactly the opaque draw each of them used to make on its own, which is why the five look as they did. They draw in cast order, so a cast reads the same way every time.
@@ -427,6 +428,34 @@ The grid is 128 texels square and does not follow the canvas, so nothing is rebu
 The fluid and this can be live at once, which is what the middle of a change between them is. `impls/FlowBlend.ts` sums them by presence, and `blendTarget` takes the LARGEST of their grids rather than the first: the blend shader samples by uv, so a 128 field lands correctly in a 1024 target, but a 1024 fluid written into a 128 target would spend the whole change at a sixty-fourth of its resolution. Every flow's `cover` comes from the canvas alone, so the two share it.
 
 Adding a term is three things: its coefficient in `ANALYTIC_KNOBS` (`presets/knobs.ts`) with a range in `ANALYTIC_RANGES`, a field of `AnalyticField` written into a vec4 of its own by `writeAnalyticUniform`, appended after the vec4s that are already there so nothing moves, and the same few lines in `analyticVelocity` and, transcribed, in the shader. The WGSL struct is one vec4 per term family for exactly that reason.
+
+#### The streaks
+
+`impls/StreaksInk.ts` with `shaders/streaks.wgsl` and the numbers in `impls/streaks.params.ts`. Thin lines on rays from the middle of the canvas, travelling in, which is the tension drawn: a build lengthens them and multiplies them and the end of the build takes them away. The `riser-streaks` study rests at a count of 0 and an intensity of 0, so it draws nothing until tension lifts it, and then no pass is encoded and nothing is uploaded either.
+
+```
+the shared clock: speed x real time, so travel is per second
+a streak:   travelled = start + rate x clock        (start and rate: hash of its index)
+            whole part = generation                 (ray, length, light, hue: hash of index and generation)
+            fractional part = how far along its trip:  0 at the edge, 1 at the eye
+```
+
+Nothing is random and nothing is integrated per streak. Placement is a hash of the streak's index and its generation, so the same song draws the same picture, and a streak that reaches the eye is reborn on a new ray at the edge. Everything is placed in pixels and the angle is taken in pixels, so the rays converge on the middle of a wide canvas and a tall one alike. Streaks are born on the canvas edge along their own ray rather than on a circle round it, so on a wide canvas the ones running sideways are not spent off screen. A small eye is left empty and the light fades over the last stretch of a trip, or the light of every ray would pile up at the centre.
+
+The shader draws one instanced quad per streak, six vertices each, so the width is a real number of pixels: `width` is written against a canvas 1080 high and scales with the short side, and `length` is a fraction of it. A line list is one pixel wide on every GPU and would vanish at 4K. The colour is the ribbon's, `ribbonColour` at the key, with `hueSpread` scattering each streak's place in that palette, so the streaks sit with the ribbon rather than beside it. It adds light through `INK_BLEND`, so presence scales it with no shader knowing.
+
+| Knob        | Means                                                      | Range    |
+| ----------- | ---------------------------------------------------------- | -------- |
+| `count`     | how many are lit; a level, so the last one fades in        | 0 to 96  |
+| `length`    | the longest a streak gets, as a fraction of the short side | 0 to 0.6 |
+| `speed`     | trips from the edge to the eye per second                  | 0 to 3   |
+| `width`     | pixels on a 1080 high canvas                               | 0 to 6   |
+| `intensity` | the brightest a streak gets                                | 0 to 1   |
+| `hueSpread` | how far the hues scatter round the ribbon's, palette units | 0 to 0.5 |
+
+Each streak's own length and light are between half and all of the knob, and its own rate between 0.6 and 1.4 of the shared clock, so they do not arrive together. Tension climbs the count, length, speed and intensity and thins the width, which is what keeps it sparse: at tension 1 with the onset flux full there are 48 streaks, at most 0.48 of the short side long and 1.5 px wide at 1080 high, which covers at most 3.2% of a square frame and 1.8% of a 16:9 one (`streakCoverage`, and a test holds it under a tenth on every shape). The one fast row is the onset flux on the length, so the streaks flick within a build.
+
+The WebGL2 path skips it: it has one program and only ever drew the fractal, and a cast the director chose without one is stood in for as before.
 
 ### Post stack
 
@@ -603,6 +632,7 @@ A mapping row reads what a preset's does, plus one field that is not in the pack
 | `dye-plumes`      | ink  | `dye`          | I G R   | cheap  |
 | `ribbon`          | ink  | `ribbon`       | G B D   | cheap  |
 | `fractal-glints`  | ink  | `fractal`      | G D     | heavy  |
+| `riser-streaks`   | ink  | `streaks`      | B       | cheap  |
 | `warm-soft`       | look | `look`         | I G R O | cheap  |
 | `clean-glass`     | look | `look`         | G b D   | cheap  |
 | `hard-clean`      | look | `look`         | G b D   | cheap  |
@@ -613,7 +643,7 @@ A cast is what is live at once: one flow, one to three inks, one look, a patch o
 
 A cast can only say one flow and one look, and the middle of a change has two of each. So the entry point for anything that fades is `resolveLive`, which takes a plain list of `{ id, presence, override }` and the canvas; `resolveCast` is that over a cast's own studies. A study at presence 0 is not resolved and is not in the output.
 
-`registry.test.ts` walks every study: a knob with no row driving it has to be on an allow list with a reason, every flow and ink has to say what tension does to it, no knob may leave its implementation's safe range at silence or at a full packet, and a full packet may not leave the light or the colour above rest.
+`registry.test.ts` walks every study: a knob with no row driving it has to be on an allow list with a reason, every flow and ink has to say what tension does to it, no knob may leave its implementation's safe range at silence or at a full packet, and a full packet may not leave the light or the colour above rest. That last rule is held at tension 0 for every study. At full tension it is held too, except for a light a study says a build may bring in: `BUILT_LIGHT` in that file gives a ceiling and a reason, and the only entry is the riser streaks' intensity, which rests at 0 so that nothing draws without a build.
 
 `data-scene` is derived from the cast's inks, in `sceneOf`: it is the first of them whose implementation used to be a scene, so the dye reads `fluid` and the fractal reads `kaleidoscope` and the five pinned casts print exactly what their presets did. A cast whose inks were never scenes, a ribbon on its own, prints that ink's implementation instead, so the line still says what is drawing.
 

@@ -18,7 +18,15 @@ import { ANALYTIC_KNOBS, KALEIDOSCOPE_KNOBS } from '../presets/knobs'
 import type { AnalyticKnob, FluidKnob, KaleidoscopeKnob } from '../presets/knobs'
 import type { SceneId } from '../scenes/catalog'
 
-export const IMPL_IDS = ['fluid', 'analytic', 'dye', 'fractal', 'ribbon', 'look'] as const
+export const IMPL_IDS = [
+  'fluid',
+  'analytic',
+  'dye',
+  'fractal',
+  'ribbon',
+  'streaks',
+  'look',
+] as const
 export type ImplId = (typeof IMPL_IDS)[number]
 
 /**
@@ -92,6 +100,20 @@ export const RIBBON_KNOBS = [
 ] as const satisfies readonly PostKnob[]
 
 /**
+ * The streaks' numbers. Their ranges and what each one means in pixels are in
+ * `impls/streaks.params.ts`; this is only the vocabulary a study may name.
+ */
+export const STREAKS_KNOBS = [
+  'count',
+  'length',
+  'speed',
+  'width',
+  'intensity',
+  'hueSpread',
+] as const
+export type StreaksKnob = (typeof STREAKS_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -134,7 +156,7 @@ export const COUNT_KNOBS = ['emitters', 'events'] as const satisfies readonly Fl
 export const isCountKnob = (knob: string): boolean =>
   (COUNT_KNOBS as readonly string[]).includes(knob)
 
-export type ImplKnob = FluidKnob | AnalyticKnob | KaleidoscopeKnob | PostKnob
+export type ImplKnob = FluidKnob | AnalyticKnob | KaleidoscopeKnob | PostKnob | StreaksKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -143,6 +165,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   dye: FLUID_DYE_KNOBS,
   fractal: KALEIDOSCOPE_KNOBS,
   ribbon: RIBBON_KNOBS,
+  streaks: STREAKS_KNOBS,
   look: LOOK_KNOBS,
 }
 

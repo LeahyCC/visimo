@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react'
 import { renderer } from '../src'
 import { FLUID_SIZES } from '../src/catalog'
 import { ANALYTIC_RANGES } from '../src/impls/analytic.params'
+import { STREAK_RANGES } from '../src/impls/streaks.params'
 import { CANVAS_KNOBS, castStudyIds, MAX_INKS } from '../src/presets'
 import type {
   CanvasKnob,
@@ -112,13 +113,15 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
 
 /**
  * A study's own table. The fractal's knobs share four names with the dye's
- * and do not share their ranges, so the table is picked by implementation
- * rather than merged. The analytic flow's are signed, which `spanOf` cannot
- * guess from a resting value of zero.
+ * and do not share their ranges, and the streaks' `intensity` stops at 1 where
+ * the dye's runs to 4, so the table is picked by implementation rather than
+ * merged. The analytic flow's are signed, which `spanOf` cannot guess from a
+ * resting value of zero.
  */
 const rangesOf = (impl: ImplId): Partial<Record<string, readonly [number, number]>> => {
   if (impl === 'fractal') return KALEIDOSCOPE_RANGES
   if (impl === 'analytic') return ANALYTIC_RANGES
+  if (impl === 'streaks') return STREAK_RANGES
   return RANGES
 }
 

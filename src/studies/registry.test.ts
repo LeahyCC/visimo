@@ -19,6 +19,7 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { ANALYTIC_RANGES } from '../impls/analytic.params'
 import { CAUSTICS_RANGES } from '../impls/caustics.params'
 import { DUST_RANGES } from '../impls/dust.params'
+import { HALO_RANGES } from '../impls/halo.params'
 import { SHARD_RANGES } from '../impls/shards.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
 import { MAX_WEAVE, POST_KNOBS, POST_LANES } from '../post/params'
@@ -28,7 +29,7 @@ import type { AnalyticKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs
 import { KALEIDOSCOPE_RANGES } from '../scenes/kaleidoscope.params'
 import { CASTS } from './casts/index'
 import { IMPL_IDS, implKnobs, isImplId, isImplKnob } from './impls'
-import type { CausticsKnob, DustKnob, ImplId, StreaksKnob } from './impls'
+import type { CausticsKnob, DustKnob, HaloKnob, ImplId, StreaksKnob } from './impls'
 import { findStudy, STUDIES } from './registry'
 import { castFrame, resolveCast, resolveStudy } from './resolve'
 import { STUDY_FIELDS, STUDY_KINDS } from './types'
@@ -107,6 +108,8 @@ const isDustKnob = (knob: string): knob is DustKnob =>
   Object.prototype.hasOwnProperty.call(DUST_RANGES, knob)
 const isCausticsKnob = (knob: string): knob is CausticsKnob =>
   Object.prototype.hasOwnProperty.call(CAUSTICS_RANGES, knob)
+const isHaloKnob = (knob: string): knob is HaloKnob =>
+  Object.prototype.hasOwnProperty.call(HALO_RANGES, knob)
 
 /** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
 const SIGNED = new Set(['colourDrift'])
@@ -130,6 +133,7 @@ function safeRange(impl: ImplId, knob: string): readonly [number, number] | unde
   if (impl === 'shards' && isShardKnob(knob)) return SHARD_RANGES[knob]
   if (impl === 'dust' && isDustKnob(knob)) return DUST_RANGES[knob]
   if (impl === 'caustics' && isCausticsKnob(knob)) return CAUSTICS_RANGES[knob]
+  if (impl === 'halo' && isHaloKnob(knob)) return HALO_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
 }
@@ -179,6 +183,19 @@ const BUILT_LIGHT: Record<string, Record<string, { max: number; why: string }>> 
       max: 0.7,
       why: 'rests at 0 so nothing draws without a build; at most 48 lines under 2 px wide, so under 4% of the frame is lit, and it thins its width as the count climbs',
     },
+  },
+}
+
+/**
+ * Knobs that may resolve under the floor of their range, and why. The ink
+ * clamps them to it and draws nothing there, so the value under zero is a size
+ * of nothing and not a value the implementation is handed. The upper end is
+ * held as for any other knob.
+ */
+const MAY_RUN_UNDER: Record<string, Record<string, string>> = {
+  halo: {
+    radius:
+      'the energy sets the radius from 0 and tension takes 0.07 off it, so a near-silent build resolves a little under 0, which the ink clamps to 0 and draws nothing for; see halo.test.ts',
   },
 }
 
@@ -255,6 +272,9 @@ const ALLOWED: Record<string, Record<string, string>> = {
     scale:
       'the size of the cells; a live scale would zoom the whole pattern about the middle, which reads as the camera moving and not as light on water',
     hueSpread: 'how far the hues scatter round the ribbon’s, a setting of the look and not a level',
+  },
+  'halo': {
+    hue: 'the offset from the ribbon’s colour at the key, a setting of the look for a cast to make and not a level',
   },
   'fractal-glints': {
     symmetry: 'how many times the frame is folded, a whole number; moving it flickers the fold',
@@ -480,7 +500,8 @@ describe('every study stays inside a safe range', () => {
           expect(Number.isFinite(value), `${study.id} ${knob} at ${entry.label}`).toBe(true)
           const range = safeRange(study.impl, knob)
           if (!range) continue
-          expect(value, `${study.id} ${knob} at ${entry.label}`).toBeGreaterThanOrEqual(range[0])
+          if (!MAY_RUN_UNDER[study.id]?.[knob])
+            expect(value, `${study.id} ${knob} at ${entry.label}`).toBeGreaterThanOrEqual(range[0])
           expect(value, `${study.id} ${knob} at ${entry.label}`).toBeLessThanOrEqual(range[1])
         }
       }

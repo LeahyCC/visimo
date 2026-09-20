@@ -25,7 +25,7 @@ import { AUDIO_FIELDS } from '../presets/knobs'
 import { defaultCanvas, parseCast } from '../studies/cast'
 import { castOrDefault } from '../studies/casts/index'
 import frames from '../studies/casts/preset-frames.json'
-import { CAUSTICS_KNOBS, DUST_KNOBS } from '../studies/impls'
+import { CAUSTICS_KNOBS, DUST_KNOBS, HALO_KNOBS } from '../studies/impls'
 import type { ImplId } from '../studies/impls'
 import { STUDIES } from '../studies/registry'
 import type { LiveCast } from '../studies/resolve'
@@ -290,6 +290,26 @@ vi.mock('../impls/CausticsInk', () => ({
     }
     dispose() {
       impls.disposed.caustics = (impls.disposed.caustics ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/HaloInk', () => ({
+  HaloInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.halo = (impls.built.halo ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('halo', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('halo')
+    }
+    dispose() {
+      impls.disposed.halo = (impls.disposed.halo ?? 0) + 1
     }
   },
 }))
@@ -1471,6 +1491,73 @@ describe('the study bench', () => {
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     expect(() => draw(1000)).not.toThrow()
     expect(impls.built.caustics).toBeUndefined()
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('builds the halo ink for its study, hands it its numbers and draws it in cast order', async () => {
+    const { draw } = await start()
+    renderer.setBench({
+      live: live('ribbon', 'halo', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.energy] = 0.3
+        packet[F.tension] = 0
+      },
+    })
+    draw(1000)
+    expect(impls.built.halo).toBe(1)
+    expect(impls.drawn).toEqual(['ribbon', 'halo'])
+    expect(impls.seen.halo?.presence).toBe(1)
+    expect(Object.keys(impls.seen.halo?.knobs ?? {}).sort()).toEqual([...HALO_KNOBS].sort())
+    // A passage with some sound in it has a glow to draw.
+    const calm = impls.seen.halo?.knobs.radius ?? 0
+    expect(calm).toBeGreaterThan(0.1)
+
+    // The study's tension row reaches the ink through the resolver: a build
+    // tightens the glow.
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.energy] = 0.3
+        packet[F.tension] = 1
+      },
+    })
+    draw(2000)
+    expect(impls.seen.halo?.knobs.radius ?? 0).toBeLessThan(calm - 0.05)
+  })
+
+  it('is handed no radius at a silent packet, which is how it draws nothing', async () => {
+    const { draw } = await start()
+    renderer.setBench({ live: live('ribbon', 'halo', 'clean-glass') })
+    draw(1000)
+    expect(impls.seen.halo?.knobs.radius).toBe(0)
+  })
+
+  it('does not build the halo ink for a study that is faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('ribbon', 'halo', 'clean-glass')
+    const halo = cast.studies[1]
+    if (!halo) throw new Error('the halo is in the cast')
+    halo.presence = 0
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.built.halo).toBeUndefined()
+    expect(impls.updates.halo).toBeUndefined()
+    halo.presence = 0.5
+    draw(2000)
+    expect(impls.built.halo).toBe(1)
+    expect(impls.seen.halo?.presence).toBe(0.5)
+  })
+
+  it('skips the halo on the WebGL2 path, which has no compute and draws the fractal alone', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('ribbon', 'halo', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(1000)).not.toThrow()
+    expect(impls.built.halo).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

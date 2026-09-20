@@ -329,6 +329,7 @@ Both are handed a `presence`, 0 to 1, with their knobs. At 0 a study is not in t
 | `shards`   | `impls/ShardsInk.ts`                | ink  |
 | `dust`     | `impls/DustInk.ts`                  | ink  |
 | `caustics` | `impls/CausticsInk.ts`              | ink  |
+| `halo`     | `impls/HaloInk.ts`                  | ink  |
 | `look`     | nothing; a look is `PostParams`     | look |
 
 **Every ink adds light.** The renderer clears the shared target once a frame and each ink then draws over what is there, blended as its own colour times the presence, with the alpha left where the clear put it (`INK_BLEND`). For one ink at presence 1 that is exactly the opaque draw each of them used to make on its own, which is why the five look as they did. They draw in cast order, so a cast reads the same way every time.
@@ -581,6 +582,50 @@ brightness = (1 - (det / BAND)^2), clamped at 0, ^ sharpness, less CUT
 
 **Measured**, on an NVIDIA GeForce RTX 5080 through Chromium's WebGPU in headless Edge. The shader compiles and the console and the device report no errors. Shader against mirror: the ink alone into an `rgba16float` target and read back at 1280 by 720, 1080 by 1920 and 2560 by 1440 with different scales, sharpnesses and clocks, 8.7 million pixels in all, and `causticLine` at the same points differs by at most 0.0009 of the peak, which is half float rounding. In the bench with the caustics soloed over a lazy fluid through the warm and soft look, a synthetic tonal passage at level 0.15, after thirty seconds at 1280 by 720 with the demo's own controls hidden: 73.4 percent of the frame under 4 of 255, 76.6 percent under 8, 81.3 under 16 and 87.3 under 32, a mean of 10 of 255, and 2.9 percent of pixels over 128. That does not creep: 74.0 percent at ten seconds and 73.4 at thirty, and 75 percent on a 2560 by 1440 canvas. A silent packet is 100 percent under 4 with a brightest pixel of 2, which is the grain, and so is the same cast with the caustics at presence 0. At a full packet with `tonality` 1, `hardness` 1 and full tension it is 84.7 percent under 4 and a mean of 3.0, and at tension 0.9 on the quiet passage 81.4 percent and a mean of 5.6, against 10 without it (the bench's tension moves the lazy fluid under it as well), so a build and a loud packet both leave more black and not less. Beside the dye plumes it draws light over the colour and reads as light on water; that frame is not black, but the dye alone is not either (a mean of 79 of 255 before, 92 after), and the dye is the ink that fills a frame. One pass at 2560 by 1440 into an `rgba16float` target cost 0.07 ms over an empty pass at rest and at both extremes of the knobs, the best of five runs of 300 passes in one submission, so an upper bound for one pass's own work on this adapter and not a whole frame, and it is why the study is `cheap`. `data-frame-ms` at 2560 by 1440 read 6.77 ms with the ink and 6.79 at presence 0, which is the animation loop's own cap. Not checked: a real track, a mid-range or integrated GPU, where a fullscreen pass costs in proportion to its pixels, or a long quiet passage on a real fluid. The WebGL2 path has one program and draws the fractal alone, so it skips this ink like every other and does not throw.
 
+#### The halo
+
+`impls/HaloInk.ts` with `shaders/halo.wgsl` and the numbers in `impls/halo.params.ts`. One glow about the middle of the canvas that breathes with the music: the ink the director can always fall back on, because it suits every moment and every character. That is exactly why it is modest everywhere. It is a companion to other inks and never the whole picture, and it is the one ink that sits where the canvas piles light up. It is one quad sized to the glow, six vertices, and a 12 float uniform made once, added into the shared target through `INK_BLEND` so presence scales the light.
+
+```text
+d = distance from the middle in pixels / (radius x short side)      round on any canvas
+u = 1 at the peak, 0 at the edge                                    (and at the middle, for a ring)
+light = smoothstep(u) ^ exponent                                    exactly 0 at d = 1 and beyond
+```
+
+The quad is square in pixels and the light is a function of the distance in pixels, so the glow is round on a wide canvas and a tall one, and `radius` is a fraction of the short side, so it is the same share of the picture on both. A smoothstep has no slope at either end, so the peak is round and the edge arrives without a crease, and it is exactly zero at the radius whatever the other knobs are, which is what lets the quad be no bigger than the glow. `hollow` moves the peak out from the middle to that fraction of the radius, so a kick can open the glow into a ring. The middle is dimmed by `hollow / 0.5` and dark from a hollow of 0.5 up, so a small hollow is a soft disc with a shoulder and not a disc with a pinhole in it, and nothing jumps as it leaves 0. The peak of the profile is 1 wherever it sits.
+
+| Knob        | Means                                                                            | Range       |
+| ----------- | -------------------------------------------------------------------------------- | ----------- |
+| `radius`    | where the glow reaches zero, as a fraction of the short side                     | 0 to 0.7    |
+| `hollow`    | where the peak sits, as a fraction of the radius; from 0.5 up the glow is a ring | 0 to 0.9    |
+| `softness`  | 1 is broad shoulders and 0 is a tight core; the exponent runs from 1 to 4        | 0 to 1      |
+| `intensity` | light added on one frame at the peak                                             | 0 to 0.044  |
+| `hue`       | palette units added to the ribbon's colour at the key                            | -0.5 to 0.5 |
+
+**Silence is the radius's job.** `energy` sets the radius through a square root, so the first sound lets a small glow in and a full packet makes it 0.26 of the short side, and a silent packet resolves to a radius of 0 and no pass is encoded. The radius carries the gate and the intensity does not, because a size of 0 draws nothing however much light there is, so tension can lift the light without a silent build lighting anything. A near-silent packet at full tension resolves the radius a little under 0, which the ink holds at 0; `registry.test.ts` names that as the one knob allowed under the floor of its range, and `halo.test.ts` holds that it draws nothing.
+
+**What the music does.** `energy` on the radius, `beatPulse` a little on the intensity (0.005 on a rest of 0.028), `lowEnd` on the hollow (0.5, so a kick opens it to a ring and lets it close), and `hardness` takes 0.4 off the softness so a hard track has a tighter core. Loud, hard and swelling music dims the light, to 0.013 at a full packet, so a bigger glow is a dimmer one and the study never ends a loud passage brighter than rest.
+
+**Tension tightens it to a point.** It takes 0.07 off the radius and 0.15 off the hollow and adds 0.005 to the intensity. A quiet build (an energy of 0.15) goes from a radius of 0.10 to 0.03, still lit, with the hollow at nothing. A full packet at full tension is at 0.018 against a rest of 0.028, so the light a build adds is inside the wash-out guard and needs no entry in `BUILT_LIGHT`.
+
+**The arithmetic.** The halo sits at the middle of a canvas whose flows mostly pull toward that point or push from it, so light accumulates there before it does anywhere else. The canvas keeps 0.93 of itself a frame, so a still image sums to `1 / (1 - 0.93)`, about fourteen times what one frame adds. A flow only takes light away from the middle (its velocity is zero there, so what it carries in comes from further out), so that still sum is the most the middle can reach. The feedback pass bends light above half its ceiling, and a director-built canvas holds a ceiling of 1.25 at a full packet, so the knee is at 0.625. The top of the intensity range, `HALO_INTENSITY_MAX`, is the light at which a still image settles exactly there, so nothing a study writes can bend the middle at a full packet.
+
+| Where                                            | Intensity | Radius | Settled peak | Share of a 16:9 frame lit |
+| ------------------------------------------------ | --------- | ------ | ------------ | ------------------------- |
+| rest, a quiet passage (energy 0.15)              | 0.028     | 0.10   | 0.40         | 0.9 percent               |
+| a loud packet, energy 1 alone                    | 0.018     | 0.26   | 0.26         | 6.2 percent               |
+| a quiet build (energy 0.15, tension 1)           | 0.033     | 0.03   | 0.47         | under 0.1 percent         |
+| the most light the mapping reaches on any packet | 0.038     |        | 0.54         |                           |
+| the top of the range                             | 0.044     |        | 0.625        |                           |
+
+"Lit" is brighter than 0.05 of the peak, counted on a grid (`haloCoverage`). `halo.test.ts` sums the centre and the peak frame by frame at a full packet and holds them under the ceiling read back from the director's own canvas and under half of it, and searches the mapping for the most light it can reach on any packet and holds that under the knee.
+
+**Same at any frame rate.** It has no clock and no state: what it draws is its knobs and the key, so there is nothing per frame to keep, and the canvas's own per-second feedback holds the brightness. `HaloInk.test.ts` writes the same uniform at 30 and 144 steps a second.
+
+**Cost.** One quad sized to the glow and six vertices: at most a radius of 0.7 of the short side, and about 6 percent of a 16:9 frame at the most the study reaches. Presence 0 is never built or called, and a radius of 0 or no light encodes no pass and uploads nothing.
+
+**Checked** on an NVIDIA Blackwell adapter through Chromium's WebGPU in headless Edge: the shader compiled with no messages and no validation errors, and the ink alone drawn into an `rgba16float` target at 1280 by 720, 720 by 1280, 1000 by 1000 and 1920 by 1080 (hollows from 0 to 0.9, softnesses from 0 to 1) read back within 0.00025 of the TypeScript, which is half float rounding, with nothing lit at or beyond the radius. Not checked: a real track, how it looks over a real flow, its cost as a share of a real frame, or any other adapter. The WebGL2 path has one program and draws the fractal alone, so it skips this ink like every other and does not throw.
+
 ### Post stack
 
 `src/post/PostStack.ts` sits between the inks and the swap chain. An ink never draws on the canvas: it draws into one of two `rgba16float` history textures, and the composite pass is the only thing that writes the canvas.
@@ -768,6 +813,7 @@ A mapping row reads what a preset's does, plus one field that is not in the pack
 | `shards`          | ink  | `shards`       | D       | cheap  |
 | `dust`            | ink  | `dust`         | I R O   | cheap  |
 | `caustics`        | ink  | `caustics`     | I R O   | cheap  |
+| `halo`            | ink  | `halo`         | any     | cheap  |
 | `warm-soft`       | look | `look`         | I G R O | cheap  |
 | `clean-glass`     | look | `look`         | G b D   | cheap  |
 | `hard-clean`      | look | `look`         | G b D   | cheap  |
@@ -775,7 +821,7 @@ A mapping row reads what a preset's does, plus one field that is not in the pack
 | `impact-flash`    | look | `look`         | D       | cheap  |
 | `film`            | look | `look`         | I R O   | cheap  |
 
-A capital is a strong fit and reads 1, a lower case one about a half, and a letter that is absent reads 0.
+A capital is a strong fit and reads 1, a lower case one about a half, and a letter that is absent reads 0. `any` is every moment at a half, which is the halo: a study written for a moment beats it there.
 
 **Film** is the look for the quiet end of a song, the one place the other looks have nothing to say: heavy grain, a resting vignette and a slight gate weave, for the intro, the rest and the outro of a soft, slow track. It enables bloom, tonemap, grain and grade, and costs what a look costs, which is nothing beyond the composite: no new pass, no new texture, and the weave is a shifted read of the picture the composite already samples.
 

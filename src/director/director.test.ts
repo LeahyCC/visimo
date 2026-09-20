@@ -390,16 +390,7 @@ describe('Director', () => {
     const wide = ink('wide-ink', moments({ groove: 1 }), { reach: 1, home: elsewhere })
     const near = ink('near-ink', moments({ groove: 1 }), { reach: 0.2, home: track })
     const director = new Director({ studies: [GROOVE_FLOW, ONE_LOOK, wide, near], budget: 4 })
-    const steady = packet({
-      section: 1,
-      recall: 0.9,
-      pace: 0.9,
-      tempo: 0.9,
-      hardness: 0.95,
-      weight: 0.5,
-      keyClarity: 0.5,
-      tempoConfidence: 0.5,
-    })
+    const steady = sounding(packet({ section: 1, recall: 0.9 }), track)
     run(director, steady, 4)
     expect(director.cast?.inks).toEqual(['wide-ink'])
     run(director, steady, 60)

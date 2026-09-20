@@ -114,6 +114,9 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'bloom.intensity': [0, 3],
   'chromatic.amount': [0, 0.05],
   'chromatic.beat': [0, 0.05],
+  'grade.vignette': [0, 1],
+  // The stage stops at untouched, so there is nothing above 1 to reach.
+  'grade.saturation': [0, 1],
   'tonemap.exposure': [0, 4],
   'tonemap.shoulder': [0, 2],
   'grain.amount': [0, 0.5],

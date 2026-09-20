@@ -25,6 +25,8 @@ import {
   RIBBON_VERTICES,
   ribbonColour,
   ribbonRuns,
+  VIGNETTE_SOFTNESS,
+  vignetteLight,
   writePostUniform,
 } from './params'
 import type { FlowCover, PostParams } from './params'
@@ -303,8 +305,9 @@ describe('carrying the history along a flow', () => {
     const before = write(defaultPostParams(), features)
     const after = write(carrying(), features, 1920, 1080, coverOf(1920, 1080))
     expect(Array.from(after.slice(0, 28))).toEqual(Array.from(before.slice(0, 28)))
-    // The ribbon's two vec4s went on the end, past the flow block and the floor.
-    expect(POST_UNIFORM_FLOATS).toBe(44)
+    // The ribbon's two vec4s went on past the flow block and the floor, and
+    // the grade's went on past those: twelve vec4s, 192 bytes.
+    expect(POST_UNIFORM_FLOATS).toBe(48)
   })
 
   it('makes the carry vanish with no flow, no carry or the stage off', () => {
@@ -633,5 +636,111 @@ describe('the ribbon', () => {
         for (const value of out) expect(Number.isFinite(value)).toBe(true)
       }
     }
+  })
+})
+
+describe('the grade stage', () => {
+  const graded = (grade: Partial<PostParams['grade']> = {}) =>
+    mergePostParams(defaultPostParams(), { grade: { enabled: true, ...grade } })
+
+  it('is off by default, so no shipped look prints it', () => {
+    expect(defaultPostParams().grade.enabled).toBe(false)
+    expect(postSummary(defaultPostParams())).toBe('feedback bloom chroma tonemap grain')
+    expect(postSummary(graded())).toBe('feedback bloom chroma grade tonemap grain')
+    // Pass order: after the split and the bloom, before the tonemap.
+    expect(POST_STAGES.indexOf('grade')).toBeGreaterThan(POST_STAGES.indexOf('chromatic'))
+    expect(POST_STAGES.indexOf('grade')).toBeLessThan(POST_STAGES.indexOf('tonemap'))
+  })
+
+  it('has a lane for each number, and the stage switch is not one', () => {
+    const params = defaultPostParams()
+    expect(POST_LANES['grade.vignette'].read(params)).toBe(0)
+    expect(POST_LANES['grade.saturation'].read(params)).toBe(1)
+    POST_LANES['grade.vignette'].write(params, 0.4)
+    POST_LANES['grade.saturation'].write(params, 0.6)
+    expect(params.grade).toMatchObject({ vignette: 0.4, saturation: 0.6 })
+    expect('grade.enabled' in POST_LANES).toBe(false)
+  })
+
+  it('is neutral when it is on and nothing is said: no vignette, colour as it was', () => {
+    const on = write(graded())
+    expect([on[44], on[45]]).toEqual([0, 1])
+    // And off writes the same pair, so the shader needs no branch for it.
+    const off = write(defaultPostParams())
+    expect([off[44], off[45]]).toEqual([0, 1])
+    const stackOff = write(mergePostParams(graded({ vignette: 0.9 }), { enabled: false }))
+    expect([stackOff[44], stackOff[45]]).toEqual([0, 1])
+  })
+
+  it('goes past the ribbon’s block and leaves every float before it where it was', () => {
+    const features = packet({ dt: 1 / 90, time: 3, beatPulse: 0.3, keyHue: 0.2 })
+    const before = write(defaultPostParams(), features)
+    const after = write(graded({ vignette: 0.7, saturation: 0.25 }), features)
+    expect(Array.from(after.slice(0, 44))).toEqual(Array.from(before.slice(0, 44)))
+    expect(after[44]).toBeCloseTo(0.7, 6)
+    expect(after[45]).toBe(0.25)
+    expect(after[46]).toBe(VIGNETTE_SOFTNESS)
+  })
+
+  // A row may push a lane past its end, which is how an impact undoes what
+  // tension did, so the writer is where the shader is protected from it.
+  it('holds both numbers to 0 to 1 and never writes a NaN', () => {
+    const at = (grade: Partial<PostParams['grade']>) => write(graded(grade))
+    expect(at({ vignette: -0.4 })[44]).toBe(0)
+    expect(at({ vignette: 3 })[44]).toBe(1)
+    expect(at({ saturation: -1 })[45]).toBe(0)
+    // Above 1 the smallest channel of a saturated pixel goes negative and the
+    // composite's last max would clip it.
+    expect(at({ saturation: 1.6 })[45]).toBe(1)
+    expect([at({ vignette: Number.NaN })[44], at({ saturation: Number.NaN })[45]]).toEqual([0, 1])
+  })
+
+  describe('vignetteLight', () => {
+    it('touches nothing at 0, out to the corner', () => {
+      for (const distance of [0, 0.3, 0.7071, 1]) expect(vignetteLight(distance, 0)).toBe(1)
+    })
+
+    it('always leaves the centre lit', () => {
+      for (const vignette of [0, 0.25, 0.5, 0.75, 1]) expect(vignetteLight(0, vignette)).toBe(1)
+    })
+
+    // The point of the shape: a plain power of the distance spends the whole
+    // range before it shows. At a half the corners have to be plainly dark
+    // and the middle of an edge only just touched.
+    it('is already plain to see in the middle of the range', () => {
+      const corner = vignetteLight(1, 0.5)
+      const edge = vignetteLight(Math.SQRT1_2, 0.5)
+      expect(corner).toBeLessThan(0.35)
+      expect(edge).toBeGreaterThan(0.7)
+      expect(edge).toBeLessThan(0.95)
+    })
+
+    it('is closed down hard to the centre at 1', () => {
+      expect(vignetteLight(Math.SQRT1_2, 1)).toBeLessThan(0.05)
+      expect(vignetteLight(1, 1)).toBe(0)
+      // Which the corner reaches well before the end of the range.
+      expect(vignetteLight(1, 0.85)).toBeLessThan(0.02)
+    })
+
+    it('only ever closes as the number climbs, and only ever darkens outward', () => {
+      for (let distance = 0; distance <= 1; distance += 0.05) {
+        let last = 1
+        for (let vignette = 0; vignette <= 1; vignette += 0.05) {
+          const light = vignetteLight(distance, vignette)
+          expect(light).toBeLessThanOrEqual(last + 1e-12)
+          expect(light).toBeGreaterThanOrEqual(0)
+          last = light
+        }
+      }
+
+      for (let vignette = 0.1; vignette <= 1; vignette += 0.1) {
+        let last = 1
+        for (let distance = 0; distance <= 1; distance += 0.05) {
+          const light = vignetteLight(distance, vignette)
+          expect(light).toBeLessThanOrEqual(last + 1e-12)
+          last = light
+        }
+      }
+    })
   })
 })

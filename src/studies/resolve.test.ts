@@ -252,6 +252,92 @@ describe('the looks, blended', () => {
   })
 })
 
+// The grade is the first stage whose strength knob is neutral at 1 and not 0.
+// Fading its saturation toward 0 as a look leaves would drain the colour on
+// the way out, which is backwards, and the stage switching off at the end
+// would then snap the colour back.
+describe('a look with the grade, fading out against one without', () => {
+  // Squeeze at the top of a build: the frame closed to 0.6 and the colour at 0.45.
+  const fade = (presence: number) =>
+    resolveLive(
+      [
+        { id: 'squeeze', presence },
+        { id: 'clean-glass', presence: 1 - presence },
+      ],
+      STILL,
+      FEATURES,
+      1,
+      castFrame(),
+    ).post
+
+  const own = fade(1).grade
+
+  it('is the look’s own numbers while it is alone', () => {
+    expect(own.enabled).toBe(true)
+    expect(own.vignette).toBeCloseTo(0.6, 10)
+    expect(own.saturation).toBeCloseTo(0.45, 10)
+  })
+
+  it('never drains colour below what the look itself had, and heads for untouched', () => {
+    let last = own.saturation
+    for (const presence of [0.9, 0.75, 0.5, 0.25, 0.1, 0.01]) {
+      const grade = fade(presence).grade
+      expect(grade.enabled).toBe(true)
+      expect(grade.saturation, `at ${presence}`).toBeGreaterThan(last)
+      expect(grade.saturation, `at ${presence}`).toBeLessThanOrEqual(1)
+      // A fade toward 0 would put this at 0.2 at a half.
+      expect(grade.saturation, `at ${presence}`).toBeCloseTo(
+        presence * own.saturation + (1 - presence),
+        10,
+      )
+      last = grade.saturation
+    }
+  })
+
+  it('opens the vignette as the look leaves, to nothing', () => {
+    let last = own.vignette
+    for (const presence of [0.9, 0.5, 0.1, 0.01]) {
+      const grade = fade(presence).grade
+      expect(grade.vignette, `at ${presence}`).toBeLessThan(last)
+      expect(grade.vignette, `at ${presence}`).toBeCloseTo(presence * own.vignette, 10)
+      last = grade.vignette
+    }
+  })
+
+  it('does not snap when the stage switches off', () => {
+    const nearly = fade(0.01).grade
+    const gone = fade(0).grade
+    expect(gone.enabled).toBe(false)
+    // Off, the numbers are the neutral ones, and the step to them from the
+    // last frame it was on is the size of one percent of the look, not of it.
+    expect(gone.saturation).toBe(1)
+    expect(gone.vignette).toBe(0)
+    expect(1 - nearly.saturation).toBeLessThan(0.01)
+    expect(nearly.vignette).toBeLessThan(0.01)
+  })
+
+  // The other way round is the ordinary case, and it must not have changed:
+  // a stage whose neutral is 0 still thins to 0 and not toward anything else.
+  it('leaves the strength knobs whose neutral is 0 fading to nothing, as they did', () => {
+    const out = resolveLive(
+      [
+        { id: 'warm-soft', presence: 0.5 },
+        { id: 'squeeze', presence: 0.5 },
+      ],
+      STILL,
+      FEATURES,
+      0,
+      castFrame(),
+    ).post
+    expect(out.grain.enabled).toBe(true)
+    expect(out.chromatic.enabled).toBe(true)
+    // Squeeze has neither, so warm-soft's are thinned by half and not averaged
+    // with squeeze's resting numbers.
+    expect(out.chromatic.amount).toBeCloseTo(0.5 * alone('warm-soft').chromatic.amount, 10)
+    expect(out.grain.amount).toBeCloseTo(0.5 * alone('warm-soft').grain.amount, 10)
+  })
+})
+
 describe('resolveLive', () => {
   it('holds two flows and two looks at once, which a cast cannot say', () => {
     const frame = resolveLive(

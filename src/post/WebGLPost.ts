@@ -15,17 +15,18 @@ void main() {
   uv = p;
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`
-// The first nine of the uniform's eleven vec4s. The eighth is the flow block
-// and nothing on this path solves a velocity field, so it is uploaded and never
-// read; the ninth is the floor, which the feedback pass below does use. The
-// last two are the ribbon's, which this path does not draw, so they are never
-// declared here. `data` uploads as many of them as the program it belongs to
-// declares live.
+// The uniform's twelve vec4s. The eighth is the flow block and nothing on this
+// path solves a velocity field, so it is uploaded and never read; the ninth is
+// the floor, which the feedback pass below does use. The tenth and eleventh
+// are the ribbon's, which this path does not draw, so nothing reads them. The
+// last is the grade, which only the composite reads. `data` uploads as many of
+// them as the program it belongs to declares live, which is the highest one it
+// reads, so the feedback pass sends nine and the composite all twelve.
 const COMMON = `#version 300 es
 precision highp float;
 in vec2 uv;
 out vec4 result;
-uniform vec4 post[9];
+uniform vec4 post[12];
 uniform sampler2D source;
 `
 const BRIGHT = `
@@ -89,6 +90,11 @@ void main() {
             + texture(bloom1, uv).rgb * post[3].y
             + texture(bloom2, uv).rgb * post[3].z;
   colour += glow * post[2].z;
+  // The grade, as post.composite.wgsl has it: the vignette, then the colour
+  // scaled about its luminance, both exact copies at the neutral numbers.
+  float inner = 1.0 - post[11].x;
+  colour *= 1.0 - smoothstep(inner, inner + post[11].z, length(uv - 0.5) * 1.4142136);
+  colour = mix(vec3(dot(colour, vec3(0.2126, 0.7152, 0.0722))), colour, post[11].y);
   colour *= post[5].x;
   float shoulder = post[5].y;
   float headroom = max(1.0 - shoulder, 0.0001);
@@ -124,7 +130,8 @@ type Pass = {
  * no compute here to solve a fluid with, so the feedback pass carries nothing
  * along a flow; `feedback.carry` reads as zero whatever a preset asks for.
  * `feedback.floor` and `feedback.ceiling` need no flow, so both apply here
- * exactly as they do on the WebGPU path. The ribbon is skipped: it wants the
+ * exactly as they do on the WebGPU path, and so does the grade, which is two
+ * lines of the composite. The ribbon is skipped: it wants the
  * analyser's waveform and a strip drawn into the scene's target, and this path
  * has neither. A preset that turns it on still draws, without the line, and
  * nothing here reads or throws on its numbers.

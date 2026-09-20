@@ -1,6 +1,7 @@
 // The last pass: chromatic aberration on the way in, the three blurred bloom
-// levels added, then the tonemap and the grain. This is the only pass that
-// writes the swap chain, so it is the only one that has to end inside 0 to 1.
+// levels added, then the grade, the tonemap and the grain. This is the only
+// pass that writes the swap chain, so it is the only one that has to end
+// inside 0 to 1.
 
 @group(0) @binding(0) var<uniform> post: PostParams;
 @group(0) @binding(1) var samp: sampler;
@@ -35,6 +36,22 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
   glow += textureSample(bloom1, samp, in.uv).rgb * post.weights.y;
   glow += textureSample(bloom2, samp, in.uv).rgb * post.weights.z;
   colour += glow * post.bloom.z;
+
+  // The grade sits after the bloom, so the glow closes in with the frame, and
+  // before the tonemap, so the tonemap still bends whatever the vignette
+  // leaves over 1. The clear zone reaches the corner at a vignette of 0 and
+  // the middle at 1; `vignetteLight` in post/params.ts is this shape, stated
+  // so it can be tested. Distance is 1 at a corner. Neutral numbers make this
+  // an exact copy: the smoothstep is 0 out to the corner and the mix takes
+  // all of the colour.
+  let across = length(centred) * 1.4142136;
+  let inner = 1.0 - post.grade.x;
+  colour *= 1.0 - smoothstep(inner, inner + post.grade.z, across);
+  // Scaled about the pixel's own luminance and not clamped: a channel that
+  // goes down goes down with the others, so the hue is thinned, not bent. It
+  // cannot go below zero because the saturation is held to 0 to 1.
+  let luma = dot(colour, vec3<f32>(0.2126, 0.7152, 0.0722));
+  colour = mix(vec3<f32>(luma), colour, post.grade.y);
 
   // A shoulder rather than a curve over the whole range: under it nothing
   // changes, so the field keeps the brightness PR #56 tuned it to, and above

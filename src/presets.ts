@@ -42,6 +42,7 @@ export {
   isImplId,
   isImplKnob,
   LOOK_KNOBS,
+  LOOK_NEUTRAL,
   LOOK_STAGES,
   LOOK_STRENGTH_KNOBS,
   RIBBON_KNOBS,
@@ -50,7 +51,7 @@ export {
 export { CHARACTER_AXES, COSTS, MOMENTS, STUDY_FIELDS, STUDY_KINDS, isLook } from './studies/types'
 export type { Cast, CastCanvas, CastOverride, CanvasKnob, PinnedCast } from './studies/cast'
 export type { CastFrame, KnobsAt, LiveCast, LiveStudy } from './studies/resolve'
-export type { ImplId, ImplKnob, LookStage, StreaksKnob } from './studies/impls'
+export type { ImplId, ImplKnob, LookStage, LookStrengthKnob, StreaksKnob } from './studies/impls'
 export type {
   Character,
   CharacterAxis,

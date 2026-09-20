@@ -75,6 +75,12 @@ const SAFE_POST: Record<PostKnob, readonly [number, number]> = {
   'bloom.intensity': [0, 1],
   'chromatic.amount': [0, 0.01],
   'chromatic.beat': [0, 0.02],
+  // Wider than what the grade takes, on purpose: a row may carry a lane past
+  // its end, which is how impact undoes what tension did, and the uniform
+  // holds the number to 0 to 1. Wide enough for that, tight enough to catch a
+  // row that runs away.
+  'grade.vignette': [-1, 1],
+  'grade.saturation': [0, 2],
   'tonemap.exposure': [0.6, 1.5],
   'tonemap.shoulder': [0, 0.98],
   'grain.amount': [0, 0.08],
@@ -118,7 +124,34 @@ function safeRange(impl: ImplId, knob: string): readonly [number, number] | unde
 }
 
 /** Light and colour: the three that may not climb when the music gets loud. */
-const INTENSITY_KNOBS = ['intensity', 'saturation', 'tonemap.exposure']
+const INTENSITY_KNOBS = ['intensity', 'saturation', 'grade.saturation', 'tonemap.exposure']
+
+/**
+ * The one way a full packet may end brighter than rest, and why. A full packet
+ * has `impact` in it, and `impact` is not a level: it is 1 for a frame and a
+ * third of that in 0.18 s, and a flash on the drop is what the study is for.
+ * The guard below does not skip these knobs. It takes `impact` out of the
+ * packet and holds the rest to rest as it does any other, and then holds what
+ * `impact` adds to the cap, which is the size of the flash.
+ */
+const LIFTS: Record<string, Record<string, { cap: number; reason: string }>> = {
+  'impact-flash': {
+    'tonemap.exposure': {
+      cap: 0.2,
+      reason: 'the flash on the drop, capped so that one is not violent; see looks.test.ts',
+    },
+  },
+  // Squeeze's `impact` rows are there to throw open what tension closed, each
+  // the mirror of a tension row. With nothing winding up there is nothing to
+  // undo, so the colour resolves past 1, and the cap is that mirror's size.
+  'squeeze': {
+    'grade.saturation': {
+      cap: 0.55,
+      reason:
+        'undoes what tension drained; the uniform writer clamps saturation at 1, so none of it shows',
+    },
+  },
+}
 
 /**
  * A knob whose light is born of tension, and the most it may reach at full
@@ -195,12 +228,16 @@ const ALLOWED: Record<string, Record<string, string>> = {
     colourDrift: 'the palette drifts on a clock of its own; the key moves where it drifts from',
   },
   'warm-soft': {
+    'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.beat':
       'the beat is already inside the stage: the split is amount + beat × beatPulse',
     'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
   },
   'clean-glass': {
+    'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
     'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
@@ -208,9 +245,27 @@ const ALLOWED: Record<string, Record<string, string>> = {
     'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
   },
   'hard-clean': {
+    'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.beat':
       'the beat is already inside the stage: the split is amount + beat × beatPulse',
+    'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
+    'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
+  },
+  'squeeze': {
+    'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
+    'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
+    'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
+    'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
+    'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
+  },
+  'impact-flash': {
+    'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
+    'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
+    'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
     'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
     'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
   },
@@ -339,6 +394,21 @@ describe('nothing a study draws is static', () => {
     }
   })
 
+  // The lifts are only worth having if they can fail either.
+  it('lets a study lift the light only by a knob it has, drives from impact and says why', () => {
+    for (const [id, knobs] of Object.entries(LIFTS)) {
+      const study = findStudy(id)
+      if (!study) throw new Error(`Expected ${id}`)
+      for (const [knob, lift] of Object.entries(knobs)) {
+        expect(
+          study.mapping.some((row) => row.to === knob && row.from === 'impact' && row.gain > 0),
+          `${id} may lift ${knob} and nothing lifts it from impact`,
+        ).toBe(true)
+        expect(lift.reason.length).toBeGreaterThan(20)
+      }
+    }
+  })
+
   // The allow list is only worth having if it can fail.
   it('notices a study that leaves a knob static with nothing said about it', () => {
     const ribbon = findStudy('ribbon')
@@ -370,8 +440,26 @@ describe('every study stays inside a safe range', () => {
     // build in it is.
     it(`${study.name}: a full packet is no brighter and no more saturated than rest`, () => {
       const out = at(study, FULL.packet, 0)
+      // The same packet without the one event in it, for a study whose lift
+      // is allowed to come from that event alone.
+      const noImpact = packetAt(1, 1)
+      noImpact[F.impact] = 0
+      const withoutImpact = at(study, noImpact, 0)
       for (const knob of INTENSITY_KNOBS) {
         if (!(knob in study.knobs)) continue
+        const lift = LIFTS[study.id]?.[knob]
+        if (lift) {
+          expect(withoutImpact[knob], `${study.id} ${knob} without impact`).toBeLessThanOrEqual(
+            resting(study, knob) + 1e-9,
+          )
+
+          expect(out[knob], `${study.id} ${knob} at a full packet`).toBeLessThanOrEqual(
+            resting(study, knob) + lift.cap + 1e-9,
+          )
+
+          continue
+        }
+
         expect(out[knob], `${study.id} ${knob} at a full packet`).toBeLessThanOrEqual(
           resting(study, knob) + 1e-9,
         )
@@ -385,10 +473,13 @@ describe('every study stays inside a safe range', () => {
       for (const knob of INTENSITY_KNOBS) {
         if (!(knob in study.knobs)) continue
         const built = BUILT_LIGHT[study.id]?.[knob]
+        // A full packet has `impact` in it, so a study allowed a lift from
+        // that event is allowed it here as well, and no more than its cap.
+        const lift = LIFTS[study.id]?.[knob]?.cap ?? 0
         expect(
           out[knob],
           `${study.id} ${knob} at a full packet and full tension`,
-        ).toBeLessThanOrEqual((built?.max ?? resting(study, knob)) + 1e-9)
+        ).toBeLessThanOrEqual((built?.max ?? resting(study, knob)) + lift + 1e-9)
       }
     })
   }

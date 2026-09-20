@@ -7,6 +7,7 @@ import {
   bloomSourceSize,
   defaultPostParams,
   feedbackStep,
+  freshWeight,
   mergePostParams,
   POST_UNIFORM_FLOATS,
   postIsActive,
@@ -182,6 +183,32 @@ describe('feedback per second', () => {
       return (step.amount * step.decay) ** fps
     }
     expect(gainAfterASecond(144)).toBeCloseTo(gainAfterASecond(60), 9)
+  })
+
+  it('settles a still image at the same brightness at any frame rate', () => {
+    // The sum of a constant frame under the trail is fresh / (1 - gain per frame).
+    const settled = (from: typeof feedback, fps: number) => {
+      const step = feedbackStep(from, 1 / fps)
+      return step.fresh / (1 - step.amount * step.decay)
+    }
+    const long = { ...feedback, amount: 1, decay: 0.97 }
+    for (const from of [feedback, long]) {
+      const wanted = 1 / (1 - from.amount * from.decay)
+      for (const fps of [30, 60, 144, 240]) expect(settled(from, fps)).toBeCloseTo(wanted, 6)
+    }
+    expect(feedbackStep(feedback, REFERENCE).fresh).toBeCloseTo(1, 9)
+  })
+
+  it('does not let a stalled frame flash the trail', () => {
+    const held = { ...feedback, amount: 1, decay: 1 }
+    expect(feedbackStep(held, 0.1).fresh).toBeLessThanOrEqual(2)
+    expect(feedbackStep(held, 1 / 120).fresh).toBeCloseTo(0.5, 6)
+  })
+
+  it('weights the new frame fully when the stage is off', () => {
+    const off = mergePostParams(defaultPostParams(), { feedback: { enabled: false } })
+    expect(freshWeight(off, packet({ dt: 1 / 144 }))).toBe(1)
+    expect(freshWeight(defaultPostParams(), packet({ dt: 1 / 144 }))).toBeLessThan(1)
   })
 
   it('reads a missing or bad step as one reference frame', () => {

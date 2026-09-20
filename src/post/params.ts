@@ -125,7 +125,16 @@ export type FeedbackStep = {
   decay: number
   zoom: number
   rotate: number
+  /** Weight on the frame the scene just drew, 1 at the reference rate. */
+  fresh: number
 }
+
+/**
+ * A long frame would weight the new frame several times over, and that flash
+ * then rides the trail for seconds. Two reference frames is 30 frames a
+ * second, below which the picture has bigger problems than its brightness.
+ */
+const MAX_FRESH_FRAMES = 2
 
 /**
  * Convert per-reference-frame feedback numbers to the step actually taken.
@@ -133,6 +142,14 @@ export type FeedbackStep = {
  * is what the shader multiplies, compounds like (amount x decay) ^ frames.
  * Zoom compounds the same way and rotation is linear in time, so two steps of
  * half the length land where one whole step does.
+ *
+ * Matching the decay is not enough on its own. The new frame is added at full
+ * weight every drawn frame, so a faster display adds more of them per second
+ * and a still image settles at 1 / (1 - gain per frame): 1.19 at 60 frames a
+ * second and 1.87 at 144 with the defaults, and far further apart once the
+ * gain is near 1. `fresh` scales the new frame so that sum comes out the same
+ * at any rate. It is (1 - gain ^ frames) / (1 - gain), which is 1 at the
+ * reference rate and tends to `frames` as the gain tends to 1.
  *
  * Pure and GPU free: it is the only place the frame rate enters the stack.
  */
@@ -145,13 +162,29 @@ export function feedbackStep(feedback: FeedbackParams, dt: number): FeedbackStep
     const safe = Math.max(base, 0)
     return Math.min(safe ** frames, Math.max(safe, 1))
   }
+  const amount = keep(feedback.amount)
+  const decay = keep(feedback.decay)
+  const gain = Math.min(Math.max(feedback.amount, 0) * Math.max(feedback.decay, 0), 1)
+  const counted = Math.min(frames, MAX_FRESH_FRAMES)
+  const fresh = 1 - gain < 1e-6 ? counted : (1 - gain ** counted) / (1 - gain)
   return {
-    amount: keep(feedback.amount),
-    decay: keep(feedback.decay),
+    amount,
+    decay,
+    fresh,
     // The shader divides by the zoom, so it never reaches zero or goes negative.
     zoom: Math.max(feedback.zoom, 0.001) ** frames,
     rotate: feedback.rotate * frames,
   }
+}
+
+/**
+ * The weight the feedback pass puts on the frame the scene just drew. It is
+ * a blend constant and not a uniform float, because the scene is already in
+ * the target when the pass runs and only the blend can reach it.
+ */
+export function freshWeight(params: PostParams, features: Float32Array): number {
+  if (!stageEnabled(params, 'feedback')) return 1
+  return feedbackStep(params.feedback, features[F.dt] ?? 0).fresh
 }
 
 /** Floats in the shared uniform; PostParams in post.common.wgsl must match. */

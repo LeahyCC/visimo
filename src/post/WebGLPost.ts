@@ -1,6 +1,7 @@
 import {
   BLOOM_LEVELS,
   bloomLevelSize,
+  freshWeight,
   POST_UNIFORM_FLOATS,
   stageEnabled,
   writePostUniform,
@@ -175,7 +176,10 @@ export class WebGLPost {
     if (this.historyReady && stageEnabled(params, 'feedback')) {
       gl.enable(gl.BLEND)
       gl.blendEquation(gl.FUNC_ADD)
-      gl.blendFunc(gl.ONE, gl.ONE)
+      // The constant weights the frame already in the target; see feedbackStep.
+      const fresh = freshWeight(params, features)
+      gl.blendColor(fresh, fresh, fresh, 1)
+      gl.blendFunc(gl.ONE, gl.CONSTANT_COLOR)
       this.draw(feedback, previous, scene)
       gl.disable(gl.BLEND)
     }

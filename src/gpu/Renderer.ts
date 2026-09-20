@@ -62,6 +62,26 @@ export type AttachResult = 'ok' | 'unsupported' | 'cancelled'
 /** What a host asks the stage to draw: a fixed cast, or the song's own choice. */
 export type Live = PinnedCast | 'auto'
 
+/**
+ * What the demo's study bench hands the renderer. It is a development hook
+ * and not something a host needs: a host pins a cast or lets the director
+ * choose, and the bench wants to draw one study under conditions set by hand.
+ * It stands over both of them for as long as it is set and gives the picture
+ * back to whichever was there when it is cleared.
+ */
+export type Bench = {
+  /** Drawn instead of the pinned cast or the director's. Presences may be moved in place. */
+  live: LiveCast
+  /**
+   * Once per drawn frame, with the real `dt`, after the packet is written and
+   * before the director or the resolver reads it. Rows written here are what
+   * every study and the director see.
+   */
+  frame?: (packet: Float32Array, dt: number) => void
+  /** Samples for the ribbon in place of the analyser's, or null to use the analyser's. */
+  waveform?: () => Float32Array | null
+}
+
 /** A study whose implementation has nothing to hand it falls back to these. */
 const NO_KNOBS: Tuning = {}
 
@@ -191,6 +211,7 @@ class Renderer {
   private pinned: PinnedCast | null = castOrDefault(DEFAULT_CAST_ID)
   private pinnedLive: LiveCast = liveCast(castOrDefault(DEFAULT_CAST_ID))
   private standIn: LiveCast | null = null
+  private bench: Bench | null = null
   private live: LiveCast = this.pinnedLive
   private readonly resolved: CastFrame = castFrame()
   /**
@@ -433,6 +454,21 @@ class Renderer {
   }
 
   /**
+   * Draw what the study bench asks for, and let it write the packet, until it
+   * is cleared with null. The director is still stepped on that packet, so its
+   * reading follows the bench's sliders. A new cast empties the canvas the way
+   * a change of pinned cast does, so a study is judged on its own picture and
+   * not on the last one's trails; the same cast handed again is left alone.
+   */
+  setBench(bench: Bench | null) {
+    const changed = bench !== null && bench.live !== this.bench?.live
+    this.bench = bench
+    if (!bench || !changed) return
+    this.setLive(bench.live)
+    this.syncImpls(true)
+  }
+
+  /**
    * Where the character reader opens, for a host that knows the track: a
    * genre tag, or the values it saved from the last play of this one. It is a
    * starting point and nothing else, so it is taken until the first frame is
@@ -510,11 +546,11 @@ class Renderer {
 
   /**
    * Whether the WebGL2 path has anything to draw. A pinned cast has to hold
-   * an ink it can draw itself; with the director choosing there is always the
-   * stand-in below, so it always has.
+   * an ink it can draw itself; with the director choosing, or the bench
+   * drawing, there is always the stand-in below, so it always has.
    */
   private fallbackDraws() {
-    if (!this.pinned) return true
+    if (!this.pinned || this.bench) return true
     return this.liveInkStudies.some((entry) => entry.impl === FALLBACK_IMPL)
   }
 
@@ -527,7 +563,7 @@ class Renderer {
    * about it through `onFailure`.
    */
   private withoutCompute(live: LiveCast): LiveCast {
-    if (this.pinned) return live
+    if (this.pinned && !this.bench) return live
     const holds = live.studies.some(
       (entry) => entry.presence > 0 && findStudy(entry.id)?.impl === FALLBACK_IMPL,
     )
@@ -545,7 +581,9 @@ class Renderer {
   private buildInk(impl: ImplId): InkImpl | null {
     if (impl === 'fractal') return new Kaleidoscope()
     if (impl === 'ribbon')
-      return this.post ? new RibbonInk(this.post, () => this.client?.waveform ?? null) : null
+      return this.post
+        ? new RibbonInk(this.post, () => this.bench?.waveform?.() ?? this.client?.waveform ?? null)
+        : null
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.
@@ -800,6 +838,7 @@ class Renderer {
     }
     this.packet[F.time] = this.time
     this.packet[F.dt] = dt
+    this.bench?.frame?.(this.packet, dt)
 
     // The director is stepped whatever is drawing, because the character and
     // the moment are read under a pinned cast as much as under none: a host
@@ -808,7 +847,7 @@ class Renderer {
     this.stepped = true
     const chosen = this.director.step(this.packet, dt)
     this.reportCharacter(dt)
-    const shown = this.pinned ? this.pinnedLive : chosen
+    const shown = this.bench?.live ?? (this.pinned ? this.pinnedLive : chosen)
     const next = compatibility ? this.withoutCompute(shown) : shown
     // The director hands back one list of one set of entries and moves the
     // presences in place, so the lists and what is built are reconciled only

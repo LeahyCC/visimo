@@ -8,6 +8,7 @@ export default defineConfig({
   plugins: [react()],
   server: { port: 5174, strictPort: true },
   // Unit tests are for pure TypeScript and run in Node. Anything that needs a
-  // GPU has to be driven in a real browser by hand.
-  test: { root: '.', include: ['src/**/*.test.ts'], environment: 'node' },
+  // GPU has to be driven in a real browser by hand. The demo's bench keeps its
+  // pure parts under `demo/bench/`, so those are run too.
+  test: { root: '.', include: ['src/**/*.test.ts', 'demo/**/*.test.ts'], environment: 'node' },
 })

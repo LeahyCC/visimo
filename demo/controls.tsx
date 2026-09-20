@@ -7,10 +7,10 @@
  *
  * It tunes a pinned cast, which is what the five presets are now. Under Auto
  * there is no cast to tune, since the song is choosing one, so the knobs give
- * way to what the director is doing. The study bench the handoff asks for,
- * where one study is soloed against sliders for character and moment, is a
- * later card; this is the panel that was here, following the shape the cast
- * took.
+ * way to what the director is doing. The study bench, where one study is
+ * soloed against sliders for character and moment, is the other mode of this
+ * panel and lives in `bench/`; the styles and the two small components below
+ * are shared with it, which is why they are exported.
  */
 import { useEffect, useState } from 'react'
 
@@ -42,7 +42,11 @@ import {
 } from '../src/presets'
 import { KALEIDOSCOPE_RANGES } from '../src/scenes/kaleidoscope.params'
 
+export type Mode = 'presets' | 'bench'
+
 type Props = {
+  mode: Mode
+  onMode: (mode: Mode) => void
   cast: PinnedCast | 'auto'
   onCast: (cast: PinnedCast | 'auto') => void
   /** The last character `onCharacter` handed the page, which a host would save. */
@@ -137,17 +141,27 @@ function stepOf(span: number): number {
   return (times > 5 ? 10 : times > 2 ? 5 : times > 1 ? 2 : 1) * power
 }
 
-const panel = {
+export const panel = {
   overflowY: 'auto',
   padding: 16,
   borderLeft: '1px solid #ffffff1a',
   background: '#0c0e13',
 } as const
 
-const heading = { margin: '20px 0 8px', fontSize: 11, letterSpacing: 1, opacity: 0.6 } as const
-const small = { fontSize: 11, padding: '3px 6px', width: '100%' } as const
-const row = { display: 'grid', gridTemplateColumns: '110px 1fr 56px', gap: 8, alignItems: 'center' }
-const cell = { width: '100%', minWidth: 0 } as const
+export const heading = {
+  margin: '20px 0 8px',
+  fontSize: 11,
+  letterSpacing: 1,
+  opacity: 0.6,
+} as const
+export const small = { fontSize: 11, padding: '3px 6px', width: '100%' } as const
+export const row = {
+  display: 'grid',
+  gridTemplateColumns: '110px 1fr 56px',
+  gap: 8,
+  alignItems: 'center',
+}
+export const cell = { width: '100%', minWidth: 0 } as const
 
 function Slider({
   name,
@@ -202,7 +216,37 @@ const FALLBACK_INK: ImplId = 'fractal'
 
 const castNeedsGpu = (cast: Cast) => !cast.inks.some((id) => findStudy(id)?.impl === FALLBACK_INK)
 
+/**
+ * The two modes of the panel, presets and the study bench. It is the first
+ * thing in either, so the choice sits above the preset picker and is in the
+ * same place whichever one is showing.
+ */
+export function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (mode: Mode) => void }) {
+  return (
+    <div role="group" aria-label="Panel mode" style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
+      {(['presets', 'bench'] as const).map((entry) => (
+        <button
+          key={entry}
+          type="button"
+          aria-pressed={mode === entry}
+          style={{
+            ...small,
+            padding: '5px 6px',
+            textTransform: 'capitalize',
+            background: mode === entry ? '#26303d' : undefined,
+          }}
+          onClick={() => onMode(entry)}
+        >
+          {entry}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 export function Controls({
+  mode,
+  onMode,
   cast,
   onCast,
   saved,
@@ -263,6 +307,7 @@ export function Controls({
 
   return (
     <div style={panel}>
+      <ModeSwitch mode={mode} onMode={onMode} />
       <label style={row}>
         <span>preset</span>
         <select
@@ -387,7 +432,7 @@ export function Controls({
 }
 
 /** A number as a bar and a figure, which is every line of the panel below. */
-function Level({ name, value, span = 1 }: { name: string; value: number; span?: number }) {
+export function Level({ name, value, span = 1 }: { name: string; value: number; span?: number }) {
   return (
     <div style={{ ...row, margin: '2px 0' }}>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>

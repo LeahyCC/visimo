@@ -256,7 +256,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     falloff:
       'a plain zoom about the middle, which is what reads as travel; a peak nearer the middle would read as a burst',
     twist:
-      'a twist that varies with radius is the polar twist study, and the swirl is this one’s turn',
+      'a twist that varies with radius is the polar twist study, and the swirl is the turn this study has',
     ...UNUSED_CURL,
   },
   'curl-drift': {

@@ -28,6 +28,7 @@ export const IMPL_IDS = [
   'shards',
   'dust',
   'caustics',
+  'halo',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -142,6 +143,14 @@ export const CAUSTICS_KNOBS = ['intensity', 'scale', 'speed', 'sharpness', 'hueS
 export type CausticsKnob = (typeof CAUSTICS_KNOBS)[number]
 
 /**
+ * The halo's numbers. Their ranges and units are in `impls/halo.params.ts`.
+ * `hollow` moves the peak of the falloff out from the middle, so the glow can
+ * open into a ring, and `hue` is an offset from the ribbon's colour at the key.
+ */
+export const HALO_KNOBS = ['radius', 'hollow', 'softness', 'intensity', 'hue'] as const
+export type HaloKnob = (typeof HALO_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -218,6 +227,7 @@ export type ImplKnob =
   | StreaksKnob
   | DustKnob
   | CausticsKnob
+  | HaloKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -230,6 +240,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   shards: SHARD_KNOBS,
   dust: DUST_KNOBS,
   caustics: CAUSTICS_KNOBS,
+  halo: HALO_KNOBS,
   look: LOOK_KNOBS,
 }
 

@@ -4,3 +4,6 @@ demo/dist/
 .env
 demo/public/audio/Ecstasy Of Soul.m4a
 demo/public/audio/Ecstasy Of Soul.flac
+
+# The measurement harness reads a list of local files; nobody else needs it.
+scripts/*.local.*

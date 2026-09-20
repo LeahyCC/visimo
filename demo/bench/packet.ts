@@ -10,7 +10,9 @@
  * array it went in as.
  */
 import { F, IMPACT_DECAY_SECONDS } from '../../src/audio/FeatureExtractor'
+import { rowsForAxis } from '../../src/director/character'
 import { CHARACTER_AXES } from '../../src/presets'
+import type { CharacterAxis } from '../../src/presets'
 
 /**
  * `set` replaces the row. `raise` only lifts it, which is how an event the
@@ -40,18 +42,20 @@ export type BenchRow = (typeof BENCH_ROWS)[number]
 
 /**
  * Which packet rows a control owns. The character axes are read back out of
- * the packet by `director/character.ts`, so each of them writes the row that
+ * the packet by `director/character.ts`, so each of them writes the rows that
  * reader takes it from: drive is the mean of `pace` and `tempo`, so it writes
  * both and the reader gets it back whole. That means the drive slider also
  * sets `tempo` for a study that reads it, and the BPM beside it only sets the
- * beat's rate.
+ * beat's rate. What number goes in each row is that reader's business too,
+ * since it stretches a row onto the axis, so `rowsForAxis` works it back and
+ * a slider at a half still means a half of the axis.
  */
 export const ROWS_OF: Readonly<Record<BenchRow, readonly number[]>> = {
   drive: [F.pace, F.tempo],
   weight: [F.weight],
   tonality: [F.keyClarity],
   steadiness: [F.tempoConfidence],
-  hardness: [F.hardness],
+  hardness: [F.grit, F.hardness],
   tension: [F.tension],
   release: [F.release],
   rest: [F.rest],
@@ -74,6 +78,9 @@ export type Held = Readonly<Partial<Record<BenchRow, number>>>
 export const isBenchRow = (value: string): value is BenchRow =>
   (BENCH_ROWS as readonly string[]).includes(value)
 
+const isAxis = (value: BenchRow): value is CharacterAxis =>
+  (CHARACTER_AXES as readonly string[]).includes(value)
+
 const unit = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value)
 
 /**
@@ -87,7 +94,10 @@ export function overridesFor(held: Held, everything: boolean): RowOverride[] {
   for (const key of BENCH_ROWS) {
     const value = held[key] ?? (everything ? REST_LEVEL[key] : undefined)
     if (value === undefined) continue
-    for (const row of ROWS_OF[key]) out.push({ row, value: unit(value), mode: 'set' })
+    if (isAxis(key))
+      for (const entry of rowsForAxis(key, unit(value)))
+        out.push({ row: entry.row, value: entry.value, mode: 'set' })
+    else for (const row of ROWS_OF[key]) out.push({ row, value: unit(value), mode: 'set' })
   }
 
   return out

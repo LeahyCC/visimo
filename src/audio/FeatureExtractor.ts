@@ -52,6 +52,8 @@
  *   48     release         0..1      the payoff is happening; decays over a phrase
  *   49     rest            0..1      the floor has dropped away, over seconds
  *   50     impact          0..1      an event: 1 on the frame the payoff landed, then falling
+ *   51     grit            0..1      how dense and how unrelenting the sound between the
+ *                                    hits is, over twenty seconds
  *
  * Each band detects its own onsets, against its own flux and its own adaptive
  * threshold, which is what lets one emitter answer the kick and another the
@@ -93,6 +95,17 @@
  * `onsetStrength` cannot stand in for it, since that grades a hit against
  * the loudest recent one and is therefore relative to the track.
  *
+ * Row 51 belongs with row 46 and answers the half of "is this a hard track"
+ * that no hit can: a wall of distorted guitars has few sharp hits over its
+ * own sustained level, and reads softer on row 46 than a lo-fi beat does.
+ * `grit` is the sound between the hits instead, as three slow means. How
+ * much of the spectrum each frame's power covers, which is what distortion
+ * and noise do to it; what share of that power sits in the upper mids, where
+ * a guitar and a saw lead live; and how near its own recent peak the level
+ * sits, which is how much room the master left itself. Measured on real
+ * tracks rather than reasoned about, and `scripts/character-table.mjs` is
+ * how it was measured and how to measure it again.
+ *
  * Rows 47 to 50 are the moment. Rows 24 to 27 and 46 say what kind of track
  * this is; these say where in it we are, which is what lets the picture tell
  * the same story the song tells rather than reacting to the last few
@@ -109,7 +122,7 @@
  */
 import { TEMPO_MAX_BPM, TEMPO_MIN_BPM, TempoTracker } from './TempoTracker'
 
-export const PACKET_LENGTH = 51
+export const PACKET_LENGTH = 52
 
 /** The five bands, in order. Band `i` is packet slot `i`. */
 export const BAND_NAMES = ['sub', 'bass', 'lowMid', 'highMid', 'treble'] as const
@@ -175,6 +188,7 @@ export const F = {
   release: 48,
   rest: 49,
   impact: 50,
+  grit: 51,
 } as const
 
 export type BandSpec = {
@@ -421,6 +435,39 @@ const HOLD_HARD = 0.9
 // a log scale, since the two ends are a decade apart and not a difference.
 const SPREAD_TONAL = 0.003
 const SPREAD_BROAD = 0.035
+// `grit` is the sound between the hits rather than the hits, so it is three
+// slow means and a combination of them, and these are the ends of each mean.
+// Every one was measured over 30 to 70 seconds of twenty tracks with
+// `scripts/character-table.mjs`, and the tracks at each end are named.
+//
+// How much of the spectrum the frame's power covers, the same ratio the
+// hardness of a hit reads but taken over every frame: Christian Loffler 0.02
+// and Wilco 0.03 at the sparse end, Pendulum 0.26 and Subtronics 0.19 at the
+// dense one.
+const GRIT_SPARSE = 0.03
+const GRIT_DENSE = 0.22
+// What share of the span's power sits in the upper mids, which is where a
+// distorted guitar and a saw lead live and where a pad and an upright bass
+// do not: Wilco 0.008 and Christian Loffler 0.006 against August Burns Red
+// 0.32 and Subtronics 0.37.
+const GRIT_THIN = 0.03
+const GRIT_FULL = 0.33
+// How near its own recent peak the level sits, which is `energy`: a
+// brickwalled master holds 0.88 to 0.94 and an orchestral recording 0.49.
+// The track's own range and never an absolute level, because a host's volume
+// control must not change what kind of track this is.
+const GRIT_DYNAMIC = 0.5
+const GRIT_FLAT = 0.85
+// What the texture is worth before the dynamic range is taken into account.
+// A hard track that breathes is still a hard track, so the range may take
+// away two fifths of the reading and no more.
+const GRIT_TEXTURE = 0.6
+// The three are averaged over this long, which is what `weight` averages its
+// centroid over. Slow, because the question is what kind of track this is,
+// and no slower: the character smooths it again over fifteen seconds, and at
+// twenty the axis was still climbing a minute into a track while `settled`
+// had long since said the reading could be trusted.
+const GRIT_MS = 10000
 // How far a hit lifted the mix above its bed, as a share of the window's
 // peak. Under the first the rise is too small a part of what is sounding for
 // its shape to mean anything, and the hit counts as soft rather than as
@@ -1614,6 +1661,8 @@ export type Character = {
   tempo: number
   /** How abrupt and how saturated this track's hits are. 0.5 before any. */
   hardness: number
+  /** How dense and how unrelenting the sound between the hits is. */
+  grit: number
 }
 
 /** What one frame hands the song: the whole-spectrum numbers it is summarised by. */
@@ -1633,6 +1682,13 @@ export type Frame = {
    * over the bin count for a single partial.
    */
   spread: number
+  /**
+   * The packet's own `energy`: the level over its recent peak, which is how
+   * much room this passage is leaving itself. `grit` reads it.
+   */
+  energy: number
+  /** What share of the span's power sits in the upper mids. */
+  upperMid: number
 }
 
 /**
@@ -1666,6 +1722,15 @@ export class Song {
   private brightnessSeen = false
   private readonly ramp = new Envelope(TEMPO_RAMP_MS, TEMPO_RAMP_MS)
   private readonly hardness = new Hardness()
+  /**
+   * The three slow means `grit` is made of. Each is taken before the
+   * combination rather than after it, so one noisy frame moves the reading by
+   * a twenty-thousandth of itself instead of by the whole shape of the curve.
+   */
+  private readonly density = new Envelope(GRIT_MS, GRIT_MS)
+  private readonly bite = new Envelope(GRIT_MS, GRIT_MS)
+  private readonly flatness = new Envelope(GRIT_MS, GRIT_MS)
+  private gritSeen = false
   private elapsed = 0
 
   /**
@@ -1678,7 +1743,7 @@ export class Song {
    * anything with a kick and a hat in it.
    */
   step(frame: Frame, dt: number): Character {
-    const { onset, loudness, brightness, bpm, spread } = frame
+    const { onset, loudness, brightness, bpm, spread, energy, upperMid } = frame
     this.elapsed += dt
 
     // Hardness reads the raw RMS for the same reason swell does, and because
@@ -1733,6 +1798,23 @@ export class Song {
 
     const weight = this.brightnessSeen ? 1 - this.brightness.value : 0.5
 
+    // Grit is only stepped on frames with something in them, and the first of
+    // those is taken outright, for the reason the centroid above is: a silent
+    // frame is not a track that has gone soft, and a mean that starts at zero
+    // would spend its first twenty seconds climbing out of one.
+    if (loudness >= QUIET) {
+      if (this.gritSeen) {
+        this.density.step(spread, dt)
+        this.bite.step(upperMid, dt)
+        this.flatness.step(energy, dt)
+      } else {
+        this.density.value = spread
+        this.bite.value = upperMid
+        this.flatness.value = energy
+        this.gritSeen = true
+      }
+    }
+
     // A bpm of 0 means the tracker has not settled; hold the ramp where it
     // is rather than dragging the scene down to nothing.
     const target = bpm > 0 ? clamp01((bpm - TEMPO_MIN_BPM) / (TEMPO_MAX_BPM - TEMPO_MIN_BPM)) : null
@@ -1744,7 +1826,29 @@ export class Song {
       weight,
       tempo,
       hardness,
+      grit: this.grit(),
     }
+  }
+
+  /**
+   * How dense and how unrelenting the sound itself is, which is the other
+   * half of what a listener calls a hard track and the half no hit can say.
+   *
+   * The density and the upper mids multiply rather than average, so a track
+   * has to do both: a cymbal wash is dense and lives above the mids, and a
+   * horn section fills the mids and is a handful of partials. The upper mids
+   * are worth twice the density because they are the cleaner of the two
+   * across real tracks, with the three metal tracks at 0.21 to 0.32 against
+   * hip hop at 0.13 and folk at 0.01, while the density puts hip hop and
+   * house within a hundredth of each other. The dynamic range then trims
+   * what is left, since a wall of guitars is also a mix with nowhere to go.
+   */
+  private grit(): number {
+    if (!this.gritSeen) return 0
+    const density = clamp01((this.density.value - GRIT_SPARSE) / (GRIT_DENSE - GRIT_SPARSE))
+    const bite = clamp01((this.bite.value - GRIT_THIN) / (GRIT_FULL - GRIT_THIN))
+    const held = clamp01((this.flatness.value - GRIT_DYNAMIC) / (GRIT_FLAT - GRIT_DYNAMIC))
+    return Math.cbrt(density * bite * bite) * (GRIT_TEXTURE + (1 - GRIT_TEXTURE) * held)
   }
 }
 
@@ -2250,6 +2354,10 @@ export class FeatureExtractor {
     // walking out reads as a low end that stayed.
     let lowSquares = 0
     let highSquares = 0
+    // The upper mids on their own, which is what `grit` reads. The high group
+    // below will not do: it folds in the treble, where a hat and a ride live
+    // and a distorted guitar does not.
+    let upperSquares = 0
     for (let band = 0; band < this.bands.length; band++) {
       const filter = this.filters[band]
       if (!filter) continue
@@ -2286,6 +2394,7 @@ export class FeatureExtractor {
       // mix that lives in the middle does not count as either end.
       if (band < 2) lowSquares += squares
       else if (band >= this.bands.length - 2) highSquares += squares
+      if (band === this.bands.length - 2) upperSquares = squares
       // The root mean square, which is what the energy in a band is; the mean
       // of the magnitudes would divide one bright partial by the whole band.
       const level = Math.sqrt(squares / total)
@@ -2380,7 +2489,15 @@ export class FeatureExtractor {
     // bins barely moves the flux of the whole spectrum; the global detector
     // is for broadband hits and the beat pulse the post stack reads.
     const song = this.song.step(
-      { onset: anyBand || whole.onset, loudness: rms, brightness, bpm: beat.bpm, spread },
+      {
+        onset: anyBand || whole.onset,
+        loudness: rms,
+        brightness,
+        bpm: beat.bpm,
+        spread,
+        energy: packet[F.energy] ?? 0,
+        upperMid: squares > 0 ? upperSquares / squares : 0,
+      },
       dt,
     )
     packet[F.pace] = song.pace
@@ -2388,6 +2505,7 @@ export class FeatureExtractor {
     packet[F.weight] = song.weight
     packet[F.tempo] = song.tempo
     packet[F.hardness] = song.hardness
+    packet[F.grit] = song.grit
 
     const harmony = this.harmony.step(dt)
     packet[F.keyHue] = harmony.keyHue

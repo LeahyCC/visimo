@@ -19,6 +19,7 @@
  * absent reads 0. An axis the catalogue says nothing about sits at 0.5, which
  * is no opinion rather than a weak one.
  */
+import { IMPL_SCENES } from './impls'
 import type { FlowStudy, InkStudy, LookStudy, Study } from './types'
 
 /**
@@ -365,3 +366,24 @@ export const findStudy = (id: string): Study | undefined => BY_ID.get(id)
 
 export const studiesOfKind = (kind: Study['kind']): readonly Study[] =>
   STUDIES.filter((study) => study.kind === kind)
+
+/**
+ * What the canvas's `data-scene` prints for a set of live inks. A cast has no
+ * single scene, so it is the first of them whose implementation was one,
+ * which keeps the five pinned casts printing exactly what their presets did:
+ * the dye is `fluid` and the fractal is `kaleidoscope`. A cast whose inks were
+ * never scenes, a ribbon on its own, prints that ink's implementation instead,
+ * so the line still says what is drawing.
+ */
+export function sceneOf(ids: readonly string[]): string {
+  let first = ''
+  for (const id of ids) {
+    const study = findStudy(id)
+    if (!study || study.kind !== 'ink') continue
+    const scene = IMPL_SCENES[study.impl]
+    if (scene) return scene
+    if (!first) first = study.impl
+  }
+
+  return first
+}

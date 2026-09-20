@@ -7,9 +7,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { attachAudio, resumeAudio } from '../src/audio'
 import { DEFAULT_FLUID_SIZE } from '../src/catalog'
-import type { SceneId } from '../src/catalog'
-import { firstPresetOf, presetOrDefault } from '../src/presets'
-import type { Preset } from '../src/presets'
+import { castOrDefault } from '../src/presets'
+import type { PinnedCast } from '../src/presets'
 import VisualizerStage from '../src/Visualizer'
 import { Controls } from './controls'
 
@@ -44,8 +43,7 @@ const elapsed = (seconds: number) =>
     .padStart(2, '0')}`
 
 export default function App() {
-  const [preset, setPreset] = useState<Preset>(() => presetOrDefault('prism'))
-  const [scene, setScene] = useState<SceneId>('kaleidoscope')
+  const [cast, setCast] = useState<PinnedCast>(() => castOrDefault('prism'))
   const [backend, setBackend] = useState<'webgpu' | 'webgl2'>('webgpu')
   const [fluidSize, setFluidSize] = useState(DEFAULT_FLUID_SIZE)
   const [hud, setHud] = useState(false)
@@ -107,24 +105,23 @@ export default function App() {
             <button type="button" onClick={() => setUnsupported(false)}>
               Retry graphics
             </button>
-            {scene !== 'kaleidoscope' && (
+            {/* Prism is the one cast the WebGL2 path can draw. */}
+            {cast.id !== 'prism' && (
               <button
                 type="button"
                 onClick={() => {
-                  setPreset(firstPresetOf('kaleidoscope'))
-                  setScene('kaleidoscope')
+                  setCast(castOrDefault('prism'))
                   setUnsupported(false)
                 }}
               >
-                Open kaleidoscope
+                Open Prism
               </button>
             )}
           </div>
         ) : (
           <VisualizerStage
             hud={hud}
-            preset={preset}
-            scene={scene}
+            preset={cast}
             fluidSize={fluidSize}
             onUnsupported={() => setUnsupported(true)}
             onBackend={setBackend}
@@ -230,16 +227,8 @@ export default function App() {
       </div>
       {!expanded && (
         <Controls
-          preset={preset}
-          onPreset={(next) => {
-            setPreset(next)
-            setScene(next.scene)
-          }}
-          scene={scene}
-          onScene={(next) => {
-            setScene(next)
-            setPreset(firstPresetOf(next))
-          }}
+          cast={cast}
+          onCast={setCast}
           fluidSize={fluidSize}
           onFluidSize={setFluidSize}
           hud={hud}

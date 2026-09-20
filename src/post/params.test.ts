@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { PRESETS } from '../presets/index'
 import { paletteAt, visibleExtent } from '../scenes/fluid.params'
+import { CASTS } from '../studies/casts/index'
+import { castFrame, resolveCast } from '../studies/resolve'
 import {
   BLOOM_LEVELS,
   bloomLevelSize,
@@ -615,10 +616,12 @@ describe('the ribbon', () => {
     expect(RIBBON_POINTS).toBeGreaterThanOrEqual(100)
   })
 
-  it('writes a whole, finite uniform for every shipped preset at any canvas', () => {
-    // The WebGL2 path writes the same uniform and skips the ribbon, so a
-    // preset that turns it on must not put anything in it that could throw.
-    for (const preset of PRESETS)
+  it('writes a whole, finite uniform for every shipped cast at any canvas', () => {
+    // The WebGL2 path writes the same uniform and skips the ribbon, so a cast
+    // that turns it on must not put anything in it that could throw.
+    const features = packet({ keyHue: 0.4, dt: 1 / 90 })
+    for (const cast of CASTS) {
+      const { post } = resolveCast(cast, features, 0, castFrame())
       for (const [width, height] of [
         [1920, 1080],
         [1, 1],
@@ -626,8 +629,9 @@ describe('the ribbon', () => {
         [600, 1400],
       ] as const) {
         const out = new Float32Array(POST_UNIFORM_FLOATS)
-        writePostUniform(preset.postParams, packet({ keyHue: 0.4, dt: 1 / 90 }), width, height, out)
+        writePostUniform(post, features, width, height, out)
         for (const value of out) expect(Number.isFinite(value)).toBe(true)
       }
+    }
   })
 })

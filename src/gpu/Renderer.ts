@@ -1,10 +1,21 @@
 /**
- * The one renderer. It owns the device, the feature buffer, whichever scene
- * is chosen with its state, the flow a preset asks for when its scene solves
- * none, and the post stack, and outlives every stage. A stage
- * hands it a canvas to draw on and takes it back on unmount; the popout
- * portals a fresh stage into another document, so the canvas and its context
- * are the only things made per mount.
+ * The one renderer. It owns the device, the feature buffer, the post stack,
+ * and one implementation per study that is live, and it outlives every stage.
+ * A stage hands it a canvas to draw on and takes it back on unmount; the
+ * popout portals a fresh stage into another document, so the canvas and its
+ * context are the only things made per mount.
+ *
+ * It draws a cast rather than a scene. Every frame the studies layer turns
+ * whatever is live into a set of knobs per study id and the whole post stack,
+ * and this hands each implementation its own:
+ *
+ *   flows simulate ─► one velocity field ─► clear ─► inks, in cast order ─► post stack
+ *
+ * A study at presence 0 is not in the live list at all, so it is not
+ * resolved, not updated, not encoded and not even constructed. What is
+ * constructed is reconciled whenever what is live changes, and an
+ * implementation is handed on to another study wanting the same one rather
+ * than rebuilt, so Plume to Wash keeps the fluid it has already stirred.
  *
  * The animation loop belongs to the window the canvas is in: the tab's
  * requestAnimationFrame stops when the tab is hidden, and a popout window
@@ -14,28 +25,41 @@ import { audioGraph } from '../audio/AudioGraph'
 import { FeatureClient } from '../audio/FeatureClient'
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { Hud } from '../hud/Hud'
-import { defaultPostParams, mergePostParams, postSummary } from '../post/params'
+import { FlowBlend } from '../impls/FlowBlend'
+import type { LiveFlow } from '../impls/FlowBlend'
+import { DyeInk, FluidFlow } from '../impls/fluid'
+import { RibbonInk } from '../impls/RibbonInk'
+import { mergePostPatch, patchPostParams, postSummary } from '../post/params'
 import type { PostParams, PostPatch } from '../post/params'
 import { PostStack, SCENE_FORMAT } from '../post/PostStack'
-import { needsFlowSolver } from '../presets/flow'
-import { DEFAULT_PRESET_ID, presetOrDefault } from '../presets/index'
 import type { Tuning } from '../presets/knobs'
-import { resolvePost, resolveScene } from '../presets/resolve'
-import type { Preset } from '../presets/types'
-import { DEFAULT_FLUID_SIZE, DEFAULT_SCENE } from '../scenes/catalog'
-import type { SceneId } from '../scenes/catalog'
-import { Fluid } from '../scenes/Fluid'
+import { DEFAULT_FLUID_SIZE } from '../scenes/catalog'
+import type { FlowImpl, InkImpl } from '../scenes/Impl'
 import { Kaleidoscope } from '../scenes/Kaleidoscope'
 import { KaleidoscopeMotion } from '../scenes/kaleidoscope.params'
 import { KaleidoscopeWebGL } from '../scenes/KaleidoscopeWebGL'
-import type { Scene } from '../scenes/Scene'
+import type { SceneContext } from '../scenes/Scene'
+import type { PinnedCast } from '../studies/cast'
+import { castOrDefault, DEFAULT_CAST_ID } from '../studies/casts/index'
+import type { ImplId } from '../studies/impls'
+import { findStudy, sceneOf } from '../studies/registry'
+import { castFrame, liveCast, resolveLive } from '../studies/resolve'
+import type { CastFrame, LiveCast } from '../studies/resolve'
 import { acquireGpu, configureCanvas, onGpuLost } from './Device'
 import type { Gpu, GpuInfo } from './Device'
 
 export type AttachResult = 'ok' | 'unsupported' | 'cancelled'
 
-/** A flow whose preset names no knobs; the fluid falls back to its defaults. */
-const NO_TUNING: Tuning = {}
+/** A study whose implementation has nothing to hand it falls back to these. */
+const NO_KNOBS: Tuning = {}
+
+/** One built implementation, and which id built it, so it can be handed on. */
+type Held<T> = { impl: ImplId; object: T }
+
+/** A live study of one kind, kept so a frame walks it without allocating. */
+type LiveEntry = { id: string; impl: ImplId; presence: number }
+
+type Buildable = { init(context: SceneContext): void; dispose(): void }
 
 const describe = (info: GpuInfo) =>
   [info.vendor, info.architecture, info.device, info.description].filter(Boolean).join(' ') ||
@@ -46,14 +70,11 @@ class Renderer {
   private compatibility: KaleidoscopeWebGL | null = null
   private readonly compatibilityMotion = new KaleidoscopeMotion()
   private unwatchContext: (() => void) | null = null
-  private scene: Scene | null = null
-  /**
-   * The fluid a preset asks for when its scene solves no field of its own. It
-   * is never drawn: the renderer steps it before the scene renders and hands
-   * its velocity to the post stack in place of the scene's. A Fluid scene
-   * needs none, since it already offers the field it is solving.
-   */
-  private flowSolver: Fluid | null = null
+  /** Keyed by study id; the order a frame walks them in is the live list's. */
+  private readonly flows = new Map<string, Held<FlowImpl>>()
+  private readonly inks = new Map<string, Held<InkImpl>>()
+  private readonly blend = new FlowBlend()
+  private blendReady = false
   private post: PostStack | null = null
   private client: FeatureClient | null = null
   private canvas: HTMLCanvasElement | null = null
@@ -70,16 +91,21 @@ class Renderer {
   private frame = 0
   private last = 0
   private time = 0
-  private sceneId: SceneId = DEFAULT_SCENE
   private fluidSize = DEFAULT_FLUID_SIZE
   private readonly packet = new Float32Array(PACKET_LENGTH)
-  // The preset it draws with, the object its mapping is resolved into each
-  // frame, and the stack the post lanes are written into. All three belong to
-  // the singleton, so the popout round trip keeps the preset.
-  private preset: Preset = presetOrDefault(DEFAULT_PRESET_ID)
-  private readonly tuning: Record<string, number> = {}
-  private base: PostParams = defaultPostParams()
-  private readonly live: PostParams = defaultPostParams()
+  // The cast it draws with, what is live of it this frame, and the object the
+  // studies layer resolves into. All three belong to the singleton, so the
+  // popout round trip keeps the picture.
+  private cast: PinnedCast = castOrDefault(DEFAULT_CAST_ID)
+  private live: LiveCast = liveCast(this.cast)
+  private readonly resolved: CastFrame = castFrame()
+  /** The development handle's override, over whatever the cast resolved to. */
+  private postPatch: PostPatch | null = null
+  // The live list split by kind, rebuilt only when what is live changes, so a
+  // frame walks studies without allocating a list per pass.
+  private readonly liveFlowStudies: LiveEntry[] = []
+  private readonly liveInkStudies: LiveEntry[] = []
+  private readonly liveFlows: LiveFlow[] = []
   private frameMs = 16.7
   private drawWidth = 1
   private drawHeight = 1
@@ -89,8 +115,28 @@ class Renderer {
   private readonly unwatchGpu: () => void
 
   constructor() {
-    this.base = mergePostParams(this.preset.postParams, {})
+    this.setLive(this.live)
     this.unwatchGpu = onGpuLost(() => this.recover())
+  }
+
+  /**
+   * What is live from now on. A pinned cast goes through here with every
+   * presence at 1, and the director card will call it once a frame with the
+   * fades it is running; nothing else in the renderer knows the difference.
+   */
+  private setLive(next: LiveCast) {
+    this.live = next
+    this.liveFlowStudies.length = 0
+    this.liveInkStudies.length = 0
+    for (const entry of next.studies) {
+      // A study at presence 0 is not drawn, not resolved and not built.
+      if (entry.presence <= 0) continue
+      const study = findStudy(entry.id)
+      if (!study) continue
+      const held = { id: entry.id, impl: study.impl, presence: entry.presence }
+      if (study.kind === 'flow') this.liveFlowStudies.push(held)
+      else if (study.kind === 'ink') this.liveInkStudies.push(held)
+    }
   }
 
   /**
@@ -109,7 +155,7 @@ class Renderer {
     const gpu = await acquireGpu()
     if (this.disposed || this.attachment !== attachment) return 'cancelled'
     this.attaching = null
-    if (!gpu && this.sceneId !== 'kaleidoscope') return 'unsupported'
+    if (!gpu && !this.fallbackDraws()) return 'unsupported'
     // Context types cannot change on an existing canvas. The stage replaces
     // a former WebGPU canvas before retrying through WebGL.
     if (!gpu && canvas.dataset.backend === 'webgpu') return 'unsupported'
@@ -120,20 +166,17 @@ class Renderer {
         this.post = new PostStack()
         this.post.init(gpu.device, gpu.format)
       }
-      this.post.useParams(this.live)
-      if (!this.scene) this.buildScene()
-      // A kept scene comes back without one, so the flow is reconciled here
-      // as well as in `buildScene`; it is a no-op when nothing changed.
-      this.syncFlow()
+      this.post.useParams(this.resolved.post)
+      this.syncImpls()
       const context = configureCanvas(gpu, canvas)
       if (!context) return 'unsupported'
       this.context = context
       canvas.dataset.adapter = describe(gpu.info)
       canvas.dataset.backend = 'webgpu'
     } else {
-      // WebGL2 has no compute, so nothing can solve a flow there. A preset
-      // that asks for one still draws; its feedback is the zoom and turn.
-      this.releaseFlow()
+      // WebGL2 has no compute and one program, so every study but the fractal
+      // is skipped there and the cast draws with what is left.
+      this.releaseImpls()
       this.compatibility = new KaleidoscopeWebGL(canvas, this.compatibilityMotion)
       canvas.dataset.adapter = this.compatibility.adapter
       canvas.dataset.backend = 'webgl2'
@@ -165,7 +208,7 @@ class Renderer {
     return 'ok'
   }
 
-  /** Stop drawing on this canvas. The device and the scene's state stay. */
+  /** Stop drawing on this canvas. The device and every implementation stay. */
   detach(canvas: HTMLCanvasElement) {
     if (this.attaching === canvas) {
       this.attaching = null
@@ -197,9 +240,7 @@ class Renderer {
     this.attaching = null
     this.unwatchGpu()
     if (this.canvas) this.detach(this.canvas)
-    this.scene?.dispose()
-    this.scene = null
-    this.releaseFlow()
+    this.releaseImpls()
     this.post?.dispose()
     this.post = null
     this.client?.dispose()
@@ -213,124 +254,172 @@ class Renderer {
   }
 
   /**
-   * Change one or more post stages by hand, over whatever the preset asked
-   * for. The development handle uses this to switch stages off while frame
-   * times are measured; choosing a preset clears it, since a preset brings
-   * its own stack.
+   * Change one or more post stages by hand, over whatever the cast resolved
+   * to. The development handle uses this to switch stages off while frame
+   * times are measured; choosing a cast clears it, since a cast brings its
+   * own look.
    */
   setPost(patch: PostPatch) {
-    this.base = mergePostParams(this.base, patch)
+    this.postPatch = mergePostPatch(this.postPatch ?? {}, patch)
   }
 
-  /** What the stack is actually drawing with: the preset, modulated. */
+  /** What the stack is actually drawing with: the cast, modulated. */
   get postParams(): PostParams | null {
-    return this.compatibility ? this.live : (this.post?.params ?? null)
+    return this.compatibility ? this.resolved.post : (this.post?.params ?? null)
   }
 
   /**
-   * Draw with this preset: its scene numbers, its stack, and the mapping that
-   * says which feature drives which of them. The scene itself is switched by
-   * `setScene`, which the stage calls with the preset's own scene.
+   * Draw this pinned cast: its studies, their numbers and the canvas they
+   * draw on. A director will hand over a live cast of its own instead; this
+   * is that with every presence at 1.
    */
-  setPreset(preset: Preset) {
-    this.preset = preset
-    this.base = mergePostParams(preset.postParams, {})
-    // The stage sets the preset before the scene it names, so this runs
-    // twice on a change; building a flow is idempotent and the second call
-    // is the one that sees the pair the frame will actually draw with.
-    this.syncFlow()
+  setPreset(cast: PinnedCast) {
+    this.cast = cast
+    this.setLive(liveCast(cast))
+    this.postPatch = null
+    if (this.compatibility && !this.fallbackDraws()) {
+      this.onFailure?.()
+      return
+    }
+
+    this.syncImpls()
   }
 
   get presetId() {
-    return this.preset.id
+    return this.cast.id
   }
 
   setFluidSize(size: number) {
     this.fluidSize = size
-    if (this.scene instanceof Fluid) this.scene.setSize(size)
-    // A flow is a fluid on the same grid, so the one control moves both.
-    this.flowSolver?.setSize(size)
+    // One control, one grid: every fluid in the cast moves together.
+    for (const held of this.flows.values())
+      if (held.object instanceof FluidFlow) held.object.setSize(size)
   }
 
-  /** Swap the whole scene. The old one's buffers go with it. */
-  setScene(id: SceneId) {
-    if (id === this.sceneId) return
-    this.sceneId = id
-    if (this.compatibility && id !== 'kaleidoscope') {
-      this.onFailure?.()
-      return
+  /** Whether anything in the cast can be drawn without compute. */
+  private fallbackDraws() {
+    return this.liveInkStudies.some((entry) => entry.impl === 'fractal')
+  }
+
+  // Construction stays here so every implementation shares one device and one
+  // post stack, and so nothing in the studies layer has to import a shader.
+  private buildFlow(impl: ImplId): FlowImpl | null {
+    if (impl === 'fluid') return new FluidFlow(this.fluidSize)
+    return null
+  }
+
+  private buildInk(impl: ImplId): InkImpl | null {
+    if (impl === 'fractal') return new Kaleidoscope()
+    if (impl === 'ribbon')
+      return this.post ? new RibbonInk(this.post, () => this.client?.waveform ?? null) : null
+    if (impl === 'dye') {
+      // The dye draws the field a fluid flow is stirring, which is what the
+      // study's `requires` promises is in the cast beside it.
+      for (const held of this.flows.values())
+        if (held.object instanceof FluidFlow) return new DyeInk(held.object)
     }
-    if (this.gpu) this.buildScene()
-  }
 
-  // Build the chosen scene, dropping whatever was there. Scenes draw into the
-  // stack's floating-point texture, not the canvas, so their pipelines are
-  // built for that format.
-  private buildScene() {
-    const gpu = this.gpu
-    if (!gpu) return
-    this.scene?.dispose()
-    // A new scene starts with no trail behind it, so the field that carries
-    // that trail starts still as well.
-    this.releaseFlow()
-    this.post?.resetHistory()
-    this.scene = this.build()
-
-    this.scene.init({
-      device: gpu.device,
-      format: SCENE_FORMAT,
-      software: gpu.info.software,
-    })
-
-    this.syncFlow()
-    this.sizeScene()
-  }
-
-  // The scene and the post stack share one size, which a scene may hold below
-  // the canvas. Every post stage samples by uv, so the composite scales it up.
-  private sizeScene() {
-    const { canvas, scene } = this
-    if (!canvas || !scene) return
-    const shrink = Math.min(
-      1,
-      Math.sqrt((scene.maxPixels ?? Infinity) / (canvas.width * canvas.height)),
-    )
-    this.drawWidth = Math.max(1, Math.round(canvas.width * shrink))
-    this.drawHeight = Math.max(1, Math.round(canvas.height * shrink))
-    scene.resize(this.drawWidth, this.drawHeight)
-    // The flow is cropped to the same band the scene draws, since the post
-    // stack reads it through the canvas uv the scene wrote.
-    this.flowSolver?.resize(this.drawWidth, this.drawHeight)
+    return null
   }
 
   /**
-   * Keep the separate flow in step with the preset and the scene. A fluid
-   * flow under the Fluid scene is the scene itself, and WebGL2 has no compute
-   * at all, so both leave the picture with whatever flow the scene offers.
+   * Build what is live and release what is not. An implementation whose study
+   * has left is handed to a newcomer that wants the same one rather than
+   * rebuilt, so switching between two casts that draw the same way keeps the
+   * field and the trails; anything genuinely built or released empties the
+   * canvas, the way changing scene always has.
    */
-  private syncFlow() {
+  private syncImpls() {
     const gpu = this.gpu
-    if (!gpu || this.compatibility || !needsFlowSolver(this.preset.flow, this.sceneId)) {
-      this.releaseFlow()
-      return
+    if (!gpu || this.compatibility) return
+    const flows = this.reconcile(this.liveFlowStudies, this.flows, (impl) => this.buildFlow(impl))
+    // A dye ink is bound to the flow it was built against, so one whose flow
+    // has gone cannot be handed on and is rebuilt against a live one.
+    for (const [id, held] of this.inks)
+      if (held.object instanceof DyeInk && !this.holds(held.object.source)) {
+        this.inks.delete(id)
+        held.object.dispose()
+      }
+
+    const inks = this.reconcile(this.liveInkStudies, this.inks, (impl) => this.buildInk(impl))
+    if (!this.blendReady) {
+      this.blend.init({ device: gpu.device, format: SCENE_FORMAT, software: gpu.info.software })
+      this.blendReady = true
     }
 
-    if (this.flowSolver) return
-    const solver = new Fluid(this.fluidSize)
-    solver.init({ device: gpu.device, format: SCENE_FORMAT, software: gpu.info.software })
-    solver.resize(this.drawWidth, this.drawHeight)
-    this.flowSolver = solver
+    if (flows || inks) this.post?.resetHistory()
+    this.sizeImpls()
   }
 
-  private releaseFlow() {
-    this.flowSolver?.dispose()
-    this.flowSolver = null
+  private holds(flow: FlowImpl) {
+    for (const held of this.flows.values()) if (held.object === flow) return true
+    return false
   }
 
-  // Construction stays here so scenes share the device and post stack.
-  private build(): Scene {
-    if (this.sceneId === 'kaleidoscope') return new Kaleidoscope()
-    return new Fluid(this.fluidSize)
+  private reconcile<T extends Buildable>(
+    want: readonly LiveEntry[],
+    held: Map<string, Held<T>>,
+    build: (impl: ImplId) => T | null,
+  ): boolean {
+    const gpu = this.gpu
+    if (!gpu) return false
+    const wanted = new Set(want.map((entry) => entry.id))
+    const spare: Held<T>[] = []
+    for (const [id, entry] of held)
+      if (!wanted.has(id)) {
+        held.delete(id)
+        spare.push(entry)
+      }
+
+    let changed = false
+    for (const { id, impl } of want) {
+      if (held.has(id)) continue
+      const at = spare.findIndex((entry) => entry.impl === impl)
+      const reused = at >= 0 ? spare.splice(at, 1)[0] : undefined
+      if (reused) {
+        held.set(id, reused)
+        continue
+      }
+
+      const object = build(impl)
+      // A study whose implementation this renderer has nothing for is
+      // skipped, and the cast draws with what is left.
+      if (!object) continue
+      object.init({ device: gpu.device, format: SCENE_FORMAT, software: gpu.info.software })
+      held.set(id, { impl, object })
+      changed = true
+    }
+
+    for (const entry of spare) {
+      entry.object.dispose()
+      changed = true
+    }
+
+    return changed
+  }
+
+  private releaseImpls() {
+    for (const held of this.flows.values()) held.object.dispose()
+    for (const held of this.inks.values()) held.object.dispose()
+    this.flows.clear()
+    this.inks.clear()
+    this.blend.dispose()
+    this.blendReady = false
+  }
+
+  // The inks and the post stack share one size, which an ink may hold below
+  // the canvas. Every post stage samples by uv, so the composite scales it up.
+  private sizeImpls() {
+    const canvas = this.canvas
+    if (!canvas) return
+    let budget = Infinity
+    for (const { id } of this.liveInkStudies)
+      budget = Math.min(budget, this.inks.get(id)?.object.maxPixels ?? Infinity)
+    const shrink = Math.min(1, Math.sqrt(budget / (canvas.width * canvas.height)))
+    this.drawWidth = Math.max(1, Math.round(canvas.width * shrink))
+    this.drawHeight = Math.max(1, Math.round(canvas.height * shrink))
+    for (const held of this.flows.values()) held.object.resize(this.drawWidth, this.drawHeight)
+    for (const held of this.inks.values()) held.object.resize(this.drawWidth, this.drawHeight)
   }
 
   private start() {
@@ -364,9 +453,9 @@ class Renderer {
       canvas.width = width
       canvas.height = height
     }
-    // A replacement scene still needs its size when HMR or recovery keeps
+    // A fresh implementation still needs its size when HMR or recovery keeps
     // the canvas and its existing drawing-buffer dimensions.
-    this.sizeScene()
+    this.sizeImpls()
     this.hud?.resize(canvas.clientWidth, canvas.clientHeight, displayRatio)
   }
 
@@ -385,14 +474,20 @@ class Renderer {
 
   private drawFrame(now: number) {
     this.frame = 0
-    const { canvas, context, gpu, scene, post, compatibility } = this
-    if (!canvas || (!compatibility && (!context || !gpu || !scene || !post || gpu.lost))) return
+    const { canvas, context, gpu, post, compatibility } = this
+    if (!canvas || (!compatibility && (!context || !gpu || !post || gpu.lost))) return
     const win = canvas.ownerDocument.defaultView ?? window
     this.frame = win.requestAnimationFrame(this.tick)
-    // Skip display frames a capped scene does not want. The 0.75 lets a
-    // display that is not a multiple of the cap land just above it, not far
-    // below: 144 Hz draws at 72, 176 Hz at 59.
-    const cap = scene?.maxFps
+    const inks = this.liveInkStudies
+    // Skip display frames a capped ink does not want. The 0.75 lets a display
+    // that is not a multiple of the cap land just above it, not far below:
+    // 144 Hz draws at 72, 176 Hz at 59.
+    let cap = 0
+    for (const { id } of inks) {
+      const wanted = this.inks.get(id)?.object.maxFps
+      if (wanted) cap = cap ? Math.min(cap, wanted) : wanted
+    }
+
     if (cap && now - this.last < 750 / cap) return
     const dt = Math.min(0.1, Math.max(0.001, (now - this.last) / 1000))
     this.last = now
@@ -410,78 +505,96 @@ class Renderer {
     this.packet[F.time] = this.time
     this.packet[F.dt] = dt
 
-    // The mapping is applied here, on the CPU, and nowhere else: the scene
-    // and the stack both read numbers that have already been modulated.
-    const preset = this.preset
-    const tuning: Tuning = resolveScene(
-      preset.sceneParams,
-      preset.audioMapping,
-      this.packet,
-      this.tuning,
-    )
-    resolvePost(this.base, preset.audioMapping, this.packet, this.live)
+    // The mapping is applied here, on the CPU, and nowhere else: every
+    // implementation and the stack read numbers already modulated.
+    const live = this.live
+    resolveLive(live.studies, live.canvas, this.packet, live.tension, this.resolved)
+    if (this.postPatch) patchPostParams(this.resolved.post, this.postPatch)
+    const flows = this.liveFlowStudies
+    const knobsOf = (id: string): Tuning => this.resolved.knobs.get(id) ?? NO_KNOBS
 
     if (compatibility) {
-      compatibility.render(this.packet, dt, tuning, this.live)
-    } else if (gpu && context && scene && post) {
-      scene.update(this.packet, dt, tuning)
-      const flow = this.flowSolver
-      // The flow is the preset's rather than the scene's, so it is tuned by
-      // the preset's own `flowParams` and not by the mapping, which speaks
-      // the drawing scene's knobs. What it leaves out falls back to the
-      // fluid's defaults.
-      if (flow) flow.update(this.packet, dt, preset.flowParams ?? NO_TUNING)
+      // One program and no compute: the fractal is the only study this path
+      // draws, and the rest of the cast is skipped. Presence is not read
+      // here, because nothing fades a cast until the director lands.
+      const fractal = inks.find((entry) => entry.impl === 'fractal')
+      if (fractal) compatibility.render(this.packet, dt, knobsOf(fractal.id), this.resolved.post)
+    } else if (gpu && context && post) {
+      // Flows first and inks second, because a dye ink's numbers reach the
+      // solver's uniform through the flow it draws.
+      for (const entry of flows)
+        this.flows.get(entry.id)?.object.update(this.packet, dt, knobsOf(entry.id), entry.presence)
+      for (const entry of inks)
+        this.inks.get(entry.id)?.object.update(this.packet, dt, knobsOf(entry.id), entry.presence)
       const encoder = gpu.device.createCommandEncoder()
-      // The scene draws into the stack's texture and the stack writes the
-      // canvas. With every stage off the composite is a straight copy, so the
-      // path is the same either way and the scene has one pipeline.
       const offscreen = post.target(this.drawWidth, this.drawHeight)
       if (!offscreen) return
-      // The flow is stirred before the scene draws, so the picture is carried
+      // The flows are stirred before the inks draw, so the picture is carried
       // along the field this frame solved rather than the last one's.
-      flow?.simulate(encoder)
-      scene.render(encoder, offscreen)
-      // It is read after both have run, because the field either names is
-      // whichever half of a ping-pong pair this frame wrote.
-      post.render(
-        encoder,
-        context.getCurrentTexture().createView(),
-        this.packet,
-        flow?.flow ?? scene.flow,
-        this.client?.waveform ?? null,
-      )
+      this.liveFlows.length = 0
+      for (const entry of flows) {
+        const held = this.flows.get(entry.id)
+        if (!held) continue
+        held.object.simulate(encoder)
+        // Read after simulating, because the field a flow names is whichever
+        // half of a ping-pong pair this frame wrote.
+        const field = held.object.flow
+        if (field) this.liveFlows.push({ flow: field, presence: entry.presence })
+      }
+
+      const carried = this.blend.blend(encoder, this.liveFlows)
+      // The uniform before any ink, because the ribbon ink reads it.
+      post.prepare(this.packet, carried?.cover ?? null)
+      post.clear(encoder, offscreen)
+      for (const entry of inks) this.inks.get(entry.id)?.object.render(encoder, offscreen)
+      post.render(encoder, context.getCurrentTexture().createView(), this.packet, carried)
       gpu.device.queue.submit([encoder.finish()])
     }
 
-    const detail = this.detailOf(compatibility?.detail ?? scene?.detail ?? '')
+    const detail = compatibility?.detail ?? this.detail()
     this.hud?.record(this.packet)
     this.hud?.draw(this.packet, {
       fps: 1000 / this.frameMs,
       frameMs: this.frameMs,
       scene: detail,
       adapter: compatibility?.adapter ?? (gpu ? describe(gpu.info) : ''),
-      post: postSummary(this.live),
-      preset: preset.name,
+      post: postSummary(this.resolved.post),
+      preset: this.cast.name,
     })
     // Timing on the element, so a screenshot or a test can read it.
     if (now - this.reported > 500) {
       this.reported = now
       canvas.dataset.frameMs = this.frameMs.toFixed(1)
-      canvas.dataset.scene = this.sceneId
+      canvas.dataset.scene = sceneOf(inks.map((entry) => entry.id))
       canvas.dataset.detail = detail
-      canvas.dataset.post = postSummary(this.live)
-      canvas.dataset.preset = preset.id
+      canvas.dataset.post = postSummary(this.resolved.post)
+      canvas.dataset.preset = this.cast.id
+      canvas.dataset.cast = live.studies
+        .filter((entry) => entry.presence > 0)
+        .map((entry) => entry.id)
+        .join(' ')
     }
   }
 
   /**
-   * What the scene is doing, plus the flow under it when the preset asked for
-   * one. `data-detail` is public API, so a preset with no flow reads exactly
-   * as it always did.
+   * What is drawing, inks first and then any flow with a line of its own.
+   * `data-detail` is public API, so the five pinned casts read exactly as
+   * their presets did: a fluid flow with a dye ink on it says nothing,
+   * because the ink already names that grid.
    */
-  private detailOf(scene: string) {
-    const flow = this.flowSolver
-    return flow ? `${scene} + ${flow.simSize} flow` : scene
+  private detail() {
+    const parts: string[] = []
+    for (const { id } of this.liveInkStudies) {
+      const line = this.inks.get(id)?.object.detail
+      if (line) parts.push(line)
+    }
+
+    for (const { id } of this.liveFlowStudies) {
+      const line = this.flows.get(id)?.object.detail
+      if (line) parts.push(line)
+    }
+
+    return parts.join(' + ')
   }
 
   // The browser took the device away. Drop everything that depended on it
@@ -492,9 +605,7 @@ class Renderer {
     const hudCanvas = this.hudCanvas
     const onFailure = this.onFailure
     if (canvas) this.detach(canvas)
-    this.scene?.dispose()
-    this.scene = null
-    this.releaseFlow()
+    this.releaseImpls()
     this.post?.dispose()
     this.post = null
     this.client?.dispose()

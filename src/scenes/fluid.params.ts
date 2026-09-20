@@ -491,6 +491,48 @@ export function fluidParams(tuning: Tuning): FluidParams {
 }
 
 /**
+ * What a flow puts into the field, as opposed to how what is in it looks.
+ * Presence scales these three and nothing else, which is what "a flow scales
+ * its velocity" means here: a flow at half presence stirs half as hard, and
+ * the field's own momentum turns that into the current easing off over a
+ * second or two rather than the picture stopping dead.
+ */
+const FLOW_FORCE_KNOBS = ['force', 'hitForce', 'eventForce'] as const
+
+/**
+ * A fluid flow's knobs and a dye ink's as the one tuning the solver reads.
+ * The split is real at the study level and cannot be at the GPU: one splat
+ * carries both an impulse and a puff of dye, written by the same compute step
+ * out of the same uniform, so the two halves have to meet somewhere and this
+ * is the only place that knows both.
+ *
+ * With no dye ink live the ink's knobs are simply absent and `fluidParams`
+ * falls back to the fluid's own defaults, which is what a flow under another
+ * ink has always been handed. Leaving them out rather than zeroing them costs
+ * nothing either way, since the injection step writes dye whether or not
+ * anything draws it.
+ *
+ * It writes into an object the caller owns and keeps, like every other
+ * resolver here, because it runs on every frame.
+ */
+export function fluidTuning(
+  solver: Tuning,
+  presence: number,
+  ink: Tuning | null,
+  out: Record<string, number>,
+): Tuning {
+  for (const key of Object.keys(out)) delete out[key]
+  for (const [key, value] of Object.entries(solver)) if (value !== undefined) out[key] = value
+  for (const knob of FLOW_FORCE_KNOBS) {
+    const value = out[knob]
+    if (value !== undefined) out[knob] = value * presence
+  }
+
+  if (ink) for (const [key, value] of Object.entries(ink)) if (value !== undefined) out[key] = value
+  return out
+}
+
+/**
  * Everything the sim uniform needs for one frame.
  *
  * Every magnitude comes in already modulated: the preset's resting value plus

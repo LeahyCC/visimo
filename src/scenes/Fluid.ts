@@ -1,10 +1,17 @@
 /**
- * The second scene: Stam's stable fluids on a square grid of compute
- * textures, with the music injecting velocity and dye on every onset. What an
- * injection is worth, and every decay and strength around it, comes from the
- * preset's numbers with its mapping already added; see `fluid.params.ts`.
+ * Stam's stable fluids on a square grid of compute textures, with the music
+ * injecting velocity and dye on every onset. What an injection is worth, and
+ * every decay and strength around it, comes from the studies live this frame
+ * with their mapping already added; see `fluid.params.ts`.
  *
  *   advect ─► diffuse ─► vorticity and injection ─► project ─► advect dye
+ *
+ * One field, two studies. `simulate` is the solve and `drawDye` is the dye
+ * drawn out of it, and they belong to a flow and to an ink respectively:
+ * `impls/fluid.ts` is the pair, and it is the reason the split runs through
+ * this file rather than through two objects. Splitting the object would not
+ * work, because one splat carries both an impulse and a puff of dye and both
+ * are written by the same compute step from the same uniform.
  *
  * The grid is 512 or 1024 texels a side and does not follow the canvas, so
  * nothing is rebuilt on a resize: the square covers the canvas and the
@@ -20,9 +27,6 @@
  *
  * The velocity field is offered to the post stack as `flow`, so the feedback
  * pass can read the last frame back along the same current the dye rides.
- * `simulate` is that solve on its own, without the dye being drawn: a preset
- * whose scene solves no field of its own can ask for a fluid flow, and the
- * renderer then keeps one of these beside the scene and only steps it.
  */
 import { F } from '../audio/FeatureExtractor'
 import type { Tuning } from '../presets/knobs'
@@ -46,7 +50,8 @@ import {
   writeSimUniform,
 } from './fluid.params'
 import type { Extent, Layout } from './fluid.params'
-import type { Flow, Scene, SceneContext } from './Scene'
+import { INK_BLEND } from './Impl'
+import type { Flow, SceneContext } from './Scene'
 
 const FIELD_FORMAT: GPUTextureFormat = 'rgba16float'
 const WORKGROUP = 8
@@ -96,7 +101,7 @@ type Sized = {
   groups: Map<string, GPUBindGroup>
 }
 
-export class Fluid implements Scene {
+export class Fluid {
   private context: SceneContext | null = null
   private gear: Gear | null = null
   private sized: Sized | null = null
@@ -157,6 +162,7 @@ export class Fluid implements Scene {
     return {
       view: sized.velocity[this.velocity].view,
       cover: [this.visible.x * 2, this.visible.y * 2] as const,
+      size: sized.size,
     }
   }
 
@@ -230,10 +236,18 @@ export class Fluid implements Scene {
       paletteTexture,
       layout,
       steps: steps as Record<Step, GPUComputePipeline>,
+      // An ink adds light to the shared target rather than owning it, so the
+      // dye is blended in at its presence and the alpha is left alone. At
+      // presence 1 over the renderer's clear that is what the old opaque draw
+      // gave, to the bit.
       draw: device.createRenderPipeline({
         layout: 'auto',
         vertex: { module: drawModule, entryPoint: 'vs' },
-        fragment: { module: drawModule, entryPoint: 'fs', targets: [{ format }] },
+        fragment: {
+          module: drawModule,
+          entryPoint: 'fs',
+          targets: [{ format, blend: INK_BLEND }],
+        },
         primitive: { topology: 'triangle-list' },
       }),
     }
@@ -319,11 +333,11 @@ export class Fluid implements Scene {
   }
 
   /**
-   * One step of the solver, and nothing drawn. The renderer runs this on its
-   * own when a preset asks for a fluid flow under another scene: that scene
-   * draws the picture and this only stirs the field the feedback pass carries
-   * it along. The dye advection stays in the list even then, since it is one
-   * dispatch and keeping it means one code path rather than two.
+   * One step of the solver, and nothing drawn. A cast may hold this flow with
+   * no dye ink on it, which is what Melt is: the fractal draws the picture
+   * and this only stirs the field the feedback pass carries it along. The dye
+   * advection stays in the list even then, since it is one dispatch and
+   * keeping it means one code path rather than two.
    */
   simulate(encoder: GPUCommandEncoder) {
     const gear = this.gear
@@ -374,17 +388,21 @@ export class Fluid implements Scene {
     this.dye = other(this.dye)
   }
 
-  render(encoder: GPUCommandEncoder, view: GPUTextureView) {
-    this.simulate(encoder)
+  /**
+   * The dye drawn out of the field, which is the ink half. It is added to
+   * whatever the inks before it drew, at `presence`, and the solve has
+   * already run: the field it reads is the one `simulate` has just written,
+   * which alternates, hence the pair of bind groups.
+   */
+  drawDye(encoder: GPUCommandEncoder, view: GPUTextureView, presence: number) {
     const gear = this.gear
     const sized = this.sized
     if (!gear || !sized) return
     const draw = encoder.beginRenderPass({
-      colorAttachments: [
-        { view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' },
-      ],
+      colorAttachments: [{ view, loadOp: 'load', storeOp: 'store' }],
     })
     draw.setPipeline(gear.draw)
+    draw.setBlendConstant({ r: presence, g: presence, b: presence, a: 1 })
     draw.setBindGroup(0, sized.draw[this.dye])
     draw.draw(3)
     draw.end()

@@ -1,14 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { renderer } from './gpu/Renderer'
-import type { Preset } from './presets/types'
-import type { SceneId } from './scenes/catalog'
+import type { PinnedCast } from './studies/cast'
 
 type Props = {
   hud: boolean
-  /** Its numbers and its stack; the scene below is its own. */
-  preset: Preset
-  scene: SceneId
+  /**
+   * The pinned cast to draw: its studies, their numbers and the canvas they
+   * draw on. It is still called `preset` because that is what these five are
+   * to a host; there is no scene to choose beside it any more.
+   */
+  preset: PinnedCast
   fluidSize: number
   /** The device could not be had, or was lost for good: show artwork instead. */
   onUnsupported: () => void
@@ -32,7 +34,6 @@ const HUD = { ...FILL, pointerEvents: 'none' } as const
 export default function VisualizerStage({
   hud,
   preset,
-  scene,
   fluidSize,
   onUnsupported,
   onBackend,
@@ -81,9 +82,7 @@ export default function VisualizerStage({
   }, [generation])
 
   useEffect(() => renderer.setHud(hud), [hud])
-  // The preset first, so the scene it names is the one that gets built.
   useEffect(() => renderer.setPreset(preset), [preset])
-  useEffect(() => renderer.setScene(scene), [scene])
   useEffect(() => renderer.setFluidSize(fluidSize), [fluidSize])
 
   return (

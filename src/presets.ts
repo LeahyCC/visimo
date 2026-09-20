@@ -1,31 +1,40 @@
 /**
- * The presets and the vocabulary they are written in. Numbers and parsing
- * only, nothing that touches the GPU, so this lands in a host's main bundle
- * alongside `visimo/catalog`.
+ * The studies, the casts built from them, and the vocabulary both are written
+ * in. Numbers and parsing only, nothing that touches the GPU, so this lands
+ * in a host's main bundle alongside `visimo/catalog`.
+ *
+ * The entry is still called `presets` and still exports the five names a host
+ * on 0.1 was written against. They now hold pinned casts rather than presets;
+ * see "Upgrading from 0.1" in the README for everything that changed.
  */
 export {
-  PRESETS,
-  DEFAULT_PRESET_ID,
-  findPreset,
-  firstPresetOf,
-  presetOrDefault,
-  stepPreset,
-} from './presets/index'
-export { parsePreset } from './presets/parse'
-export type { Preset, Mapping } from './presets/types'
-export type { AudioField, Curve, FluidKnob, KaleidoscopeKnob, Tuning } from './presets/knobs'
-export { POST_LANES, POST_KNOBS } from './post/params'
-export type { PostParams } from './post/params'
-
-// The studies, which are what the presets above become. Nothing draws a cast
-// yet; this is the contract the renderer and the director are built against.
-export { STUDIES, findStudy, studiesOfKind } from './studies/registry'
-export { CASTS, findCast } from './studies/casts/index'
+  CASTS,
+  DEFAULT_CAST_ID,
+  castOrDefault,
+  findCast,
+  stepCast,
+  // The 0.1 names for the same five, so a host changes the type it imports
+  // and nothing else.
+  CASTS as PRESETS,
+  DEFAULT_CAST_ID as DEFAULT_PRESET_ID,
+  castOrDefault as presetOrDefault,
+  findCast as findPreset,
+  stepCast as stepPreset,
+} from './studies/casts/index'
+export { STUDIES, findStudy, sceneOf, studiesOfKind } from './studies/registry'
 export { parseCast, castStudyIds, CANVAS_KNOBS, isCanvasKnob, MAX_INKS } from './studies/cast'
-export { castFrame, resolveCast, resolveLive, resolveStudy, studyFeature } from './studies/resolve'
+export {
+  castFrame,
+  liveCast,
+  resolveCast,
+  resolveLive,
+  resolveStudy,
+  studyFeature,
+} from './studies/resolve'
 export {
   IMPL_IDS,
   IMPL_KNOBS,
+  IMPL_SCENES,
   implKnobs,
   isImplId,
   isImplKnob,
@@ -36,7 +45,7 @@ export {
 } from './studies/impls'
 export { CHARACTER_AXES, COSTS, MOMENTS, STUDY_FIELDS, STUDY_KINDS, isLook } from './studies/types'
 export type { Cast, CastCanvas, CastOverride, CanvasKnob, PinnedCast } from './studies/cast'
-export type { CastFrame, LiveStudy } from './studies/resolve'
+export type { CastFrame, LiveCast, LiveStudy } from './studies/resolve'
 export type { ImplId, ImplKnob, LookStage } from './studies/impls'
 export type {
   Character,
@@ -52,3 +61,7 @@ export type {
   StudyKind,
   StudyMapping,
 } from './studies/types'
+export type { AudioField, Curve, FluidKnob, KaleidoscopeKnob, Tuning } from './presets/knobs'
+export { AUDIO_FIELDS, CURVES } from './presets/knobs'
+export { POST_LANES, POST_KNOBS } from './post/params'
+export type { PostParams } from './post/params'

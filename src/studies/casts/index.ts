@@ -20,7 +20,9 @@
  * - Every study carries a `tension` row, and tension is zero everywhere until
  *   the estimator card lands. At zero these are the presets exactly.
  *
- * Nothing draws a cast yet, so neither difference is on screen.
+ * These five are what the stage draws and what a host picks between, so the
+ * names the preset list had are kept beside the cast ones: a host written
+ * against 0.1 changes the type it names and nothing else.
  */
 import { parseCast } from '../cast'
 import type { PinnedCast } from '../cast'
@@ -39,4 +41,22 @@ export const CASTS: readonly PinnedCast[] = [
   parseCast(melt, 'studies/casts/melt.json'),
 ]
 
+/** The fluid as PR #58 tuned it, which is what the stage shows by default. */
+export const DEFAULT_CAST_ID = 'plume'
+
 export const findCast = (id: string): PinnedCast | undefined => CASTS.find((cast) => cast.id === id)
+
+/** The cast named, or the default; a stored choice goes through here. */
+export function castOrDefault(id: string): PinnedCast {
+  const found = findCast(id) ?? findCast(DEFAULT_CAST_ID) ?? CASTS[0]
+  if (!found) throw new Error('casts: none were loaded')
+  return found
+}
+
+/** Where `[` and `]` land from here. Wraps both ways. */
+export function stepCast(id: string, delta: number): PinnedCast {
+  const at = CASTS.findIndex((entry) => entry.id === id)
+  const from = at < 0 ? 0 : at
+  const next = (((from + delta) % CASTS.length) + CASTS.length) % CASTS.length
+  return CASTS[next] ?? castOrDefault(DEFAULT_CAST_ID)
+}

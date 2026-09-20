@@ -1,27 +1,40 @@
 /**
  * Every control here is generated from the lists the package already keeps:
- * the scene's knobs from `SCENE_KNOBS`, the post knobs from `POST_LANES`, the
- * mapping vocabulary from `AUDIO_FIELDS` and `CURVES`. A knob added to the
- * package shows up in this panel with no change here.
+ * a cast's studies from the registry, each study's knobs from `IMPL_KNOBS`,
+ * the canvas's from `CANVAS_KNOBS`, and the mapping vocabulary from
+ * `STUDY_FIELDS` and `CURVES`. A knob or a study added to the package shows
+ * up in this panel with no change here.
+ *
+ * It tunes a pinned cast, which is what the five presets are now. The study
+ * bench the handoff asks for, where one study is soloed against sliders for
+ * character and moment, is a later card; this is the panel that was here,
+ * following the shape the cast took.
  */
-import { FLUID_SIZES, SCENE_IDS, SCENE_LABELS } from '../src/catalog'
-import type { SceneId } from '../src/catalog'
-import { mergePostParams, POST_KNOBS, POST_LANES } from '../src/post/params'
-import type { PostParams, PostStage } from '../src/post/params'
-import { findPreset, PRESETS } from '../src/presets/index'
-import { AUDIO_FIELDS, CURVES, SCENE_KNOBS } from '../src/presets/knobs'
-import type { AudioField, Curve } from '../src/presets/knobs'
-import { parsePreset } from '../src/presets/parse'
-import type { Mapping, Preset } from '../src/presets/types'
+import { FLUID_SIZES } from '../src/catalog'
+import { CANVAS_KNOBS, castStudyIds, MAX_INKS } from '../src/presets'
+import type {
+  CanvasKnob,
+  Cast,
+  ImplId,
+  PinnedCast,
+  Study,
+  StudyField,
+  StudyMapping,
+} from '../src/presets'
+import {
+  CASTS,
+  CURVES,
+  findCast,
+  findStudy,
+  implKnobs,
+  parseCast,
+  STUDY_FIELDS,
+} from '../src/presets'
 import { KALEIDOSCOPE_RANGES } from '../src/scenes/kaleidoscope.params'
 
-type Target = Preset['audioMapping'][number]['to']
-
 type Props = {
-  preset: Preset
-  onPreset: (preset: Preset) => void
-  scene: SceneId
-  onScene: (scene: SceneId) => void
+  cast: PinnedCast
+  onCast: (cast: PinnedCast) => void
   fluidSize: number
   onFluidSize: (size: number) => void
   hud: boolean
@@ -80,6 +93,14 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'grain.amount': [0, 0.5],
 }
 
+/**
+ * A study's own table. The fractal's knobs share four names with the dye's
+ * and do not share their ranges, so the table is picked by implementation
+ * rather than merged.
+ */
+const rangesOf = (impl: ImplId): Partial<Record<string, readonly [number, number]>> =>
+  impl === 'fractal' ? KALEIDOSCOPE_RANGES : RANGES
+
 /** Knobs the slider must step in whole numbers, whatever the range implies. */
 const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity', 'ribbon.shape'])
 
@@ -94,7 +115,7 @@ function spanOf(name: string, value: number): readonly [number, number] {
 /**
  * A round step near a five-hundredth of the range: 1, 2 or 5 times a power of
  * ten. A plain division gives steps like 0.12, and a slider refuses any value
- * off its own grid, so the numbers a preset ends up holding would be 39.96
+ * off its own grid, so the numbers a cast ends up holding would be 39.96
  * rather than 40.
  */
 function stepOf(span: number): number {
@@ -120,14 +141,14 @@ function Slider({
   name,
   value,
   onChange,
-  range,
+  ranges = RANGES,
 }: {
   name: string
   value: number
   onChange: (value: number) => void
-  range?: readonly [number, number]
+  ranges?: Partial<Record<string, readonly [number, number]>>
 }) {
-  const [min, max] = range ?? spanOf(name, value)
+  const [min, max] = ranges[name] ?? spanOf(name, value)
 
   return (
     <label style={{ ...row, margin: '2px 0' }}>
@@ -148,52 +169,78 @@ function Slider({
   )
 }
 
-/** The stages the post knobs belong to, in the order the lanes list them. */
-const POST_STAGES = [...new Set(POST_KNOBS.map((knob) => knob.split('.')[0] as PostStage))]
+/** A cast as the file it came from, so an edit round trips through `parseCast`. */
+const asFile = (cast: PinnedCast) => ({
+  id: cast.id,
+  name: cast.name,
+  ...(cast.flow ? { flow: cast.flow } : {}),
+  inks: cast.inks,
+  look: cast.look,
+  canvas: cast.canvas,
+  overrides: cast.overrides,
+})
+
+/**
+ * Whether a cast draws at all without compute. The fractal is the one ink the
+ * WebGL2 path has, and a cast holding it draws with that alone; everything
+ * else in it is skipped, which is how Melt shows there as Prism with a still
+ * trail. A cast with no fractal in it has nothing left to draw.
+ */
+const FALLBACK_INK: ImplId = 'fractal'
+
+const castNeedsGpu = (cast: Cast) => !cast.inks.some((id) => findStudy(id)?.impl === FALLBACK_INK)
 
 export function Controls({
-  preset,
-  onPreset,
-  scene,
-  onScene,
+  cast,
+  onCast,
   fluidSize,
   onFluidSize,
   hud,
   onHud,
   webGpuAvailable = true,
 }: Props) {
-  const knobs = SCENE_KNOBS[preset.scene]
-  const ranges: Readonly<Partial<Record<string, readonly [number, number]>>> =
-    preset.scene === 'kaleidoscope' ? KALEIDOSCOPE_RANGES : RANGES
-  // Every edit below builds a new preset object, and an untouched one is still
-  // the very entry `PRESETS` holds, so identity is the whole check. It also
+  // Every edit below builds a new cast object, and an untouched one is still
+  // the very entry `CASTS` holds, so identity is the whole check. It also
   // answers the question worth asking mid-tune: have I drifted from the file?
-  const shipped = findPreset(preset.id)
-  const edited = shipped !== undefined && shipped !== preset
+  const shipped = findCast(cast.id)
+  const edited = shipped !== undefined && shipped !== cast
+  const studies = castStudyIds(cast)
+    .map((id) => findStudy(id))
+    .filter((study): study is Study => study !== undefined)
+  const holdsFluid = studies.some((study) => study.impl === 'fluid')
 
-  const setKnob = (knob: string, value: number) =>
-    onPreset(
-      parsePreset({ ...preset, sceneParams: { ...preset.sceneParams, [knob]: value } }, 'demo'),
-    )
-
-  // The stack is nested, so it is cloned through `mergePostParams` and the
-  // lane writes into the copy; the preset the renderer holds is never mutated.
-  const editPost = (change: (params: PostParams) => void) => {
-    const params = mergePostParams(preset.postParams, {})
-    change(params)
-    onPreset({ ...preset, postParams: params })
+  const edit = (change: (file: ReturnType<typeof asFile>) => void) => {
+    const file = asFile(cast)
+    change(file)
+    onCast(parseCast(file, 'demo'))
   }
 
-  const setMapping = (rows: readonly Mapping<string>[]) =>
-    onPreset(parsePreset({ ...preset, audioMapping: rows }, 'demo'))
+  /** A study's resting value for one knob: the cast's patch, or the study's own. */
+  const restOf = (study: Study, knob: string) =>
+    cast.overrides[study.id]?.knobs?.[knob] ?? study.knobs[knob] ?? 0
 
-  const editRow = (index: number, patch: Partial<Mapping<string>>) =>
-    setMapping(
-      preset.audioMapping.map((entry, at) => (at === index ? { ...entry, ...patch } : entry)),
-    )
+  const setKnob = (study: Study, knob: string, value: number) =>
+    edit((file) => {
+      const held = file.overrides[study.id] ?? {}
+      file.overrides = {
+        ...file.overrides,
+        [study.id]: { ...held, knobs: { ...held.knobs, [knob]: value } },
+      }
+    })
+
+  const setRows = (study: Study, rows: readonly StudyMapping[]) =>
+    edit((file) => {
+      const held = file.overrides[study.id] ?? {}
+      file.overrides = { ...file.overrides, [study.id]: { ...held, mapping: rows } }
+    })
+
+  const setCanvasKnob = (knob: CanvasKnob, value: number) =>
+    edit((file) => {
+      file.canvas = { ...file.canvas, knobs: { ...file.canvas.knobs, [knob]: value } }
+    })
 
   const copy = () => {
-    const json = JSON.stringify(preset, null, 2)
+    const json = JSON.stringify(asFile(cast), null, 2)
     void navigator.clipboard?.writeText(json).catch(() => console.log(json))
   }
 
@@ -203,20 +250,20 @@ export function Controls({
         <span>preset</span>
         <select
           style={cell}
-          value={preset.id}
+          value={cast.id}
           onChange={(event) => {
-            const found = PRESETS.find((entry) => entry.id === event.target.value)
-            if (found) onPreset(found)
+            const found = findCast(event.target.value)
+            if (found) onCast(found)
           }}
         >
-          {PRESETS.map((entry) => (
+          {CASTS.map((entry) => (
             <option
               key={entry.id}
               value={entry.id}
-              disabled={!webGpuAvailable && entry.scene === 'fluid'}
+              disabled={!webGpuAvailable && castNeedsGpu(entry)}
             >
               {entry.name}
-              {!webGpuAvailable && entry.scene === 'fluid' ? ' (requires WebGPU)' : ''}
+              {!webGpuAvailable && castNeedsGpu(entry) ? ' (requires WebGPU)' : ''}
             </option>
           ))}
         </select>
@@ -226,35 +273,17 @@ export function Controls({
           disabled={!edited}
           title={
             edited
-              ? `Put ${preset.name} back to the numbers in src/presets/`
-              : `${preset.name} is as it ships`
+              ? `Put ${cast.name} back to the numbers in src/studies/casts/`
+              : `${cast.name} is as it ships`
           }
-          onClick={() => shipped && onPreset(shipped)}
+          onClick={() => shipped && onCast(shipped)}
         >
           reset
         </button>
       </label>
 
-      <label style={row}>
-        <span>scene</span>
-        <select
-          style={cell}
-          value={scene}
-          onChange={(event) => onScene(event.target.value as SceneId)}
-        >
-          {SCENE_IDS.map((id) => (
-            <option key={id} value={id} disabled={!webGpuAvailable && id === 'fluid'}>
-              {SCENE_LABELS[id]}
-              {!webGpuAvailable && id === 'fluid' ? ' (requires WebGPU)' : ''}
-            </option>
-          ))}
-        </select>
-        <span />
-      </label>
-
-      {/* The grid is the fluid's, whether it is the scene or the flow a
-          preset asks for under another scene. */}
-      {(scene === 'fluid' || preset.flow === 'fluid') && (
+      {/* The grid is the fluid's, whichever study in the cast is using it. */}
+      {holdsFluid && (
         <label style={row}>
           <span>grid</span>
           <select
@@ -278,65 +307,67 @@ export function Controls({
         <span />
       </label>
 
-      <h2 style={heading}>SCENE</h2>
-      {knobs.map((knob) => (
+      <h2 style={heading}>CANVAS</h2>
+      {CANVAS_KNOBS.map((knob) => (
         <Slider
           key={knob}
           name={knob}
-          range={ranges[knob]}
-          value={(preset.sceneParams as Readonly<Record<string, number>>)[knob] ?? 0}
-          onChange={(value) => setKnob(knob, value)}
+          value={cast.canvas.knobs[knob]}
+          onChange={(value) => setCanvasKnob(knob, value)}
         />
       ))}
 
-      <h2 style={heading}>POST</h2>
-      <label style={{ ...row, margin: '2px 0' }}>
-        <span>stack</span>
-        <input
-          type="checkbox"
-          checked={preset.postParams.enabled}
-          onChange={(event) => {
-            const on = event.target.checked
-            editPost((params) => {
-              params.enabled = on
-            })
-          }}
-        />
-        <span />
-      </label>
-      {POST_STAGES.map((stage) => (
-        <div key={stage}>
-          <label style={{ ...row, margin: '8px 0 2px' }}>
-            <span style={{ opacity: 0.6 }}>{stage}</span>
-            <input
-              type="checkbox"
-              checked={preset.postParams[stage].enabled}
-              onChange={(event) => {
-                const on = event.target.checked
-                editPost((params) => {
-                  params[stage].enabled = on
-                })
-              }}
-            />
-            <span />
-          </label>
-          {POST_KNOBS.filter((knob) => knob.startsWith(stage + '.')).map((knob) => (
+      {studies.map((study) => (
+        <div key={study.id}>
+          <h2 style={heading}>
+            {study.kind.toUpperCase()} · {study.name}
+          </h2>
+          {implKnobs(study.impl).map((knob) => (
             <Slider
               key={knob}
               name={knob}
-              value={POST_LANES[knob].read(preset.postParams)}
-              onChange={(value) =>
-                editPost((params) => {
-                  POST_LANES[knob].write(params, value)
-                })
-              }
+              ranges={rangesOf(study.impl)}
+              value={restOf(study, knob)}
+              onChange={(value) => setKnob(study, knob, value)}
             />
           ))}
+          <Rows study={study} rows={cast.overrides[study.id]?.mapping ?? []} onRows={setRows} />
         </div>
       ))}
 
-      <h2 style={heading}>MAPPING</h2>
-      {preset.audioMapping.map((entry, index) => (
+      <h2 style={heading}>OUT</h2>
+      <button type="button" onClick={copy}>
+        copy cast
+      </button>
+      <p style={{ opacity: 0.5, lineHeight: 1.5 }}>
+        Drops straight into <code>src/studies/casts/</code>; give it a new id and name, then add it
+        to the list in <code>src/studies/casts/index.ts</code>. A cast holds one flow, up to{' '}
+        {MAX_INKS} inks and one look, and the studies it names are edited above.
+      </p>
+    </div>
+  )
+}
+
+/** The rows a cast adds on top of a study's own, which is what it may edit. */
+function Rows({
+  study,
+  rows,
+  onRows,
+}: {
+  study: Study
+  rows: readonly StudyMapping[]
+  onRows: (study: Study, rows: readonly StudyMapping[]) => void
+}) {
+  const knobs = implKnobs(study.impl)
+  const editRow = (index: number, patch: Partial<StudyMapping>) =>
+    onRows(
+      study,
+      rows.map((entry, at) => (at === index ? { ...entry, ...patch } : entry)),
+    )
+
+  return (
+    <>
+      {rows.map((entry, index) => (
         <div
           key={index}
           style={{
@@ -349,9 +380,9 @@ export function Controls({
           <select
             style={cell}
             value={entry.from}
-            onChange={(event) => editRow(index, { from: event.target.value as AudioField })}
+            onChange={(event) => editRow(index, { from: event.target.value as StudyField })}
           >
-            {AUDIO_FIELDS.map((field) => (
+            {STUDY_FIELDS.map((field) => (
               <option key={field} value={field}>
                 {field}
               </option>
@@ -360,9 +391,9 @@ export function Controls({
           <select
             style={cell}
             value={entry.to}
-            onChange={(event) => editRow(index, { to: event.target.value as Target })}
+            onChange={(event) => editRow(index, { to: event.target.value as StudyMapping['to'] })}
           >
-            {[...knobs, ...POST_KNOBS].map((knob) => (
+            {knobs.map((knob) => (
               <option key={knob} value={knob}>
                 {knob}
               </option>
@@ -378,7 +409,9 @@ export function Controls({
           <select
             style={cell}
             value={entry.curve}
-            onChange={(event) => editRow(index, { curve: event.target.value as Curve })}
+            onChange={(event) =>
+              editRow(index, { curve: event.target.value as StudyMapping['curve'] })
+            }
           >
             {CURVES.map((curve) => (
               <option key={curve} value={curve}>
@@ -389,7 +422,12 @@ export function Controls({
           <button
             type="button"
             title="remove"
-            onClick={() => setMapping(preset.audioMapping.filter((_, at) => at !== index))}
+            onClick={() =>
+              onRows(
+                study,
+                rows.filter((_, at) => at !== index),
+              )
+            }
           >
             x
           </button>
@@ -401,23 +439,11 @@ export function Controls({
         onClick={() => {
           const first = knobs[0]
           if (!first) return
-          setMapping([
-            ...preset.audioMapping,
-            { from: 'energy', to: first, gain: 1, curve: 'linear' },
-          ])
+          onRows(study, [...rows, { from: 'energy', to: first, gain: 1, curve: 'linear' }])
         }}
       >
         + row
       </button>
-
-      <h2 style={heading}>OUT</h2>
-      <button type="button" onClick={copy}>
-        copy preset
-      </button>
-      <p style={{ opacity: 0.5, lineHeight: 1.5 }}>
-        Drops straight into <code>src/presets/</code>; give it a new id and name, then add it to the
-        list in <code>src/presets/index.ts</code>.
-      </p>
-    </div>
+    </>
   )
 }

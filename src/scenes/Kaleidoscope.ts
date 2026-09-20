@@ -1,15 +1,21 @@
 import type { Tuning } from '../presets/knobs'
 import shader from '../shaders/kaleidoscope.wgsl?raw'
+import { INK_BLEND } from './Impl'
+import type { InkImpl } from './Impl'
 import {
   KALEIDOSCOPE_UNIFORM_FLOATS,
   KaleidoscopeMotion,
   kaleidoscopeParams,
   writeKaleidoscopeUniform,
 } from './kaleidoscope.params'
-import type { Scene, SceneContext } from './Scene'
+import type { SceneContext } from './Scene'
 
-/** A raymarched fractal with five material scales. Phases survive a resize. */
-export class Kaleidoscope implements Scene {
+/**
+ * A raymarched fractal with five material scales, which is the `fractal` ink.
+ * Phases survive a resize. It covers most of the frame, so it is the one ink
+ * the registry keeps out of a cast with the dye.
+ */
+export class Kaleidoscope implements InkImpl {
   private context: SceneContext | null = null
   private pipeline: GPURenderPipeline | null = null
   private uniform: GPUBuffer | null = null
@@ -18,6 +24,7 @@ export class Kaleidoscope implements Scene {
   private height = 1
   private readonly motion = new KaleidoscopeMotion()
   private readonly data = new Float32Array(KALEIDOSCOPE_UNIFORM_FLOATS)
+  private presence = 1
   // Every frame is a full raymarch and the motion is slow.
   readonly maxFps = 60
   // 2560x1440. A 4K canvas at full size pinned an RTX 5080.
@@ -48,7 +55,7 @@ export class Kaleidoscope implements Scene {
       label: 'Kaleidoscope',
       layout: 'auto',
       vertex: { module, entryPoint: 'vs' },
-      fragment: { module, entryPoint: 'fs', targets: [{ format }] },
+      fragment: { module, entryPoint: 'fs', targets: [{ format, blend: INK_BLEND }] },
       primitive: { topology: 'triangle-list' },
     })
 
@@ -63,7 +70,8 @@ export class Kaleidoscope implements Scene {
     this.height = height
   }
 
-  update(features: Float32Array, dt: number, tuning: Tuning) {
+  update(features: Float32Array, dt: number, tuning: Tuning, presence: number) {
+    this.presence = presence
     if (!this.context || !this.uniform) return
     const params = kaleidoscopeParams(tuning)
     this.motion.step(params, dt, features)
@@ -81,11 +89,10 @@ export class Kaleidoscope implements Scene {
   render(encoder: GPUCommandEncoder, view: GPUTextureView) {
     if (!this.pipeline || !this.group) return
     const pass = encoder.beginRenderPass({
-      colorAttachments: [
-        { view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store' },
-      ],
+      colorAttachments: [{ view, loadOp: 'load', storeOp: 'store' }],
     })
     pass.setPipeline(this.pipeline)
+    pass.setBlendConstant({ r: this.presence, g: this.presence, b: this.presence, a: 1 })
     pass.setBindGroup(0, this.group)
     pass.draw(3)
     pass.end()

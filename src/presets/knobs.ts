@@ -167,6 +167,30 @@ export const KALEIDOSCOPE_KNOBS = [
 export type KaleidoscopeKnob = (typeof KALEIDOSCOPE_KNOBS)[number]
 
 /**
+ * The analytic flow's coefficients, one per term, and the shape numbers the
+ * terms need. The field is the sum of its terms and every coefficient is a
+ * rate, so a study on this implementation is nothing but numbers.
+ *
+ * `radial` is speed along the line to the centre, in field widths a second at
+ * the point the pull is strongest: negative draws the picture in, positive
+ * pushes it out. `falloff` is the only shape number there is so far, and it
+ * says where along that line the pull is strongest: 0 is a plain zoom about
+ * the middle, growing with the radius, and anything above 1 puts the peak at
+ * one over its own value of the way to the corner and leaves the rim alone.
+ *
+ * `swirl` is turns a second about the centre, the same at every radius, so
+ * the picture turns without shearing. `twist` is turns a second added at the
+ * centre alone and gone by the corner, so the middle outruns the rim and the
+ * picture winds into a spiral. Both are signed, and positive is clockwise on
+ * screen.
+ *
+ * A term added later is a coefficient here and a few lines of
+ * `impls/analytic.params.ts`; that file's header is the recipe.
+ */
+export const ANALYTIC_KNOBS = ['radial', 'falloff', 'swirl', 'twist'] as const
+export type AnalyticKnob = (typeof ANALYTIC_KNOBS)[number]
+
+/**
  * The shards' numbers. `burst` is how many an impact throws, a count rather
  * than a magnitude, and `hitRate` is the most hits a second that may throw a
  * few more while the payoff is still sounding. `speed` is in frame heights a
@@ -185,7 +209,7 @@ export const SHARD_KNOBS = [
 ] as const
 export type ShardKnob = (typeof SHARD_KNOBS)[number]
 
-export type SceneKnob = FluidKnob | KaleidoscopeKnob | ShardKnob
+export type SceneKnob = FluidKnob | KaleidoscopeKnob | AnalyticKnob | ShardKnob
 
 /**
  * The resolved numbers an implementation reads each frame. The renderer fills

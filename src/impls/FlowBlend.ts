@@ -11,9 +11,9 @@
  * stirs at a low presence is the flow's own business and is already in the
  * field it hands over; see `fluidTuning`.
  *
- * The target follows the first live flow's grid, and the cover with it. Every
- * flow there is solves on the same grid today, and a field of another size
- * still lands correctly because the shader samples by uv.
+ * The two flows need not solve on the same grid. The analytic flow writes a
+ * 128 texel field and the fluid solves on 512 or 1024, and `blendTarget`
+ * below is what decides what the two land in.
  */
 import type { Flow, SceneContext } from '../scenes/Scene'
 import blend from '../shaders/flow.blend.wgsl?raw'
@@ -22,6 +22,32 @@ const FIELD_FORMAT: GPUTextureFormat = 'rgba16float'
 
 /** One live flow: the field it wrote this frame and the fade it is at. */
 export type LiveFlow = { flow: Flow; presence: number }
+
+/**
+ * The grid the live flows are summed into, and the cover the result carries.
+ *
+ * The size is the LARGEST among them, not the first's. The blend shader
+ * samples by uv, so a small field lands correctly in a large target, but a
+ * large one written into a small target loses detail it cannot get back: a
+ * 1024 fluid crossfading with a 128 analytic field would spend the whole
+ * change at a sixty-fourth of the fluid's resolution and the filaments would
+ * come back at the end of it.
+ *
+ * The cover is the first flow's, and every flow's is the same: it comes from
+ * the canvas alone (`visibleExtent`), and every flow is handed the same
+ * canvas by `sizeImpls`. If one ever differed, blending by uv would be wrong
+ * before this function was, since the fields would not be laid on the same
+ * part of the canvas.
+ */
+export function blendTarget(
+  live: readonly LiveFlow[],
+): { size: number; cover: Flow['cover'] } | null {
+  const first = live[0]
+  if (!first) return null
+  let size = 0
+  for (const entry of live) size = Math.max(size, entry.flow.size)
+  return size > 0 ? { size, cover: first.flow.cover } : null
+}
 
 type Gear = {
   device: GPUDevice
@@ -82,8 +108,9 @@ export class FlowBlend {
     const gear = this.gear
     let total = 0
     for (const entry of live) total += Math.max(entry.presence, 0)
-    if (!gear || total <= 0) return first.flow
-    const view = this.target(gear.device, first.flow.size)
+    const wanted = blendTarget(live)
+    if (!gear || total <= 0 || !wanted) return first.flow
+    const view = this.target(gear.device, wanted.size)
     if (!view) return first.flow
 
     const pass = encoder.beginRenderPass({
@@ -109,7 +136,7 @@ export class FlowBlend {
     }
     pass.end()
 
-    return { view, cover: first.flow.cover, size: this.size }
+    return { view, cover: wanted.cover, size: this.size }
   }
 
   private target(device: GPUDevice, size: number): GPUTextureView | null {

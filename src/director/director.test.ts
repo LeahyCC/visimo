@@ -4,10 +4,12 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { MAX_INKS } from '../studies/cast'
 import { CASTS } from '../studies/casts'
 import { findStudy, STUDIES } from '../studies/registry'
+import { castFrame, resolveLive } from '../studies/resolve'
 import type { LiveStudy } from '../studies/resolve'
 import type { Character, FlowStudy, InkStudy, LookStudy, Moments, Study } from '../studies/types'
 import { COST_OF, Director, pickCast } from './director'
 import type { PickedCast } from './director'
+import { BUILD_FULL } from './moment'
 import type { MomentWeights } from './moment'
 import { DROP_AT, HARDSTYLE, HOUSE, LOFI, PARTS, playSong } from './song.fixture'
 
@@ -489,6 +491,113 @@ describe('how a change lands', () => {
   })
 })
 
+describe('a build beginning', () => {
+  const settle = (director: Director, features: Float32Array, seconds: number) =>
+    run(director, features, seconds)
+
+  // A build has no boundary of its own until it is six seconds old, and a
+  // riser creeps in with no novelty spike. On a real track the build's own
+  // section was confirmed after the drop it led to.
+  it('casts for the build as tension rises, with no boundary and no novelty', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    settle(director, packet({ section: 1 }), 40)
+    expect(director.cast?.inks).not.toContain('build-ink')
+    settle(director, packet({ section: 1, tension: 0.1 }), 1)
+    expect(director.cast?.inks).not.toContain('build-ink')
+    director.step(packet({ section: 1, tension: 0.35 }), 1 / 60)
+    expect(director.cast?.inks).toContain('build-ink')
+  })
+
+  it('is one signal per build, however the tension wavers on the way up', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    settle(director, packet({ section: 1 }), 40)
+    let changes = 0
+    let held = name(director.cast)
+    for (const tension of [0.35, 0.28, 0.4, 0.26, 0.45, 0.3, 0.5]) {
+      settle(director, packet({ section: 1, tension }), 0.5)
+      if (name(director.cast) !== held) {
+        changes += 1
+        held = name(director.cast)
+      }
+    }
+
+    expect(changes).toBe(1)
+  })
+
+  it('cuts away from the build’s cast on the drop, with tension still high', () => {
+    // The shared library has no ink written for a drop, and with nothing to
+    // beat it the build's ink would keep its seat on its margin.
+    const studies = [...BENCH, ink('drop-ink', moments({ drop: 1 }))]
+    const director = new Director({ studies, budget: 4 })
+    settle(director, packet({ section: 1 }), 40)
+    settle(director, packet({ section: 1, tension: 0.45 }), 4)
+    expect(director.cast?.inks).toContain('build-ink')
+    director.step(packet({ section: 1, tension: 0.41, release: 0.37, impact: 1 }), 1 / 60)
+    expect(director.cast?.flow).toBe('drop-flow')
+    expect(director.cast?.inks).not.toContain('build-ink')
+  })
+
+  // Not every riser ends in a drop. Left alone, the build's cast stayed on
+  // screen with nothing to wind up to until some other signal came along.
+  it('lets the build’s cast go when the build fizzles', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    settle(director, packet({ section: 1 }), 40)
+    settle(director, packet({ section: 1, tension: 0.45 }), 4)
+    expect(director.cast?.inks).toContain('build-ink')
+    settle(director, packet({ section: 1, tension: 0.2 }), 1)
+    expect(director.cast?.inks).toContain('build-ink')
+    settle(director, packet({ section: 1, tension: 0.05 }), 1)
+    expect(director.cast?.inks).not.toContain('build-ink')
+    expect(director.cast?.inks).toContain('groove-ink')
+  })
+
+  // A build starting is the drop's section over, whatever has been confirmed.
+  it('is heard even while a drop’s cast is being held', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    settle(director, packet({ section: 1 }), 40)
+    director.step(packet({ section: 1, release: 0.5, impact: 1 }), 1 / 60)
+    settle(director, packet({ section: 1 }), 8)
+    expect(director.cast?.flow).toBe('drop-flow')
+    director.step(packet({ section: 1, tension: 0.4 }), 1 / 60)
+    expect(director.cast?.inks).toContain('build-ink')
+  })
+})
+
+describe('the canvas a chosen cast draws on', () => {
+  // With the post stack's own defaults the carry was 0, and under the
+  // director no flow moved the picture at all.
+  it('carries the picture along the flow, and keeps a floor and a ceiling', () => {
+    const director = new Director({ studies: STUDIES })
+    const { canvas } = director.step(packet({ section: 1 }), 1 / 60)
+    expect(canvas.enabled).toBe(true)
+    expect(canvas.knobs['feedback.carry']).toBe(1)
+    expect(canvas.knobs['feedback.amount'] * canvas.knobs['feedback.decay']).toBeGreaterThan(0.9)
+    expect(canvas.knobs['feedback.floor']).toBeGreaterThan(0)
+    expect(canvas.knobs['feedback.ceiling']).toBeLessThan(4)
+  })
+
+  it('stays inside a safe range at silence, at a full packet and wound right up', () => {
+    const director = new Director({ studies: STUDIES })
+    const { canvas } = director.step(packet({ section: 1 }), 1 / 60)
+    for (const level of [0, 1]) {
+      const features = new Float32Array(PACKET_LENGTH).fill(level)
+      const frame = resolveLive([], canvas, features, level, castFrame())
+      const { feedback } = frame.post
+      // Kept per frame stays under 1, or a still picture sums without limit.
+      expect(feedback.amount * feedback.decay).toBeLessThan(1)
+      expect(feedback.amount * feedback.decay).toBeGreaterThan(0.8)
+      expect(feedback.ceiling).toBeGreaterThan(feedback.floor + 0.5)
+      expect(feedback.floor).toBeGreaterThanOrEqual(0)
+    }
+  })
+
+  it('leaves a pinned cast its own canvas', () => {
+    const pinned = CASTS[0]!
+    const director = new Director({ pinned })
+    expect(director.step(packet({ section: 1 }), 1 / 60).canvas).toBe(pinned.canvas)
+  })
+})
+
 describe('what a section is remembered by', () => {
   // A track that opens straight into a section is given the neutral guess
   // for it, since nothing is known yet. Remembered, that guess would be what
@@ -565,8 +674,8 @@ describe('a pinned cast', () => {
     expect(director.settled).toBe(1)
     expect(director.character.hardness).toBeGreaterThan(0.8)
     expect(director.character.steadiness).toBeGreaterThan(0.7)
-    director.step(packet({ section: 1, tension: 0.8 }), 1 / 60)
-    expect(director.weights.build).toBeCloseTo(0.8)
+    director.step(packet({ section: 1, tension: 0.2 }), 1 / 60)
+    expect(director.weights.build).toBeCloseTo(0.2 / BUILD_FULL)
   })
 })
 

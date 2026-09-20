@@ -37,7 +37,7 @@
  * are the same objects every frame.
  */
 import { F } from '../audio/FeatureExtractor'
-import { defaultCanvas, MAX_INKS } from '../studies/cast'
+import { carriedCanvas, MAX_INKS } from '../studies/cast'
 import type { Cast, CastOverride } from '../studies/cast'
 import { STUDIES } from '../studies/registry'
 import type { LiveCast, LiveStudy } from '../studies/resolve'
@@ -109,6 +109,23 @@ const SECTION_SLACK = 1.5
 /** What the extractor itself calls a candidate boundary, and where it rearms. */
 const NOVELTY_ON = 0.4
 const NOVELTY_OFF = 0.25
+
+/**
+ * A build beginning, read off packet row 47. A build is the one place in a
+ * song where what happens next is nearly certain, and nothing told the
+ * director one had started: a build has no boundary of its own until it is
+ * six seconds old, and often no novelty spike either, since a riser creeps
+ * in. On the first real track the build's own section was confirmed after
+ * the drop it led to. So tension rising through this is a signal like the
+ * other two, and the cast for the build is chosen while there is still a
+ * build to show it over. It sits where the build already outweighs the
+ * groove (0.3 of a row that is full at 0.5 is a build weight of 0.6): tried
+ * at 0.2 the signal fired while the groove's cast, with its margin, still
+ * won, and was spent before it could choose anything. The rearm sits well
+ * under it, so a build that wavers is one signal.
+ */
+const TENSION_ON = 0.3
+const TENSION_OFF = 0.12
 
 /** A moment no study is written for still needs a picture. See `valueOf`. */
 const LAST_RESORT = 1e-4
@@ -346,6 +363,7 @@ export class Director {
   private ramp = DEFAULT_GLIDE_SECONDS
   private impactHeld = false
   private noveltyHeld = false
+  private tensionHeld = false
 
   constructor(options: DirectorOptions = {}) {
     this.studies = options.studies ?? STUDIES
@@ -359,7 +377,7 @@ export class Director {
     this.ramp = this.glideSeconds
     this.frame = {
       studies: this.live,
-      canvas: this.pinned?.canvas ?? defaultCanvas(),
+      canvas: this.pinned?.canvas ?? carriedCanvas(),
       tension: 0,
     }
 
@@ -397,6 +415,12 @@ export class Director {
     const section = features[F.section] ?? 0
     const impact = this.fired(features[F.impact] ?? 0)
     const novelty = this.spiked(features[F.novelty] ?? 0)
+    const wasWound = this.tensionHeld
+    const winding = this.wound(features[F.tension] ?? 0)
+    // The build let go with no drop: not every riser ends in one. Left alone,
+    // the build's cast stays on screen with nothing to wind up to until some
+    // other signal happens to come along.
+    const fizzled = wasWound && !this.tensionHeld && !this.holding
     const boundary = section > 0 && section !== this.section
     if (boundary) {
       this.section = section
@@ -406,7 +430,12 @@ export class Director {
     this.sinceImpact = impact ? 0 : this.sinceImpact + dt
     if (boundary || !this.current) this.settle(section, character, weights, settled, impact)
     else if (impact) this.challenge(character, weights, settled, this.cutSeconds)
-    else if (novelty && !this.holding)
+    else if (winding) {
+      // A build starting is the drop's section over, whatever has or has not
+      // been confirmed, so it is heard even while a drop's cast is held.
+      this.holding = false
+      this.challenge(character, weights, settled, this.glideSeconds)
+    } else if ((novelty || fizzled) && !this.holding)
       this.challenge(character, weights, settled, this.glideSeconds)
     if (impact) this.holding = true
 
@@ -549,6 +578,17 @@ export class Director {
     }
 
     if (impact < IMPACT_OFF) this.impactHeld = false
+    return false
+  }
+
+  /** And for `tension`: one signal per build, however it wavers on the way up. */
+  private wound(tension: number): boolean {
+    if (!this.tensionHeld && tension >= TENSION_ON) {
+      this.tensionHeld = true
+      return true
+    }
+
+    if (tension < TENSION_OFF) this.tensionHeld = false
     return false
   }
 

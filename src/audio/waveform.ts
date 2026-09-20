@@ -78,3 +78,35 @@ export function resampleWaveform(
 
   return out
 }
+
+/** Seconds for the remembered peak to fall to 1/e once the sound gets quieter. */
+const LEVEL_RELEASE_SECONDS = 3
+/**
+ * The quietest peak that is still scaled up to full. Under it the line
+ * shrinks with the sound, so the hiss of a paused track is not blown up into
+ * a full-height scribble.
+ */
+const LEVEL_FLOOR = 0.02
+/** Where the loudest recent sample is put, leaving headroom for an overshoot. */
+const LEVEL_TARGET = 0.8
+
+/**
+ * Scale the points in place so the loudest recent sample sits near full
+ * height, and return the peak to remember for the next frame.
+ *
+ * The analyser hears the element after its volume control, so without this a
+ * listener at a tenth of full volume gets a tenth of a line. The band levels
+ * are scaled against their own recent peak for the same reason. The peak
+ * rises at once and falls slowly, so a loud hit is never clipped and a quiet
+ * passage grows back into the frame over a few seconds and not frame to frame.
+ */
+export function levelWaveform(points: Float32Array, remembered: number, dt: number): number {
+  let loudest = 0
+  for (const point of points) loudest = Math.max(loudest, Math.abs(point))
+  const held = Number.isFinite(remembered) && remembered > 0 ? remembered : 0
+  const step = Number.isFinite(dt) && dt > 0 ? dt : 0
+  const peak = Math.max(loudest, held * Math.exp(-step / LEVEL_RELEASE_SECONDS))
+  const gain = LEVEL_TARGET / Math.max(peak, LEVEL_FLOOR)
+  for (let at = 0; at < points.length; at++) points[at] = (points[at] ?? 0) * gain
+  return peak
+}

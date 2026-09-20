@@ -20,6 +20,8 @@
  * which a dock or popout move always does, so the trails start again from
  * black on each move while the simulation itself keeps running.
  */
+import { F } from '../audio/FeatureExtractor'
+import { levelWaveform } from '../audio/waveform'
 import type { Flow } from '../scenes/Scene'
 import blur from '../shaders/post.blur.wgsl?raw'
 import bright from '../shaders/post.bright.wgsl?raw'
@@ -108,6 +110,8 @@ export class PostStack {
   private readonly uniformData = new Float32Array(POST_UNIFORM_FLOATS)
   // The points are made here, on the CPU, and only when the ribbon draws.
   private readonly ribbonData = new Float32Array(RIBBON_POINTS)
+  /** The loudest recent sample, which the line is scaled against. */
+  private ribbonPeak = 0
 
   init(device: GPUDevice, format: GPUTextureFormat) {
     const module = (code: string) => {
@@ -312,6 +316,9 @@ export class PostStack {
     // rides the trail from this frame on.
     if (waveform && ribbonRuns(this.settings)) {
       fillRibbonPoints(waveform, this.ribbonData)
+      // Levelled against its own recent peak, so the line is as tall at a
+      // tenth of the volume as at full.
+      this.ribbonPeak = levelWaveform(this.ribbonData, this.ribbonPeak, features[F.dt] ?? 0)
       gear.device.queue.writeBuffer(gear.ribbonPoints, 0, this.ribbonData)
       draw(
         encoder,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resampleWaveform, windowStart } from './waveform'
+import { levelWaveform, resampleWaveform, windowStart } from './waveform'
 
 /** `cycles` whole turns of a sine over `length` samples, starting `phase` turns in. */
 const sine = (length: number, cycles: number, phase = 0) =>
@@ -154,5 +154,46 @@ describe('starting the window on a rising zero crossing', () => {
     expect(out[0] ?? -1).toBeGreaterThanOrEqual(0)
     expect(out[0] ?? 1).toBeLessThan(0.3)
     expect(out[3] ?? 0).toBeGreaterThan(out[0] ?? 0)
+  })
+})
+
+describe('levelling the waveform', () => {
+  const tone = (amplitude: number) =>
+    Float32Array.from({ length: 256 }, (_, n) => amplitude * Math.sin((n / 256) * Math.PI * 8))
+  const tallest = (points: Float32Array) => points.reduce((m, p) => Math.max(m, Math.abs(p)), 0)
+
+  it('draws a quiet sound as tall as a loud one', () => {
+    const loud = tone(0.9)
+    const quiet = tone(0.05)
+    levelWaveform(loud, 0, 1 / 60)
+    levelWaveform(quiet, 0, 1 / 60)
+    expect(tallest(quiet)).toBeCloseTo(tallest(loud), 5)
+    expect(tallest(loud)).toBeCloseTo(0.8, 5)
+  })
+
+  it('lets near silence shrink and leaves silence alone', () => {
+    const hiss = tone(0.002)
+    levelWaveform(hiss, 0, 1 / 60)
+    expect(tallest(hiss)).toBeLessThan(0.1)
+    const nothing = new Float32Array(256)
+    expect(levelWaveform(nothing, 0, 1 / 60)).toBe(0)
+    expect(tallest(nothing)).toBe(0)
+  })
+
+  it('remembers a loud hit, so the quiet after it grows back slowly', () => {
+    const peak = levelWaveform(tone(0.9), 0, 1 / 60)
+    const after = tone(0.09)
+    const next = levelWaveform(after, peak, 1 / 60)
+    expect(tallest(after)).toBeLessThan(0.1)
+    expect(next).toBeLessThan(peak)
+    const later = tone(0.09)
+    levelWaveform(later, peak, 30)
+    expect(tallest(later)).toBeCloseTo(0.8, 5)
+  })
+
+  it('shrugs off a bad step or a bad memory', () => {
+    const points = tone(0.5)
+    expect(Number.isFinite(levelWaveform(points, Number.NaN, Number.NaN))).toBe(true)
+    expect(tallest(points)).toBeCloseTo(0.8, 5)
   })
 })

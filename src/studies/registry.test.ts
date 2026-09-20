@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { ANALYTIC_RANGES } from '../impls/analytic.params'
+import { CAUSTICS_RANGES } from '../impls/caustics.params'
 import { DUST_RANGES } from '../impls/dust.params'
 import { SHARD_RANGES } from '../impls/shards.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
@@ -27,7 +28,7 @@ import type { AnalyticKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs
 import { KALEIDOSCOPE_RANGES } from '../scenes/kaleidoscope.params'
 import { CASTS } from './casts/index'
 import { IMPL_IDS, implKnobs, isImplId, isImplKnob } from './impls'
-import type { DustKnob, ImplId, StreaksKnob } from './impls'
+import type { CausticsKnob, DustKnob, ImplId, StreaksKnob } from './impls'
 import { findStudy, STUDIES } from './registry'
 import { castFrame, resolveCast, resolveStudy } from './resolve'
 import { STUDY_FIELDS, STUDY_KINDS } from './types'
@@ -104,6 +105,8 @@ const isShardKnob = (knob: string): knob is ShardKnob =>
   Object.prototype.hasOwnProperty.call(SHARD_RANGES, knob)
 const isDustKnob = (knob: string): knob is DustKnob =>
   Object.prototype.hasOwnProperty.call(DUST_RANGES, knob)
+const isCausticsKnob = (knob: string): knob is CausticsKnob =>
+  Object.prototype.hasOwnProperty.call(CAUSTICS_RANGES, knob)
 
 /** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
 const SIGNED = new Set(['colourDrift'])
@@ -126,6 +129,7 @@ function safeRange(impl: ImplId, knob: string): readonly [number, number] | unde
   if (impl === 'streaks' && isStreaksKnob(knob)) return STREAK_RANGES[knob]
   if (impl === 'shards' && isShardKnob(knob)) return SHARD_RANGES[knob]
   if (impl === 'dust' && isDustKnob(knob)) return DUST_RANGES[knob]
+  if (impl === 'caustics' && isCausticsKnob(knob)) return CAUSTICS_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
 }
@@ -245,6 +249,11 @@ const ALLOWED: Record<string, Record<string, string>> = {
   },
   'dust': {
     size: 'the grain of the dust; a size that moved would pulse every speck at once, which is what the twinkle is for',
+    hueSpread: 'how far the hues scatter round the ribbon’s, a setting of the look and not a level',
+  },
+  'caustics': {
+    scale:
+      'the size of the cells; a live scale would zoom the whole pattern about the middle, which reads as the camera moving and not as light on water',
     hueSpread: 'how far the hues scatter round the ribbon’s, a setting of the look and not a level',
   },
   'fractal-glints': {

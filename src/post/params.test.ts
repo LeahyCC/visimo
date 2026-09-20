@@ -1,20 +1,29 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { visibleExtent } from '../scenes/fluid.params'
+import { PRESETS } from '../presets/index'
+import { paletteAt, visibleExtent } from '../scenes/fluid.params'
 import {
   BLOOM_LEVELS,
   bloomLevelSize,
   bloomSourceSize,
   defaultPostParams,
   feedbackStep,
+  fillRibbonPoints,
   flowCover,
   freshWeight,
   mergePostParams,
   POST_LANES,
+  POST_STAGES,
   POST_UNIFORM_FLOATS,
   postIsActive,
   postSummary,
+  RIBBON_POINTS,
+  RIBBON_SEARCH,
+  RIBBON_SPAN,
+  RIBBON_VERTICES,
+  ribbonColour,
+  ribbonRuns,
   writePostUniform,
 } from './params'
 import type { FlowCover, PostParams } from './params'
@@ -293,7 +302,8 @@ describe('carrying the history along a flow', () => {
     const before = write(defaultPostParams(), features)
     const after = write(carrying(), features, 1920, 1080, coverOf(1920, 1080))
     expect(Array.from(after.slice(0, 28))).toEqual(Array.from(before.slice(0, 28)))
-    expect(POST_UNIFORM_FLOATS).toBe(36)
+    // The ribbon's two vec4s went on the end, past the flow block and the floor.
+    expect(POST_UNIFORM_FLOATS).toBe(44)
   })
 
   it('makes the carry vanish with no flow, no carry or the stage off', () => {
@@ -417,5 +427,207 @@ describe('the floor under the trail', () => {
     // a code value or two out of a background that is nearly black.
     expect(Math.abs(settled(0.018, 144) - settled(0.018, 60))).toBeLessThan(0.01)
     for (const fps of [30, 60, 144, 240]) expect(settled(0.018, fps)).toBeLessThan(0.06)
+  })
+})
+
+describe('the ribbon', () => {
+  const lighting = (patch = {}) =>
+    mergePostParams(defaultPostParams(), { ribbon: { enabled: true, intensity: 0.5, ...patch } })
+  /** The ribbon's own vec4s, the last two in the uniform. */
+  const ribbonFloats = (out: Float32Array) => Array.from(out.slice(36, 44))
+  const brightest = (colour: readonly number[]) => Math.max(...colour)
+
+  it('is off by default, and shows nothing when switched on at no intensity', () => {
+    const ribbon = defaultPostParams().ribbon
+    expect(ribbon.enabled).toBe(false)
+    expect(ribbon.intensity).toBe(0)
+    expect(ribbonRuns(defaultPostParams())).toBe(false)
+    expect(ribbonRuns(lighting({ intensity: 0 }))).toBe(false)
+    expect(ribbonRuns(lighting({ width: 0 }))).toBe(false)
+    expect(ribbonRuns(lighting({ intensity: -1 }))).toBe(false)
+    expect(ribbonRuns(lighting())).toBe(true)
+    // The stack's own switch overrides the stage, as it does for every other.
+    expect(ribbonRuns(mergePostParams(lighting(), { enabled: false }))).toBe(false)
+  })
+
+  it('leaves the uniform’s existing floats exactly as they were', () => {
+    // The stack at its defaults, one 60 Hz frame, written out by hand from the
+    // defaults above: every number here is what this file wrote before the
+    // ribbon existed, and none of them moves.
+    const features = packet({ dt: 1 / 60, time: 5 })
+    const out = write(defaultPostParams(), features)
+    const wanted = [
+      ...[1920, 1080, 1 / 1920, 1 / 1080],
+      ...[0.22, 0.72, 1.012, 0.002],
+      ...[0.85, 0.2, 0.35, 0],
+      ...[0.5, 0.32, 0.18, 1],
+      ...[0.0008, 0, 0, 0],
+      ...[1, 0.6, 1, 0],
+      ...[0.02, 5, 0, 0],
+      ...[0, 16, 1, 1],
+      ...[0, 0, 0, 0],
+    ]
+    expect(wanted).toHaveLength(36)
+    wanted.forEach((value, index) => expect(out[index]).toBeCloseTo(value, 6))
+    // And turning the ribbon on moves none of them either.
+    const drawing = write(lighting({ shape: 1 }), features)
+    expect(Array.from(drawing.slice(0, 36))).toEqual(Array.from(out.slice(0, 36)))
+  })
+
+  it('writes values that make it vanish when it is off', () => {
+    const features = packet({ keyHue: 0.3 })
+    const zeros = [0, 0, 0, 0, 0, 0, 0, 0]
+    expect(ribbonFloats(write(defaultPostParams(), features))).toEqual(zeros)
+    expect(ribbonFloats(write(lighting({ enabled: false }), features))).toEqual(zeros)
+    expect(ribbonFloats(write(mergePostParams(lighting(), { enabled: false }), features))).toEqual(
+      zeros,
+    )
+    // Off with every other number a preset might have left behind it.
+    const off = lighting({ enabled: false, shape: 1, width: 9, height: 0.4 })
+    expect(ribbonFloats(write(off, features))).toEqual(zeros)
+  })
+
+  it('writes its width in pixels at 1080p and scales it with the canvas', () => {
+    const width = (w: number, h: number, patch = {}) =>
+      write(lighting({ width: 3, ...patch }), packet(), w, h)[37]
+    expect(width(1920, 1080)).toBeCloseTo(3, 6)
+    expect(width(3840, 2160)).toBeCloseTo(6, 6)
+    expect(width(1280, 720)).toBeCloseTo(2, 6)
+    // The short side, so a phone held upright draws the line a wide screen would.
+    expect(width(1080, 1920)).toBeCloseTo(3, 6)
+    expect(width(1920, 1080, { width: 7.5 })).toBeCloseTo(7.5, 6)
+  })
+
+  it('writes its intensity and never a negative one', () => {
+    expect(write(lighting({ intensity: 0.7 }), packet())[36]).toBeCloseTo(0.7, 6)
+    expect(write(lighting({ intensity: -2 }), packet())[36]).toBe(0)
+  })
+
+  it('makes its height a fraction of the canvas in the direction the sound pushes', () => {
+    const at = (w: number, h: number, patch = {}) =>
+      write(lighting({ height: 0.25, ...patch }), packet(), w, h)
+    // The line moves up and down the frame: a quarter of its height.
+    expect(at(1920, 1080)[38]).toBeCloseTo(270, 4)
+    // The circle moves in and out from the middle: a quarter of its short side.
+    expect(at(1920, 1080, { shape: 1 })[38]).toBeCloseTo(270, 4)
+    expect(at(1000, 500, { shape: 1 })[38]).toBeCloseTo(125, 4)
+    expect(at(1000, 500)[38]).toBeCloseTo(125, 4)
+    expect(at(1000, 400, { shape: 1 })[38]).toBeCloseTo(100, 4)
+    expect(at(1920, 1080, { height: -1 })[38]).toBe(0)
+  })
+
+  it('has two shapes, the line at 0 and the circle at 1, and rounds up from halfway', () => {
+    const shape = (value: number) => write(lighting({ shape: value }), packet(), 1920, 1080)
+    expect(shape(0)[39]).toBe(0)
+    expect(shape(0.49)[39]).toBe(0)
+    expect(shape(0.5)[39]).toBe(1)
+    expect(shape(1)[39]).toBe(1)
+    expect(shape(3)[39]).toBe(1)
+    // The circle has a radius at rest and the line has none to carry.
+    expect(shape(1)[43]).toBeCloseTo(0.28 * 1080, 4)
+    expect(shape(0)[43]).toBe(0)
+  })
+
+  it('takes its colour from the fluid’s palette at the song’s key', () => {
+    for (const keyHue of [0, 1 / 12, 0.3, 7 / 12, 0.95]) {
+      const out = write(lighting(), packet({ keyHue }))
+      const [red, green, blue] = paletteAt(keyHue + 0.5)
+      const peak = Math.max(red, green, blue)
+      expect(out[40]).toBeCloseTo(red / peak, 5)
+      expect(out[41]).toBeCloseTo(green / peak, 5)
+      expect(out[42]).toBeCloseTo(blue / peak, 5)
+    }
+  })
+
+  it('moves with the key and holds the same brightness in every key', () => {
+    const colour = (keyHue: number) => ribbonColour(packet({ keyHue }))
+    expect(colour(0)).not.toEqual(colour(0.25))
+    for (let step = 0; step < 24; step++) expect(brightest(colour(step / 24))).toBeCloseTo(1, 6)
+    // The key wraps, so a hue past 1 is the hue it is a turn from.
+    for (const [a, b] of [
+      [1.25, 0.25],
+      [-0.25, 0.75],
+    ] as const)
+      colour(a).forEach((value, index) => expect(value).toBeCloseTo(colour(b)[index] ?? 0, 5))
+  })
+
+  it('draws white rather than NaN when the key is not a number', () => {
+    expect(ribbonColour(packet({ keyHue: Number.NaN }))).toEqual([1, 1, 1])
+  })
+
+  it('has a lane for each of its numbers', () => {
+    const params = defaultPostParams()
+    for (const [lane, value] of [
+      ['ribbon.intensity', 0],
+      ['ribbon.width', 3],
+      ['ribbon.height', 0.25],
+      ['ribbon.shape', 0],
+    ] as const) {
+      expect(POST_LANES[lane].read(params)).toBe(value)
+      POST_LANES[lane].write(params, 0.5)
+      expect(POST_LANES[lane].read(params)).toBe(0.5)
+    }
+
+    expect(params.ribbon).toMatchObject({ intensity: 0.5, width: 0.5, height: 0.5, shape: 0.5 })
+    // A lane is a number, and the switch is not one.
+    expect('ribbon.enabled' in POST_LANES).toBe(false)
+  })
+
+  it('takes a patch without touching what it was given', () => {
+    const base = defaultPostParams()
+    const patched = mergePostParams(base, { ribbon: { enabled: true, shape: 1 } })
+    expect(patched.ribbon).toEqual({ ...base.ribbon, enabled: true, shape: 1 })
+    expect(base.ribbon.enabled).toBe(false)
+    expect(patched.ribbon).not.toBe(base.ribbon)
+  })
+
+  it('is the first stage a summary names, and only when it runs', () => {
+    expect(POST_STAGES[0]).toBe('ribbon')
+    expect(postSummary(defaultPostParams())).toBe('feedback bloom chroma tonemap grain')
+    expect(postSummary(lighting())).toBe('ribbon feedback bloom chroma tonemap grain')
+    const alone = mergePostParams(lighting(), {
+      feedback: { enabled: false },
+      bloom: { enabled: false },
+      chromatic: { enabled: false },
+      tonemap: { enabled: false },
+      grain: { enabled: false },
+    })
+
+    expect(postSummary(alone)).toBe('ribbon')
+    expect(postIsActive(alone)).toBe(true)
+    expect(postSummary(mergePostParams(alone, { ribbon: { enabled: false } }))).toBe('off')
+  })
+
+  it('takes its points from the newest sound and never writes a NaN', () => {
+    const out = new Float32Array(RIBBON_POINTS).fill(9)
+    expect(fillRibbonPoints(new Float32Array(4096), out)).toBe(out)
+    for (const value of out) expect(value).toBe(0)
+    const tone = Float32Array.from({ length: 4096 }, (_, index) => Math.sin(index / 5))
+    fillRibbonPoints(tone, out)
+    for (const value of out) expect(Math.abs(value)).toBeLessThanOrEqual(1)
+    expect(Math.max(...out)).toBeGreaterThan(0.5)
+  })
+
+  it('sizes the strip for the points, one more than there are to close the circle', () => {
+    expect(RIBBON_VERTICES).toBe(2 * (RIBBON_POINTS + 1))
+    // The window and the room to find a crossing in fit the analyser's 4096.
+    expect(RIBBON_SPAN + RIBBON_SEARCH).toBeLessThanOrEqual(4096)
+    expect(RIBBON_POINTS).toBeGreaterThanOrEqual(100)
+  })
+
+  it('writes a whole, finite uniform for every shipped preset at any canvas', () => {
+    // The WebGL2 path writes the same uniform and skips the ribbon, so a
+    // preset that turns it on must not put anything in it that could throw.
+    for (const preset of PRESETS)
+      for (const [width, height] of [
+        [1920, 1080],
+        [1, 1],
+        [3840, 2160],
+        [600, 1400],
+      ] as const) {
+        const out = new Float32Array(POST_UNIFORM_FLOATS)
+        writePostUniform(preset.postParams, packet({ keyHue: 0.4, dt: 1 / 90 }), width, height, out)
+        for (const value of out) expect(Number.isFinite(value)).toBe(true)
+      }
   })
 })

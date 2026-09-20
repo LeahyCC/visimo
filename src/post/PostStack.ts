@@ -1,16 +1,18 @@
 /**
  * The post stack: everything between the scene and the swap chain.
  *
- *   scene ──► history[current] ──► bright ──► blur x3 ──► composite ──► canvas
- *                   ▲  add                                    ▲
- *                   └── history[other], zoomed and decayed ────┘
+ *   scene ──► ribbon ──► history[current] ──► bright ──► blur x3 ──► composite ──► canvas
+ *                              ▲  add                                    ▲
+ *                              └── history[other], zoomed and decayed ────┘
  *
  * The scene draws into one of two floating-point history textures instead of
  * the canvas, so its brightest pixels survive past 1 and the tonemap in the
- * composite has something to roll off. The feedback pass adds the other
- * history texture back over it, warped a little, and the two swap each frame.
- * A scene that solves a velocity field may offer it as its `flow`, and the
- * warp then reads the last frame back along that current as well.
+ * composite has something to roll off. The ribbon, when a preset turns it on,
+ * draws the sound as a line into that same texture, so it is fresh light like
+ * the scene's and the trails carry it. The feedback pass adds the other
+ * history texture back over both, warped a little, and the two swap each
+ * frame. A scene that solves a velocity field may offer it as its `flow`, and
+ * the warp then reads the last frame back along that current as well.
  *
  * Like the scene, this belongs to the renderer singleton, so the pipelines,
  * the sampler and the parameters outlive every remount. The textures do not:
@@ -18,20 +20,27 @@
  * which a dock or popout move always does, so the trails start again from
  * black on each move while the simulation itself keeps running.
  */
+import { F } from '../audio/FeatureExtractor'
+import { levelWaveform } from '../audio/waveform'
 import type { Flow } from '../scenes/Scene'
 import blur from '../shaders/post.blur.wgsl?raw'
 import bright from '../shaders/post.bright.wgsl?raw'
 import common from '../shaders/post.common.wgsl?raw'
 import composite from '../shaders/post.composite.wgsl?raw'
 import feedback from '../shaders/post.feedback.wgsl?raw'
+import ribbon from '../shaders/post.ribbon.wgsl?raw'
 import {
   BLOOM_LEVELS,
   bloomLevelSize,
   bloomSourceSize,
   defaultPostParams,
+  fillRibbonPoints,
   freshWeight,
   mergePostParams,
   POST_UNIFORM_FLOATS,
+  RIBBON_POINTS,
+  RIBBON_VERTICES,
+  ribbonRuns,
   stageEnabled,
   writePostUniform,
 } from './params'
@@ -74,6 +83,11 @@ type Gear = {
   /** One zero texel, bound as the flow when the scene offers none. */
   still: GPUTextureView
   stillTexture: GPUTexture
+  ribbon: GPURenderPipeline
+  /** The uniform and the points, bound once: neither buffer is ever replaced. */
+  ribbonGroup: GPUBindGroup
+  /** The waveform's points, `RIBBON_POINTS` floats, sized once. */
+  ribbonPoints: GPUBuffer
   bright: GPURenderPipeline
   blur: GPURenderPipeline
   composite: GPURenderPipeline
@@ -94,6 +108,10 @@ export class PostStack {
   private current: 0 | 1 = 0
   private settings = defaultPostParams()
   private readonly uniformData = new Float32Array(POST_UNIFORM_FLOATS)
+  // The points are made here, on the CPU, and only when the ribbon draws.
+  private readonly ribbonData = new Float32Array(RIBBON_POINTS)
+  /** The loudest recent sample, which the line is scaled against. */
+  private ribbonPeak = 0
 
   init(device: GPUDevice, format: GPUTextureFormat) {
     const module = (code: string) => {
@@ -108,13 +126,23 @@ export class PostStack {
       return shader
     }
 
-    const pipeline = (code: string, target: GPUColorTargetState, group?: GPUBindGroupLayout) => {
+    // Every pass is one oversized triangle from `vs` in post.common.wgsl but
+    // the ribbon's, which brings its own vertex entry point and a strip.
+    const pipeline = (
+      code: string,
+      target: GPUColorTargetState,
+      group?: GPUBindGroupLayout,
+      shape: { vertex: string; topology: GPUPrimitiveTopology } = {
+        vertex: 'vs',
+        topology: 'triangle-list',
+      },
+    ) => {
       const shader = module(code)
       return device.createRenderPipeline({
         layout: group ? device.createPipelineLayout({ bindGroupLayouts: [group] }) : 'auto',
-        vertex: { module: shader, entryPoint: 'vs' },
+        vertex: { module: shader, entryPoint: shape.vertex },
         fragment: { module: shader, entryPoint: 'fs', targets: [target] },
-        primitive: { topology: 'triangle-list' },
+        primitive: { topology: shape.topology },
       })
     }
 
@@ -146,6 +174,29 @@ export class PostStack {
       { width: 1, height: 1 },
     )
 
+    // The ribbon's two buffers are made here and never again, and its bind
+    // group with them, since neither buffer is ever replaced. The layout is
+    // named for the reason the feedback one is. The vertex stage reads both
+    // of them: the points to place the line and the uniform to size it.
+    const uniform = device.createBuffer({
+      size: POST_UNIFORM_FLOATS * 4,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+    const ribbonPoints = device.createBuffer({
+      size: RIBBON_POINTS * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    })
+    const ribbonLayout = device.createBindGroupLayout({
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+          buffer: { type: 'uniform' },
+        },
+        { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+      ],
+    })
+
     this.gear = {
       device,
       // Linear and clamped: the warp, the downsamples and the blur all rely on
@@ -156,10 +207,7 @@ export class PostStack {
         addressModeU: 'clamp-to-edge',
         addressModeV: 'clamp-to-edge',
       }),
-      uniform: device.createBuffer({
-        size: POST_UNIFORM_FLOATS * 4,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      }),
+      uniform,
       // The scene has already drawn into the target, so the history is added
       // to it rather than read back and mixed. The constant is the weight on
       // that new frame, which keeps the sum the same at any frame rate.
@@ -177,6 +225,28 @@ export class PostStack {
       feedbackLayout,
       still: stillTexture.createView(),
       stillTexture,
+      // Light added to what the scene drew and nothing else: the alpha is
+      // left where it was.
+      ribbon: pipeline(
+        ribbon,
+        {
+          format: SCENE_FORMAT,
+          blend: {
+            color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+            alpha: { srcFactor: 'zero', dstFactor: 'one', operation: 'add' },
+          },
+        },
+        ribbonLayout,
+        { vertex: 'strip', topology: 'triangle-strip' },
+      ),
+      ribbonGroup: device.createBindGroup({
+        layout: ribbonLayout,
+        entries: [
+          { binding: 0, resource: { buffer: uniform } },
+          { binding: 1, resource: { buffer: ribbonPoints } },
+        ],
+      }),
+      ribbonPoints,
       bright: pipeline(bright, { format: SCENE_FORMAT }),
       blur: pipeline(blur, { format: SCENE_FORMAT }),
       composite: pipeline(composite, { format }),
@@ -223,13 +293,15 @@ export class PostStack {
    * Run the stack over what the scene drew and write `view`. `flow` is the
    * velocity field the scene is solving, if it solves one; it is passed in
    * each frame rather than held, since which of a ping-pong pair it names
-   * alternates.
+   * alternates. `waveform` is the analyser's newest samples for the ribbon;
+   * with none, or with the ribbon off, nothing is drawn and nothing uploaded.
    */
   render(
     encoder: GPUCommandEncoder,
     view: GPUTextureView,
     features: Float32Array,
     flow: Flow | null = null,
+    waveform: Float32Array | null = null,
   ) {
     const gear = this.gear
     const sized = this.sized
@@ -238,6 +310,26 @@ export class PostStack {
     const cover = flow?.cover ?? null
     writePostUniform(this.settings, features, sized.width, sized.height, this.uniformData, cover)
     gear.device.queue.writeBuffer(gear.uniform, 0, this.uniformData)
+
+    // Before the feedback pass, into the same texture as the scene: the pass
+    // adds the history to whatever is there, so the line is fresh light and
+    // rides the trail from this frame on.
+    if (waveform && ribbonRuns(this.settings)) {
+      fillRibbonPoints(waveform, this.ribbonData)
+      // Levelled against its own recent peak, so the line is as tall at a
+      // tenth of the volume as at full.
+      this.ribbonPeak = levelWaveform(this.ribbonData, this.ribbonPeak, features[F.dt] ?? 0)
+      gear.device.queue.writeBuffer(gear.ribbonPoints, 0, this.ribbonData)
+      draw(
+        encoder,
+        gear.ribbon,
+        gear.ribbonGroup,
+        sized.history[this.current].view,
+        'load',
+        undefined,
+        RIBBON_VERTICES,
+      )
+    }
 
     if (this.historyReady && stageEnabled(this.settings, 'feedback')) {
       const into = sized.history[this.current].view
@@ -387,6 +479,7 @@ export class PostStack {
   dispose() {
     this.release()
     this.gear?.uniform.destroy()
+    this.gear?.ribbonPoints.destroy()
     this.gear?.stillTexture.destroy()
     this.gear = null
   }
@@ -399,6 +492,7 @@ function draw(
   view: GPUTextureView,
   loadOp: GPULoadOp,
   blendConstant?: number,
+  vertices = 3,
 ) {
   const pass = encoder.beginRenderPass({
     colorAttachments: [{ view, clearValue: BLACK, loadOp, storeOp: 'store' }],
@@ -407,7 +501,7 @@ function draw(
   if (blendConstant !== undefined)
     pass.setBlendConstant({ r: blendConstant, g: blendConstant, b: blendConstant, a: 1 })
   pass.setBindGroup(0, group)
-  pass.draw(3)
+  pass.draw(vertices)
   pass.end()
 }
 

@@ -448,6 +448,7 @@ class Renderer {
         context.getCurrentTexture().createView(),
         this.packet,
         flow?.flow ?? scene.flow,
+        this.client?.waveform ?? null,
       )
       gpu.device.queue.submit([encoder.finish()])
     }

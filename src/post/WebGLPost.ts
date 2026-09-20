@@ -15,10 +15,12 @@ void main() {
   uv = p;
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`
-// All nine of the uniform's vec4s. The eighth is the flow block and nothing
-// on this path solves a velocity field, so it is uploaded and never read; the
-// ninth is the floor, which the feedback pass below does use. `data` uploads
-// as many of them as the program it belongs to declares live.
+// The first nine of the uniform's eleven vec4s. The eighth is the flow block
+// and nothing on this path solves a velocity field, so it is uploaded and never
+// read; the ninth is the floor, which the feedback pass below does use. The
+// last two are the ribbon's, which this path does not draw, so they are never
+// declared here. `data` uploads as many of them as the program it belongs to
+// declares live.
 const COMMON = `#version 300 es
 precision highp float;
 in vec2 uv;
@@ -118,7 +120,10 @@ type Pass = {
  * no compute here to solve a fluid with, so the feedback pass carries nothing
  * along a flow; `feedback.carry` reads as zero whatever a preset asks for.
  * `feedback.floor` and `feedback.ceiling` need no flow, so both apply here
- * exactly as they do on the WebGPU path.
+ * exactly as they do on the WebGPU path. The ribbon is skipped: it wants the
+ * analyser's waveform and a strip drawn into the scene's target, and this path
+ * has neither. A preset that turns it on still draws, without the line, and
+ * nothing here reads or throws on its numbers.
  */
 export class WebGLPost {
   readonly supportsFeedback = true

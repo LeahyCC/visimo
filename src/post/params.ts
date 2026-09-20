@@ -8,6 +8,30 @@
  * renderer a patch per preset and the stack needs no new API for it.
  */
 import { F } from '../audio/FeatureExtractor'
+import { resampleWaveform } from '../audio/waveform'
+import { paletteAt } from '../scenes/fluid.params'
+
+/**
+ * The sound drawn as a line, added to the scene's own picture before the
+ * feedback pass adds the history, so the trails carry it. Every number in it
+ * is a resting value the preset may move.
+ */
+export type RibbonParams = {
+  /** Off draws nothing and uploads nothing. */
+  enabled: boolean
+  /** Peak brightness of the line, 0 for none. The colour is scaled so its brightest channel is 1. */
+  intensity: number
+  /** Width in pixels on a 1080 pixel canvas, scaled with the canvas. */
+  width: number
+  /**
+   * How far the sound pushes the line off its resting place, as a fraction of
+   * the canvas: its height for the horizontal line, its short side for the
+   * circle. A full-scale sample moves the line that far.
+   */
+  height: number
+  /** 0 is a horizontal line across the middle, 1 a circle about the centre. Halfway rounds up. */
+  shape: number
+}
 
 /** The previous frame, warped a little and decayed, added under the new one. */
 export type FeedbackParams = {
@@ -98,6 +122,7 @@ export type GrainParams = {
 export type PostParams = {
   /** Off skips every stage, leaving the composite a straight copy. */
   enabled: boolean
+  ribbon: RibbonParams
   feedback: FeedbackParams
   bloom: BloomParams
   chromatic: ChromaticParams
@@ -108,6 +133,7 @@ export type PostParams = {
 /** A partial update, one stage at a time; what a preset will hand over. */
 export type PostPatch = {
   enabled?: boolean
+  ribbon?: Partial<RibbonParams>
   feedback?: Partial<FeedbackParams>
   bloom?: Partial<BloomParams>
   chromatic?: Partial<ChromaticParams>
@@ -127,6 +153,9 @@ export const BLOOM_LEVELS = 3
  */
 export const DEFAULT_POST_PARAMS: PostParams = {
   enabled: true,
+  // Off, and at no intensity even when a preset switches it on, so the stage
+  // draws nothing until a preset says how bright.
+  ribbon: { enabled: false, intensity: 0, width: 3, height: 0.25, shape: 0 },
   feedback: {
     enabled: true,
     amount: 0.22,
@@ -248,7 +277,65 @@ export function freshWeight(params: PostParams, features: Float32Array): number 
 }
 
 /** Floats in the shared uniform; PostParams in post.common.wgsl must match. */
-export const POST_UNIFORM_FLOATS = 36
+export const POST_UNIFORM_FLOATS = 44
+
+/**
+ * Points along the ribbon. A few hundred is a smooth line at 4K, and the
+ * buffer they live in is sized from this once and never again.
+ */
+export const RIBBON_POINTS = 256
+
+/**
+ * How much sound the line shows. The span is 1536 samples, about 32 ms: a
+ * couple of cycles of a kick, so the shape of a bass note is readable, and
+ * plenty of a hat. The search is how many older samples the window may give
+ * up to start on a rising zero crossing. The two together stay inside the
+ * 4096 samples the analyser holds.
+ */
+export const RIBBON_SPAN = 1536
+export const RIBBON_SEARCH = 512
+
+/** The canvas height a `ribbon.width` is written against, in pixels. */
+const RIBBON_REFERENCE_HEIGHT = 1080
+
+/** How far out the circle sits at rest, as a fraction of the canvas's short side. */
+const RIBBON_RADIUS = 0.28
+
+/**
+ * Where in the fluid's palette the line sits, as an offset from the key. The
+ * fluid's plumes are shades within under half a palette of the key, so half a
+ * palette on is the far side of them, and a line drawn there reads against the
+ * dye instead of vanishing into it. It moves with the key like everything else.
+ */
+const RIBBON_TINT = 0.5
+
+/** Vertices in the strip: two a point, and one point more than there are to close a circle. */
+export const RIBBON_VERTICES = 2 * (RIBBON_POINTS + 1)
+
+/**
+ * Whether the ribbon draws at all this frame. A line with no light or no width
+ * adds nothing, so it is skipped rather than drawn as nothing.
+ */
+export const ribbonRuns = (params: PostParams) =>
+  stageEnabled(params, 'ribbon') && params.ribbon.intensity > 0 && params.ribbon.width > 0
+
+/**
+ * The colour of the line: the fluid's own palette at the song's key, scaled so
+ * its brightest channel is 1. The palette's dimmest stop peaks at 0.34 and its
+ * brightest at 0.94, so left as they are the line would be about a third as
+ * bright in one key as in another and `intensity` would mean a different
+ * thing in each. Scaled, it is the peak brightness whatever the key.
+ */
+export function ribbonColour(features: Float32Array): [number, number, number] {
+  const [red, green, blue] = paletteAt((features[F.keyHue] ?? 0) + RIBBON_TINT)
+  const peak = Math.max(red, green, blue)
+  // Written so that a NaN from a bad key falls through to white, not to NaN.
+  return peak > 1e-4 ? [red / peak, green / peak, blue / peak] : [1, 1, 1]
+}
+
+/** The newest sound as the ribbon's points, into a buffer the caller keeps. */
+export const fillRibbonPoints = (waveform: Float32Array, out: Float32Array): Float32Array =>
+  resampleWaveform(waveform, out, RIBBON_SPAN, RIBBON_SEARCH)
 
 /**
  * Canvas uv to a flow field's own uv, as `Flow.cover` in `scenes/Scene.ts`
@@ -282,6 +369,7 @@ const MIN_CEILING = 1e-4
 
 const clone = (params: PostParams): PostParams => ({
   enabled: params.enabled,
+  ribbon: { ...params.ribbon },
   feedback: { ...params.feedback },
   bloom: { ...params.bloom, weights: [...params.bloom.weights] },
   chromatic: { ...params.chromatic },
@@ -295,6 +383,7 @@ export const defaultPostParams = () => clone(DEFAULT_POST_PARAMS)
 export function mergePostParams(base: PostParams, patch: PostPatch): PostParams {
   const merged = clone(base)
   if (patch.enabled !== undefined) merged.enabled = patch.enabled
+  Object.assign(merged.ribbon, patch.ribbon)
   Object.assign(merged.feedback, patch.feedback)
   Object.assign(merged.bloom, patch.bloom)
   Object.assign(merged.chromatic, patch.chromatic)
@@ -304,9 +393,22 @@ export function mergePostParams(base: PostParams, patch: PostPatch): PostParams 
   return merged
 }
 
-export type PostStage = 'feedback' | 'bloom' | 'chromatic' | 'tonemap' | 'grain'
+export type PostStage = 'ribbon' | 'feedback' | 'bloom' | 'chromatic' | 'tonemap' | 'grain'
 
-const STAGES: readonly PostStage[] = ['feedback', 'bloom', 'chromatic', 'tonemap', 'grain']
+/**
+ * Every stage, in the order the passes run. `postSummary` prints the running
+ * ones in this order and the canvas's `data-post` is that line, so a stage
+ * that is off by default leaves every preset that does not turn it on
+ * printing exactly what it did.
+ */
+export const POST_STAGES: readonly PostStage[] = [
+  'ribbon',
+  'feedback',
+  'bloom',
+  'chromatic',
+  'tonemap',
+  'grain',
+]
 
 /**
  * Every number in the stack a preset may name, read and written one at a
@@ -318,6 +420,30 @@ const STAGES: readonly PostStage[] = ['feedback', 'bloom', 'chromatic', 'tonemap
  * still set it outright, and nothing wants a feature riding on it.
  */
 export const POST_LANES = {
+  'ribbon.intensity': {
+    read: (p: PostParams) => p.ribbon.intensity,
+    write: (p: PostParams, value: number) => {
+      p.ribbon.intensity = value
+    },
+  },
+  'ribbon.width': {
+    read: (p: PostParams) => p.ribbon.width,
+    write: (p: PostParams, value: number) => {
+      p.ribbon.width = value
+    },
+  },
+  'ribbon.height': {
+    read: (p: PostParams) => p.ribbon.height,
+    write: (p: PostParams, value: number) => {
+      p.ribbon.height = value
+    },
+  },
+  'ribbon.shape': {
+    read: (p: PostParams) => p.ribbon.shape,
+    write: (p: PostParams, value: number) => {
+      p.ribbon.shape = value
+    },
+  },
   'feedback.amount': {
     read: (p: PostParams) => p.feedback.amount,
     write: (p: PostParams, value: number) => {
@@ -427,11 +553,11 @@ export const stageEnabled = (params: PostParams, stage: PostStage) =>
  * times in docs/visualizer.md call the stack off.
  */
 export const postIsActive = (params: PostParams) =>
-  STAGES.some((stage) => stageEnabled(params, stage))
+  POST_STAGES.some((stage) => stageEnabled(params, stage))
 
 /** One line for the debug overlay: the stages that are on, or `off`. */
 export function postSummary(params: PostParams): string {
-  const on = STAGES.filter((stage) => stageEnabled(params, stage))
+  const on = POST_STAGES.filter((stage) => stageEnabled(params, stage))
   return on.length ? on.map((stage) => (stage === 'chromatic' ? 'chroma' : stage)).join(' ') : 'off'
 }
 
@@ -532,5 +658,24 @@ export function writePostUniform(
   out[33] = 0
   out[34] = 0
   out[35] = 0
+
+  // The ribbon, last again. It is resolved to pixels here so the shader does
+  // no scaling of its own. A ribbon that is off, or has no light or no width,
+  // writes zeros, so were it ever drawn it would add nothing.
+  const drawn = ribbonRuns(params)
+  const ribbon = params.ribbon
+  const circle = drawn && ribbon.shape >= 0.5
+  const short = Math.min(width, height)
+  const [red, green, blue] = drawn ? ribbonColour(features) : [0, 0, 0]
+  out[36] = drawn ? ribbon.intensity : 0
+  out[37] = drawn ? ribbon.width * (short / RIBBON_REFERENCE_HEIGHT) : 0
+  // A height is a fraction of the canvas in the direction the sound pushes:
+  // down the frame for the line, out from the middle for the circle.
+  out[38] = drawn ? Math.max(ribbon.height, 0) * (circle ? short : height) : 0
+  out[39] = circle ? 1 : 0
+  out[40] = red ?? 0
+  out[41] = green ?? 0
+  out[42] = blue ?? 0
+  out[43] = circle ? RIBBON_RADIUS * short : 0
   return out
 }

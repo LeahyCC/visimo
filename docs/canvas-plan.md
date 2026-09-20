@@ -73,6 +73,8 @@ A study is one small piece that does one job: one flow, one ink, or one look. Th
 
 The first three rows of ink and the two fluid flows are mostly code that exists. The rest is new and each is small.
 
+One rule for every study, and for every preset built from them: nothing on screen is static. The scene, the feedback, the bloom, the chromatic split, the tonemap, the grain and the ribbon all move with the music. A study ships with its own mapping rows, and a test walks every preset and fails when an enabled stage has nothing driving it.
+
 ## The song picks the studies
 
 A lo-fi track and a hardstyle track should not get the same studies. The extractor already knows most of what is needed, in the slow features that move over tens of seconds.
@@ -173,15 +175,18 @@ B  a scene's flow carries the feedback      E  hardness in the packet
 C  the fluid runs as a flow under Kaleidoscope
 |
 D  waveform ribbon
+|
+F  everything moves with the music
 ```
 
-| Card | What it does                                                                                         | Done when                                                                     |
-| ---- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| A    | Decay, zoom and turn are defined at 60 frames a second and converted by the real step                | A trail lasts the same time at 60 and 144 Hz, and Wash looks as it did at 60  |
-| B    | A scene may offer a velocity field; the feedback pass reads the last frame back along it, with a cap | New preset Drift: Fluid with long trails that swirl with the dye, never white |
-| C    | The solver can run without drawing, under another scene                                              | New preset Melt: the fractal smeared along a fluid the music pushes           |
-| D    | The analyser's waveform is drawn as a line into the scene's target, under the feedback               | A ribbon that the trails turn into sheets, off by default                     |
-| E    | One new packet row, `hardness`, slow, loudness and frame rate independent                            | Clipped kicks read high and soft pads low in the synthetic tests              |
+| Card | What it does                                                                                            | Done when                                                                                   |
+| ---- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| A    | Decay, zoom and turn are defined at 60 frames a second and converted by the real step                   | A trail lasts the same time at 60 and 144 Hz, and Wash looks as it did at 60                |
+| B    | A scene may offer a velocity field; the feedback pass reads the last frame back along it, with a cap    | New preset Drift: Fluid with long trails that swirl with the dye, never white               |
+| C    | The solver can run without drawing, under another scene                                                 | New preset Melt: the fractal smeared along a fluid the music pushes                         |
+| D    | The analyser's waveform is drawn as a line into the scene's target, under the feedback                  | A ribbon that the trails turn into sheets, off by default                                   |
+| E    | One new packet row, `hardness`, slow, loudness and frame rate independent                               | Clipped kicks read high and soft pads low in the synthetic tests                            |
+| F    | Every post stage in every preset gets mapping rows, with a guard test and a range test over all presets | No enabled stage is left static, and no knob leaves its safe range at silence or full level |
 
 Existing presets must not change in batch 1. Every new behaviour is off by default and switched on by a new preset.
 

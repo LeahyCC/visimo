@@ -26,6 +26,7 @@ import {
   bloomLevelSize,
   bloomSourceSize,
   defaultPostParams,
+  freshWeight,
   mergePostParams,
   POST_UNIFORM_FLOATS,
   stageEnabled,
@@ -122,11 +123,12 @@ export class PostStack {
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
       }),
       // The scene has already drawn into the target, so the history is added
-      // to it rather than read back and mixed.
+      // to it rather than read back and mixed. The constant is the weight on
+      // that new frame, which keeps the sum the same at any frame rate.
       feedback: pipeline(feedback, {
         format: SCENE_FORMAT,
         blend: {
-          color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+          color: { srcFactor: 'one', dstFactor: 'constant', operation: 'add' },
           alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
         },
       }),
@@ -183,7 +185,8 @@ export class PostStack {
 
     if (this.historyReady && stageEnabled(this.settings, 'feedback')) {
       const into = sized.history[this.current].view
-      draw(encoder, gear.feedback, sized.feedback[this.current], into, 'load')
+      const fresh = freshWeight(this.settings, features)
+      draw(encoder, gear.feedback, sized.feedback[this.current], into, 'load', fresh)
     }
 
     if (stageEnabled(this.settings, 'bloom')) {
@@ -333,11 +336,14 @@ function draw(
   group: GPUBindGroup,
   view: GPUTextureView,
   loadOp: GPULoadOp,
+  blendConstant?: number,
 ) {
   const pass = encoder.beginRenderPass({
     colorAttachments: [{ view, clearValue: BLACK, loadOp, storeOp: 'store' }],
   })
   pass.setPipeline(pipeline)
+  if (blendConstant !== undefined)
+    pass.setBlendConstant({ r: blendConstant, g: blendConstant, b: blendConstant, a: 1 })
   pass.setBindGroup(0, group)
   pass.draw(3)
   pass.end()

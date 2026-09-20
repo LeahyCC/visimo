@@ -6,6 +6,8 @@ import {
   atLevel,
   breakdown,
   build,
+  denseChorus,
+  denseVerse,
   fft,
   fourOnTheFloor,
   kit,
@@ -597,4 +599,83 @@ describe('the moment on a synthesised story', () => {
       spread(runs.map(({ rate, packets }) => peak(packets, F.release, DROP_AT, DROP_AT + 1, rate))),
     ).toBeLessThan(0.1)
   }, 300000)
+})
+
+/**
+ * The dense song: a verse, a chorus and the verse again, a wall of noise
+ * with a kit over it throughout. Its two passages differ in a couple of
+ * bands and in how busy the kit is and in nothing else, which is what a
+ * metal track's passages do. Under the fixed gain and the fixed bar this
+ * song's novelty peaked at 0.24 at 60 frames a second and 0.12 at 144, so
+ * nothing was ever proposed and the whole of it was one section; measured
+ * against its own reach the same signal peaks near 1.
+ */
+describe('the structure on a dense song', () => {
+  const VERSE_ENDS = 30
+  const CHORUS_ENDS = 60
+  // A boundary is only a section once six seconds of it have been heard, and
+  // the novelty it starts from is the present against ten seconds ago, so a
+  // change is called about ten seconds after it happened however dense the
+  // track is. It is the same lateness the tuned-on dance track has.
+  const LAG = 13
+  const song: Section[] = [
+    { pattern: denseVerse(), seconds: VERSE_ENDS },
+    { pattern: denseChorus(), seconds: CHORUS_ENDS - VERSE_ENDS },
+    { pattern: denseVerse(), seconds: 30 },
+  ]
+
+  /** Every frame the section id changes, and what it changed to. */
+  const boundaries = (packets: Float32Array[], frameRate: number) => {
+    const found: { at: number; section: number }[] = []
+    let last = 1
+    packets.forEach((packet, index) => {
+      const section = packet[F.section] ?? 0
+      if (section !== last) found.push({ at: index / frameRate, section })
+
+      last = section
+    })
+
+    return found
+  }
+
+  const peakOf = (packets: Float32Array[], row: number, from: number, frameRate: number) =>
+    packets
+      .slice(Math.round(from * frameRate))
+      .reduce((most, packet) => Math.max(most, packet[row] ?? 0), 0)
+
+  for (const frameRate of [60, 144]) {
+    describe(`at ${frameRate} frames a second`, () => {
+      const packets = play(song, frameRate)
+
+      it('finds both of its boundaries', () => {
+        const found = boundaries(packets, frameRate)
+        expect(found).toHaveLength(2)
+        expect(found[0]?.at ?? 0).toBeGreaterThanOrEqual(VERSE_ENDS)
+        expect(found[0]?.at ?? 0).toBeLessThan(VERSE_ENDS + LAG)
+        expect(found[1]?.at ?? 0).toBeGreaterThanOrEqual(CHORUS_ENDS)
+        expect(found[1]?.at ?? 0).toBeLessThan(CHORUS_ENDS + LAG)
+      })
+
+      it('lifts novelty where a fixed gain left it flat', () => {
+        expect(peakOf(packets, F.novelty, VERSE_ENDS, frameRate)).toBeGreaterThan(0.4)
+      })
+
+      it('gives the verse its own number when it comes back', () => {
+        const found = boundaries(packets, frameRate)
+        expect(found[0]?.section).toBe(2)
+        expect(found[1]?.section).toBe(1)
+        expect(peakOf(packets, F.recall, CHORUS_ENDS, frameRate)).toBeGreaterThan(0.7)
+      })
+
+      it('finds nothing in ninety seconds of one passage', () => {
+        const steady = play([{ pattern: denseVerse(), seconds: 90 }], frameRate)
+        expect(boundaries(steady, frameRate)).toHaveLength(0)
+        // The floor under the relative bar is what does this: a passage
+        // going nowhere is not stretched into structure.
+        // 0.4 is the bar a candidate has to clear, now a share of the
+        // track's own reach rather than a level.
+        expect(peakOf(steady, F.novelty, 20, frameRate)).toBeLessThan(0.4)
+      })
+    })
+  }
 })

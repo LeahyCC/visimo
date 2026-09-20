@@ -35,6 +35,15 @@ export type Hit = {
  */
 export type Sweep = { from: number; to: number; gain: number }
 
+/**
+ * A wall: band-limited noise held through the whole section, which is what a
+ * distorted guitar and a ride cymbal look like to five bands. `tilt` splits
+ * it between the low side and the high side of 800 Hz, 0 for all low and 1
+ * for all high, so two passages can differ in a couple of bands and in
+ * nothing else.
+ */
+export type Wall = { gain: number; tilt: number }
+
 export type Pattern = {
   bpm: number
   /** Beats in a bar. The hits repeat every bar. */
@@ -44,6 +53,8 @@ export type Pattern = {
   pad?: number
   /** A riser climbing across the whole of this section; absent for none. */
   sweep?: Sweep
+  /** A wall of noise under everything, for a dense track; absent for none. */
+  wall?: Wall
 }
 
 /** A run of one pattern for so many seconds; sections are played back to back. */
@@ -197,6 +208,26 @@ export function synthesize(sections: readonly Section[], sampleRate = 48000): Fl
           Math.sin(2 * Math.PI * 329.6 * t) +
           0.5 * Math.sin(2 * Math.PI * 659.3 * t)
         out[offset + index] = (out[offset + index] ?? 0) + chord * pattern.pad * 0.25
+      }
+    }
+
+    if (pattern.wall) {
+      const { gain, tilt } = pattern.wall
+      // One pole at about 800 Hz, and what it leaves behind. Noise rather
+      // than partials because a wall has to fill every band without putting
+      // a key in any of them: a chroma read off it is flat, so two walls
+      // differ in where their power sits and in nothing the harmony hears.
+      const alpha = 1 - Math.exp((-2 * Math.PI * 800) / sampleRate)
+      let low = 0
+      for (let index = 0; index < length; index++) {
+        const white = random()
+        low += (white - low) * alpha
+        const high = white - low
+        // The low side is the quieter of the two for the same amplitude,
+        // being one pole down, so it is lifted to keep the two sides worth
+        // about the same to a band.
+        out[offset + index] =
+          (out[offset + index] ?? 0) + (3 * low * (1 - tilt) + high * tilt) * gain
       }
     }
 
@@ -394,6 +425,36 @@ export function build(bpm: number, pad = 0.25, fizzle = false): Section[] {
 export function steadyHits(bpm: number, drum: Drum, gain = 0.9): Pattern {
   return { bpm, beats: 4, hits: [0, 1, 2, 3].map((beat) => on(drum, beat, gain)) }
 }
+
+/**
+ * A dense passage: a wall of noise with a kit over it, loud from end to end,
+ * which is what a metal track looks like to five bands. Everything a
+ * structure vector reads is pinned near the top of its range and stays
+ * there, so two of these are 0.98 alike however differently they are played,
+ * and the novelty between them never comes near the 0.4 a dance track's
+ * boundaries clear. `busy` doubles the kit the way a chorus doubles it, and
+ * the tilt moves a little of the wall between the low and the high side.
+ *
+ * It exists because every threshold in the structure was read off a track
+ * whose passages sound nothing alike, and a bar that suits that hears no
+ * structure at all in this.
+ */
+export function densePassage(bpm: number, tilt: number, busy: boolean): Pattern {
+  const hits: Hit[] = []
+  for (let beat = 0; beat < 4; beat++) {
+    hits.push(on('kick', beat, 0.9))
+    if (busy) hits.push(on('kick', beat + 0.5, 0.8))
+    hits.push(on('hat', beat, 0.3), on('hat', beat + 0.5, 0.25))
+  }
+
+  hits.push(on('snare', 1, 0.8), on('snare', 3, 0.8))
+  if (busy) hits.push(on('snare', 0, 0.5), on('snare', 2, 0.5))
+  return { bpm, beats: 4, hits, wall: { gain: 0.35, tilt } }
+}
+
+/** The two passages of the dense song: a verse and the chorus it opens into. */
+export const denseVerse = (bpm = 150): Pattern => densePassage(bpm, 0.35, false)
+export const denseChorus = (bpm = 150): Pattern => densePassage(bpm, 0.55, true)
 
 /** A sustained chord and nothing struck at all: no onsets after the first. */
 export function padOnly(bpm: number, pad = 0.5): Pattern {

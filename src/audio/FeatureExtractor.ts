@@ -540,8 +540,8 @@ const MOMENT_FLOOR = 1e-7
 // What the evidence for a build and for a drop reads when each is wholly
 // there, which is what the two rows are published against; `Moment.reading`
 // says why. A build on a real track peaked at 0.49 and the synthetic one at
-// 0.71; a real drop at 0.41, the synthetic one at 0.46 to 0.50, and `impact`
-// fires at 0.35. Tuned on one real track, and the first thing to move.
+// 0.71; a real drop at 0.32 to 0.41, the synthetic one at 0.46 to 0.50, and
+// `impact` fires at `IMPACT_ON`. Tuned on one real track, and the first thing to move.
 const TENSION_FULL = 0.5
 const RELEASE_FULL = 0.4
 // Under this there is nothing to hear and the arms are held rather than
@@ -619,8 +619,18 @@ const MOMENT_TEMPO_TRUSTED = 0.4
 // the shape of the bug `pace` had. Exported with the shortest phrase above so
 // the flash look can work out the soonest one impact can follow another: it
 // is what its flash-rate test is built on, and a copy would drift.
-export const IMPACT_ON = 0.35
-export const IMPACT_OFF = 0.12
+//
+// The first number was 0.35, set from one play of one track whose first drop
+// peaked at 0.41. Played again the same drop peaked anywhere from 0.32 to
+// 0.37, since where the analysis hops fall against the audio moves the peak a
+// little, and it fired on some plays and not on others: the biggest moment of
+// the track, cut to on one listen and glided past on the next. Across the
+// same track nothing that is not a drop reads over 0.19 before one has fired,
+// so 0.28 sits clear of both.
+export const IMPACT_ON = 0.28
+// The rearm level moved with it, in the same ratio, so the soonest one impact
+// can follow another is what it was and the flash look's rate is untouched.
+export const IMPACT_OFF = 0.096
 // The same fall as `beatPulse`, so a scene that reads impact reads it the way
 // it reads a hit. Exported so the demo's bench fires one by hand with the
 // same fall, and does not keep a second copy that drifts.
@@ -1742,7 +1752,7 @@ export class Moment {
   /**
    * What goes in the packet. Inside this class tension and release are levels
    * of evidence, and neither reaches 1 on music: `impact` fires when release
-   * crosses 0.35, and on the first real track a drop peaked at 0.41 and a
+   * crosses `IMPACT_ON`, and on the first real track a drop peaked at 0.41 and a
    * build at 0.49. Published like that, everything downstream had to work
    * round it, each in its own way. The director divided them back up. A study
    * written so that a tension of 1 is the whole effect, which is how every

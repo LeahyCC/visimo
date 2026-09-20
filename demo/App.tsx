@@ -131,6 +131,7 @@ export default function App() {
             hud={hud}
             preset={cast}
             fluidSize={fluidSize}
+            track={track}
             onCharacter={setSaved}
             onUnsupported={() => setUnsupported(true)}
             onBackend={setBackend}

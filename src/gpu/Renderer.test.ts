@@ -762,6 +762,28 @@ describe('the director drives the cast', () => {
     song.renderer.dispose()
   })
 
+  // Everything the director holds is about one song. Carried into the next,
+  // the second track never opens on a guess, its sections are handed the
+  // casts the first track's had, and its starting character is never read.
+  it('starts the director again for a new track, from that track’s starting character', async () => {
+    const song = await playThrough('auto')
+    const played = song.renderer
+    expect(played.settled).toBe(1)
+    const { element, draw } = sizedCanvas(1280, 720)
+    await played.attach(element, canvas(), vi.fn())
+    played.setStartCharacter({ hardness: 0.95 })
+    // Ignored while the first track plays, as it always was.
+    draw(1_000_000)
+    expect(played.character.hardness).toBeLessThan(0.9)
+    played.newTrack()
+    draw(1_000_017)
+    expect(played.settled).toBe(0)
+    expect(played.character.hardness).toBeGreaterThan(0.9)
+    // The canvas is left alone: one track into the next is a change of cast.
+    expect(stack.reset).toBe(0)
+    played.dispose()
+  })
+
   it('reports the character once it has settled and rarely after that', async () => {
     vi.resetModules()
     impls.reset()

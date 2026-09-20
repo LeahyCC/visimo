@@ -414,6 +414,79 @@ describe('how a change lands', () => {
     const frame = run(director, packet({ section: 1, release: 0.5 }), 0.1)
     expect(presenceOf(frame.studies, 'drop-flow')).toBe(1)
   })
+
+  // Seen on a real track: the drop cut to its cast at 1:46, the section it
+  // opened was confirmed eight seconds later with `release` long gone, the
+  // pick read that as groove and glided back, and the groove's cast was what
+  // got remembered as the drop's.
+  it('keeps the cast a drop cut to when its section is confirmed late', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    settle(director, packet({ section: 1 }), 40)
+    expect(director.settled).toBe(1)
+    director.step(packet({ section: 1, release: 0.5, impact: 1 }), 1 / 60)
+    expect(director.cast?.flow).toBe('drop-flow')
+    // The payoff fades over a phrase, and then the extractor catches up.
+    settle(director, packet({ section: 1 }), 6)
+    settle(director, packet({ section: 2 }), 2)
+    expect(director.cast?.flow).toBe('drop-flow')
+    const dropped = name(director.cast)
+    // An impact opens one section. The next boundary is still inside the span
+    // and must pick for itself: a quiet passage gets the quiet ink, which an
+    // adopted cast would not hold.
+    settle(director, packet({ section: 3, rest: 1 }), 1)
+    expect(director.cast?.inks).toContain('quiet-ink')
+    // And the drop's section comes back as the drop's, not as a groove's.
+    settle(director, packet({ section: 2 }), 1)
+    expect(name(director.cast)).toBe(dropped)
+  })
+
+  it('picks afresh for a section confirmed long after any drop', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    settle(director, packet({ section: 1 }), 40)
+    director.step(packet({ section: 1, release: 0.5, impact: 1 }), 1 / 60)
+    settle(director, packet({ section: 1 }), 20)
+    settle(director, packet({ section: 2 }), 2)
+    expect(director.cast?.flow).toBe('groove-flow')
+  })
+
+  // What undid the drop on a real track. Eight seconds in something new
+  // entered, novelty spiked, and with `release` already gone the pick read
+  // plain groove. `release` lasts a phrase and a drop section lasts many.
+  it('holds the cast a drop cut to against a novelty spike inside the drop', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    settle(director, packet({ section: 1 }), 40)
+    director.step(packet({ section: 1, release: 0.5, impact: 1 }), 1 / 60)
+    settle(director, packet({ section: 1 }), 8)
+    director.step(packet({ section: 1, novelty: 0.9 }), 1 / 60)
+    settle(director, packet({ section: 1 }), 3)
+    expect(director.cast?.flow).toBe('drop-flow')
+    // The spike was a boundary, and six seconds on it is confirmed: a section
+    // that began after the drop, so the choosing is open again.
+    settle(director, packet({ section: 2 }), 3)
+    expect(director.cast?.flow).toBe('groove-flow')
+    director.step(packet({ section: 2, rest: 1, novelty: 0 }), 1 / 60)
+    director.step(packet({ section: 2, rest: 1, novelty: 0.9 }), 1 / 60)
+    expect(director.cast?.inks).toContain('quiet-ink')
+  })
+
+  // The build is confirmed a couple of seconds after the drop it led to,
+  // because it began six seconds before that. Remembered by the drop's cast,
+  // the next build in the track would open on the drop's picture.
+  it('does not remember the build by the cast its drop cut to', () => {
+    const director = new Director({ studies: BENCH, budget: 4 })
+    settle(director, packet({ section: 1 }), 40)
+    director.step(packet({ section: 1, release: 0.5, impact: 1 }), 1 / 60)
+    const dropped = name(director.cast)
+    // Section 2 is the build: confirmed two seconds after the impact.
+    settle(director, packet({ section: 1 }), 2)
+    settle(director, packet({ section: 2 }), 1)
+    expect(name(director.cast)).toBe(dropped)
+    settle(director, packet({ section: 3, rest: 1 }), 20)
+    // The build again, as a build. It picks for itself and gets the build ink.
+    settle(director, packet({ section: 2, tension: 1 }), 1)
+    expect(name(director.cast)).not.toBe(dropped)
+    expect(director.cast?.inks).toContain('build-ink')
+  })
 })
 
 describe('what a section is remembered by', () => {

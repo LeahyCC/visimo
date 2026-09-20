@@ -78,17 +78,18 @@ const Stage = lazy(() => import('visimo').then((m) => ({ default: m.VisualizerSt
 
 Both canvases are `position: absolute; inset: 0`, so **give them a positioned parent**. They carry no stylesheet; `className` and `hudClassName` are there if you want to restyle them.
 
-| Prop             | Required | What it does                                                                                 |
-| ---------------- | -------- | -------------------------------------------------------------------------------------------- |
-| `hud`            | yes      | draws the overlay; the host owns the key that toggles it                                     |
-| `preset`         | yes      | a pinned cast to draw, or `"auto"` to let the song choose. See [The director](#the-director) |
-| `fluidSize`      | yes      | the fluid's grid, from `FLUID_SIZES`. One control, every fluid                               |
-| `startCharacter` | no       | where the character reader opens, as a partial of the five axes                              |
-| `onCharacter`    | no       | the character once it settles and rarely after, to save for next time                        |
-| `onUnsupported`  | yes      | nothing can start or recover on an available backend: show artwork                           |
-| `onBackend`      | no       | `webgpu` or `webgl2`, after attachment                                                       |
-| `className`      | no       | goes on the scene canvas                                                                     |
-| `hudClassName`   | no       | goes on the HUD canvas                                                                       |
+| Prop             | Required | What it does                                                                                  |
+| ---------------- | -------- | --------------------------------------------------------------------------------------------- |
+| `hud`            | yes      | draws the overlay; the host owns the key that toggles it                                      |
+| `preset`         | yes      | a pinned cast to draw, or `"auto"` to let the song choose. See [The director](#the-director)  |
+| `fluidSize`      | yes      | the fluid's grid, from `FLUID_SIZES`. One control, every fluid                                |
+| `startCharacter` | no       | where the character reader opens, as a partial of the five axes                               |
+| `track`          | no       | any value that changes with the track, an id or a url. The director starts again when it does |
+| `onCharacter`    | no       | the character once it settles and rarely after, to save for next time                         |
+| `onUnsupported`  | yes      | nothing can start or recover on an available backend: show artwork                            |
+| `onBackend`      | no       | `webgpu` or `webgl2`, after attachment                                                        |
+| `className`      | no       | goes on the scene canvas                                                                      |
+| `hudClassName`   | no       | goes on the HUD canvas                                                                        |
 
 Everything optional is new in 0.2 and nothing about it changes what a host that leaves it out already gets.
 
@@ -614,6 +615,7 @@ The rules, each with a test in `director.test.ts`:
 
 - **Changes land on the music.** A cast is picked on a change of `section` or on `impact`, never on a timer. The extractor confirms a section about six seconds late, so a `novelty` spike starts a fade toward a challenger and the confirmed section settles it.
 - **The drop is a cut.** On `impact` the new cast is whole inside a tenth of a second. Everything else glides over seconds. The trigger sits at a half and not near the top: `impact` is 1 for a single frame, and one packet read late at 30 frames a second already sees 0.83, so a trigger at 0.9 lost the drop to one janky frame.
+- **A drop keeps its cast for its section.** `release` lasts a phrase by design and a drop section lasts many, so once a drop has cut to a cast, novelty spikes choose nothing until a section that began after the drop is confirmed. Measured on a real track before this rule: the drop cut at 1:46, something new entered eight seconds in, novelty spiked with `release` already at 0.06, the pick read plain groove and glided back, and a thirty second drop got eight seconds of its cast. A section confirmed within about seven seconds of an impact began before the drop or at it (the extractor confirms about six seconds late), so it neither re-picks nor recalls; and only the one confirmed near that six seconds, which is the section the drop itself opened, is remembered by the drop's cast. One confirmed sooner is the build, and remembered that way the next build would open on the drop's picture.
 - **No flicker.** A challenger has to clear the margin over a sitting member to unseat it. Close scores change nothing.
 - **A section that comes back gets the cast it had**, keyed on the section id in the packet. A cast picked before the character is half settled is not remembered, because it is the neutral opening guess, and a track that opens straight into its main groove would be handed that guess every time the groove returned.
 - **Determinism.** Same packets in, same casts out. Any tie-break is seeded from the section id and the settled character, never `Math.random` and never the clock. The character is read for the seed once, when it has settled, and rounded to quarters. Hashed afresh at every boundary to sixteenths, it undid the determinism it was there for: real packets differ a little between two plays of a track, and some axis was within that little of a rounding edge at most boundaries.
@@ -653,6 +655,7 @@ const [saved, setSaved] = useState<Partial<Character> | undefined>(() => load(tr
 
 <Stage
   preset="auto"
+  track={track}
   startCharacter={saved}
   onCharacter={(character) => save(track, character)}
   ...
@@ -660,6 +663,8 @@ const [saved, setSaved] = useState<Partial<Character> | undefined>(() => load(tr
 ```
 
 `startCharacter` is a partial of the five axes, so a host that knows one thing about a track says only that; anything it leaves out opens neutral. It moves where the drift starts and not how long it takes, since a reading is still unsettled until the music has been heard, and it is taken until the first frame is drawn and ignored after that, which is what lets a host pass a fresh object on every render.
+
+`track` is what makes it work for a second song. Everything the director holds is about one track: how settled its character is, which cast each section had, and the seed its rotation counts from. Left running into the next song, the opening thirty seconds are never a guess again, a section is handed the cast another track's section of the same number had, and the new track's `startCharacter` is never read. So when `track` changes the director starts again, from `startCharacter` as it stands at that moment. The canvas is not emptied: one track into the next is a change of cast like any other. A host that passes no `track` gets a session read as one long song.
 
 `onCharacter` is the other end of it: the character once the reading has settled, and once every thirty seconds after that, which is the slowest of the reader's own smoothers and so the soonest a number is worth writing down. It hands over a copy, since the reader writes one object in place every frame. It fires under a pinned cast as much as under the director, because the song is read either way: pin Plume for a whole track and the next play can still open where that track actually sits.
 
@@ -713,6 +718,7 @@ The renderer steps the director on every frame whatever is drawing, and what it 
 | ------------------ | -------------------------------------------------------------------------------- |
 | `preset="auto"`    | the song chooses the cast. `preset` still takes a `PinnedCast` and still pins it |
 | `startCharacter`   | where the character reader opens, as a partial of the five axes                  |
+| `track`            | changes when the track does, and the director starts again from `startCharacter` |
 | `onCharacter`      | the character once settled and rarely after, to save for the next play           |
 | `Live` in `visimo` | the type of `preset`: `PinnedCast \| 'auto'`                                     |
 

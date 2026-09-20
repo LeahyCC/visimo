@@ -26,6 +26,14 @@ type Props = {
    */
   startCharacter?: Partial<Character>
   /**
+   * Which track is playing: any value that changes when the track does, an id
+   * or a url. Everything the director holds is about one song, so when this
+   * changes it starts again, from `startCharacter` as it stands then. Without
+   * it a session is read as one long track: the second song never opens on a
+   * guess, and its sections are handed the casts the first song's had.
+   */
+  track?: string | number
+  /**
    * The character, once the reading has settled and rarely after that, so a
    * host can save it and hand it back as `startCharacter` next time. It fires
    * under a pinned cast as much as under the director, because the song is
@@ -56,6 +64,7 @@ export default function VisualizerStage({
   preset,
   fluidSize,
   startCharacter,
+  track,
   onCharacter,
   onUnsupported,
   onBackend,
@@ -107,6 +116,14 @@ export default function VisualizerStage({
   // The starting character before the cast, so the first frame the director
   // steps is already the one a host that knows the track asked for.
   useEffect(() => renderer.setStartCharacter(startCharacter), [startCharacter])
+  // After the starting character, so a new track opens on its own and not on
+  // the last one's. The first run is the mount and not a change of track.
+  const playing = useRef(track)
+  useEffect(() => {
+    if (playing.current === track) return
+    playing.current = track
+    renderer.newTrack()
+  }, [track])
   useEffect(() => renderer.setPreset(preset), [preset])
   useEffect(() => renderer.setFluidSize(fluidSize), [fluidSize])
   useEffect(() => {

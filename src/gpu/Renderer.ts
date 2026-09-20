@@ -205,6 +205,8 @@ class Renderer {
    */
   private director = new Director()
   private stepped = false
+  /** The last starting character a host gave, kept for the next `newTrack`. */
+  private opening: Partial<Character> | undefined
   private onCharacter: ((character: Character) => void) | null = null
   private characterDue = 0
   /** The development handle's override, over whatever the cast resolved to. */
@@ -438,8 +440,25 @@ class Renderer {
    * object on every render.
    */
   setStartCharacter(start: Partial<Character> | undefined) {
+    this.opening = start
     if (this.stepped) return
     this.director = new Director({ start })
+  }
+
+  /**
+   * A different track is playing. Everything the director holds is about one
+   * song: how settled its character is, which cast each section had, and the
+   * seed its rotation counts from. Carried into the next song, the opening
+   * thirty seconds are never a guess again, a section is handed a cast that
+   * another track's section of the same number had, and `startCharacter` for
+   * the new track is never read. So the director starts again, from whatever
+   * starting character the host last gave. The canvas is left alone: one
+   * track running into the next is a change of cast like any other, and
+   * should morph.
+   */
+  newTrack() {
+    this.director = new Director({ start: this.opening })
+    this.characterDue = 0
   }
 
   /**
@@ -452,6 +471,11 @@ class Renderer {
   }
 
   /** The pinned cast's id, or `auto` while the director is choosing. */
+  /** A copy, since the packet is one array written over every frame. */
+  get features(): Float32Array {
+    return this.packet.slice()
+  }
+
   get presetId() {
     return this.pinned?.id ?? 'auto'
   }
@@ -556,6 +580,18 @@ class Renderer {
         this.inks.delete(id)
         held.object.dispose()
       }
+
+    // The same for one waiting among the spares. A flow and its dye go spare
+    // on their own clocks, so the flow can be released while the dye still has
+    // a second left, and a dye taken back then would draw a field that has
+    // been destroyed.
+    for (let at = this.spareInks.length - 1; at >= 0; at -= 1) {
+      const spare = this.spareInks[at]
+      if (spare?.object instanceof DyeInk && !this.holds(spare.object.source)) {
+        spare.object.dispose()
+        this.spareInks.splice(at, 1)
+      }
+    }
 
     const inks = this.reconcile(
       this.liveInkStudies,
@@ -953,6 +989,8 @@ export type VisualizerDevHandle = {
   setPost: (patch: PostPatch) => void
   post: () => PostParams | null
   preset: () => string
+  /** A copy of the latest packet, for reading what the director is reading. */
+  features: () => Float32Array
 }
 
 // A handle for driving the post stack by hand while measuring frame times,
@@ -963,5 +1001,6 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
     setPost: (patch) => renderer.setPost(patch),
     post: () => renderer.postParams,
     preset: () => renderer.presetId,
+    features: () => renderer.features,
   }
 }

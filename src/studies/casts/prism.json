@@ -6,9 +6,12 @@
   "canvas": { "enabled": false },
   "overrides": {
     "fractal-glints": {
+      "knobs": { "intensity": 1, "glint": 0 },
       "mapping": [
         { "from": "swell", "to": "intensity", "gain": -0.02, "curve": "square" },
-        { "from": "hardness", "to": "intensity", "gain": -0.02, "curve": "square" }
+        { "from": "hardness", "to": "intensity", "gain": -0.02, "curve": "square" },
+        { "from": "energy", "to": "glint", "gain": -0.3 },
+        { "from": "release", "to": "glint", "gain": -0.25 }
       ]
     }
   }

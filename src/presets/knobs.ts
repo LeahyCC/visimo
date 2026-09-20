@@ -143,7 +143,17 @@ export const FLUID_KNOBS = [
 ] as const
 export type FluidKnob = (typeof FLUID_KNOBS)[number]
 
-/** Mirrored fractal geometry, motion in seconds, and the colour of its enamel. */
+/**
+ * Mirrored fractal geometry, motion in seconds, and the colour of its enamel.
+ *
+ * The last two are the brightness threshold that makes this ink sparse.
+ * `glint` is how much of its own light the fractal keeps, 0 for all of it and
+ * 1 for only what reaches the brightest a ridge can be this frame, and
+ * `glintKnee` is how soft that edge is as a fraction of the level itself. The
+ * fractal fills the frame, so on a canvas that carries it has to be cut back
+ * to the bright parts or the trails sum it to a flat slab; what the level is
+ * measured against is the long comment in `scenes/kaleidoscope.params.ts`.
+ */
 export const KALEIDOSCOPE_KNOBS = [
   'symmetry',
   'zoom',
@@ -163,6 +173,8 @@ export const KALEIDOSCOPE_KNOBS = [
   'saturation',
   'colourShift',
   'colourDrift',
+  'glint',
+  'glintKnee',
 ] as const
 export type KaleidoscopeKnob = (typeof KALEIDOSCOPE_KNOBS)[number]
 

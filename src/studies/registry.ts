@@ -671,26 +671,32 @@ const CAUSTICS: InkStudy = {
  * How much light is the arithmetic that matters, because the halo sits at the
  * middle of a canvas whose flows mostly pull toward or push from that point,
  * so light piles up there before it does anywhere else. The canvas keeps 0.93
- * of itself a frame, so a still image sums to 1 / (1 - 0.93), about fourteen
- * times what one frame adds. The resting intensity is 0.028, so the middle of a
- * glow that sits still settles at about 0.4. The feedback pass bends light
- * above half its ceiling, and a director-built canvas holds a ceiling of 1.25
- * at a full packet, so the knee is at 0.625; a full packet dims the light to
- * 0.013 and the most any packet reaches is 0.038 (a beat with no sound and a
- * full build), which settles at 0.54, under the knee. `halo.test.ts` sums it
- * frame by frame and holds both. That the light rises with a build at all is
- * within the wash-out guard on its own: a full packet at full tension is
- * 0.018, under rest, so it needs no entry in `BUILT_LIGHT`.
+ * of itself a frame and takes a floor of 0.018 off what it kept, so a still
+ * image sums to 1 / (1 - 0.93), about fourteen times what one frame adds over
+ * that floor. The resting intensity is 0.055, so the middle of a glow that
+ * sits still settles at about 0.52. The feedback pass bends light above half
+ * its ceiling, and a director-built canvas holds a ceiling of 1.25 at a full
+ * packet, so the knee is at 0.625; a full packet dims the light to 0.032 and
+ * the most any packet reaches is 0.061 (a beat with no sound and a full
+ * build), which settles at 0.61, under the knee. `halo.test.ts` sums it frame
+ * by frame and holds both. That the light rises with a build at all is within
+ * the wash-out guard on its own: a full packet at full tension is 0.034,
+ * under rest, so it needs no entry in `BUILT_LIGHT`.
  *
  * It is one quad sized to the glow: at its widest the study reaches, a radius
  * of 0.26 of the short side on a loud packet, it lights about 6% of a 16:9
  * frame (`haloCoverage`), and at rest on a quiet passage about 1%. The pass is
  * one draw of six vertices into the shared target.
  *
- * The intensity is the number to trust least. It was chosen from the sum and
- * not from looking at it: 0.028 is a settled peak of 0.4, which is pale beside
- * the dye and may read as nearly nothing on a real quiet passage, and the
- * ceiling it has to stay under leaves room for about half as much again.
+ * The intensity is the number to trust least, and it has already been wrong
+ * once. It was first chosen from the sum alone, with the canvas's floor left
+ * out of the sum: 0.028, reckoned to settle at 0.4. With the floor under it
+ * that is 0.14, and on a real adapter it was a faint ring at a quiet level and
+ * could not be found at all beside the ribbon. At 0.055 it reads as a small
+ * pale glow in the quiet and as a ring a kick opens in a groove, with the
+ * fluid pulling a wisp off it, and it is still a companion and not the
+ * picture. The ceiling leaves almost no room above it, so if it wants to be
+ * brighter it is the radius and not the light that has to give.
  */
 const HALO: InkStudy = {
   id: 'halo',
@@ -704,7 +710,7 @@ const HALO: InkStudy = {
     radius: 0,
     hollow: 0.15,
     softness: 0.6,
-    intensity: 0.028,
+    intensity: 0.055,
     hue: 0,
   },
   mapping: [
@@ -713,11 +719,11 @@ const HALO: InkStudy = {
     { from: 'lowEnd', to: 'hollow', gain: 0.5, curve: 'linear' },
     { from: 'tension', to: 'hollow', gain: -0.15, curve: 'linear' },
     { from: 'hardness', to: 'softness', gain: -0.4, curve: 'linear' },
-    { from: 'beatPulse', to: 'intensity', gain: 0.005, curve: 'linear' },
-    { from: 'energy', to: 'intensity', gain: -0.01, curve: 'square' },
-    { from: 'swell', to: 'intensity', gain: -0.005, curve: 'square' },
-    { from: 'hardness', to: 'intensity', gain: -0.005, curve: 'square' },
-    { from: 'tension', to: 'intensity', gain: 0.005, curve: 'linear' },
+    { from: 'beatPulse', to: 'intensity', gain: 0.004, curve: 'linear' },
+    { from: 'energy', to: 'intensity', gain: -0.015, curve: 'square' },
+    { from: 'swell', to: 'intensity', gain: -0.006, curve: 'square' },
+    { from: 'hardness', to: 'intensity', gain: -0.006, curve: 'square' },
+    { from: 'tension', to: 'intensity', gain: 0.002, curve: 'linear' },
   ],
   cost: 'cheap',
 }

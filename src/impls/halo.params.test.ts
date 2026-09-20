@@ -12,6 +12,7 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { ribbonColour } from '../post/params'
 import { HALO_KNOBS } from '../studies/impls'
 import {
+  CANVAS_FLOOR,
   CEILING_AT_FULL_PACKET,
   dipOf,
   exponentOf,
@@ -252,13 +253,21 @@ describe('how much of the frame it lights and how bright the middle can get', ()
     expect(haloCoverage({ ...REST, radius: HALO_RANGES.radius[1] })).toBeLessThan(0.6)
   })
 
-  it('sums a still image to `SETTLE` times what one frame adds, which the geometric series says', () => {
+  it('sums a still image to `SETTLE` times what one frame adds over the canvas’s floor', () => {
     expect(FEEDBACK_KEEP).toBe(0.93)
     expect(SETTLE).toBeCloseTo(1 / 0.07, 9)
-    // Frame by frame: keep 0.93 of the canvas and add one frame's light.
+    // Frame by frame: keep 0.93 of the canvas, take the floor off what was
+    // kept, and add one frame's light. Left out, the floor is the whole
+    // difference between a glow and nothing: see `CANVAS_FLOOR`.
     let canvas = 0
-    for (let frame = 0; frame < 600; frame += 1) canvas = canvas * FEEDBACK_KEEP + REST.intensity
+    for (let frame = 0; frame < 600; frame += 1)
+      canvas = Math.max(0, canvas * FEEDBACK_KEEP - CANVAS_FLOOR) + REST.intensity
     expect(canvas).toBeCloseTo(settledPeak(REST), 4)
+  })
+
+  it('settles at nothing when one frame adds no more than the floor takes off', () => {
+    expect(settledPeak({ ...REST, intensity: CANVAS_FLOOR })).toBe(0)
+    expect(settledPeak({ ...REST, intensity: CANVAS_FLOOR / 2 })).toBe(0)
   })
 
   it('settles at the knee at the top of the intensity range, which is what the range is', () => {

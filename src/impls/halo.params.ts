@@ -37,7 +37,8 @@
  * adds to what the flow has carried in. The canvas keeps `FEEDBACK_KEEP` of
  * itself a frame, so a still image sums to `SETTLE`, about fourteen times what
  * one frame adds. The glow does not move, so the middle of it does settle to
- * that: `SETTLE x intensity`, and `settledPeak` says it. A flow only takes light
+ * that, over the floor the canvas takes off each frame: `SETTLE x (intensity -
+ * CANVAS_FLOOR)`, and `settledPeak` says it. A flow only takes light
  * away from the middle (the velocity is zero there, so what it carries in
  * comes from further out and is dimmer), so the still sum is the most the
  * middle can reach. The feedback pass bends light only above half its ceiling,
@@ -71,8 +72,21 @@ export const CEILING_AT_FULL_PACKET = 1.25
 /** Where the feedback pass starts bending light: half its ceiling. */
 export const KNEE = CEILING_AT_FULL_PACKET / 2
 
+/**
+ * What a director-built canvas takes off every pixel on every frame, its
+ * `feedback.floor` at rest. It is what keeps a long trail from settling into a
+ * haze, and it is why the sum is not simply `SETTLE x intensity`: a glow only
+ * builds on what it adds over the floor. The first numbers here left it out.
+ * They put the resting glow at 0.028 a frame and expected it to settle near
+ * 0.4; with a floor of 0.018 under it, it settled near 0.14, and on a real
+ * adapter it read as almost nothing at a quiet level and could not be found
+ * at all beside the ribbon. `halo.test.ts` reads the floor back from that
+ * canvas, so a change there fails there.
+ */
+export const CANVAS_FLOOR = 0.018
+
 /** The light added on one frame at which a still image settles at `KNEE`. */
-export const HALO_INTENSITY_MAX = KNEE / SETTLE
+export const HALO_INTENSITY_MAX = KNEE / SETTLE + CANVAS_FLOOR
 
 /**
  * What each knob may reach, inclusive. The registry guard holds every study to
@@ -176,11 +190,13 @@ export function haloQuad(params: HaloParams, width: number, height: number) {
 }
 
 /**
- * What a still image of this halo settles to at its brightest point: the sum
- * of what one frame adds over every frame the canvas keeps. The peak of the
- * falloff is 1 wherever `hollow` puts it, so this is `SETTLE x intensity`.
+ * What a still image of this halo settles to at its brightest point: the sum,
+ * over every frame the canvas keeps, of what one frame adds over the floor the
+ * canvas takes off. The peak of the falloff is 1 wherever `hollow` puts it.
+ * Under the floor nothing builds at all, which is a glow that is not there.
  */
-export const settledPeak = (params: HaloParams) => SETTLE * params.intensity
+export const settledPeak = (params: HaloParams) =>
+  SETTLE * Math.max(0, params.intensity - CANVAS_FLOOR)
 
 /** A pixel counts as lit, for coverage, when its light passes this share of the peak. */
 export const LIT_THRESHOLD = 0.05

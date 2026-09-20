@@ -13,6 +13,7 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { closeness, momentFit } from '../director/score'
 import { HARDSTYLE, HOUSE, LOFI } from '../director/song.fixture'
 import {
+  CANVAS_FLOOR,
   CEILING_AT_FULL_PACKET,
   FEEDBACK_KEEP,
   HALO_INTENSITY_MAX,
@@ -150,7 +151,7 @@ describe('what the music does to the halo', () => {
     const still = at(packetOf(QUIET)).intensity ?? 0
     const beat = at(packetOf({ ...QUIET, beatPulse: 1 })).intensity ?? 0
     expect(beat).toBeGreaterThan(still)
-    expect(beat - still).toBeCloseTo(0.005, 9)
+    expect(beat - still).toBeCloseTo(0.004, 9)
     expect(beat / still).toBeLessThan(1.25)
   })
 
@@ -199,7 +200,7 @@ describe('what tension does to the halo', () => {
     const light = [0, 0.25, 0.5, 0.75, 1].map((tension) => at(packet, tension).intensity ?? 0)
     for (let step = 1; step < light.length; step += 1)
       expect(light[step]).toBeGreaterThan(light[step - 1] ?? 0)
-    expect((light[4] ?? 0) - (light[0] ?? 0)).toBeCloseTo(0.005, 9)
+    expect((light[4] ?? 0) - (light[0] ?? 0)).toBeCloseTo(0.002, 9)
     expect((light[4] ?? 0) / (light[0] ?? 1)).toBeLessThan(1.25)
   })
 
@@ -244,6 +245,12 @@ describe('how bright the middle of the canvas can get', () => {
     return frame.post.feedback.ceiling
   }
 
+  // The floor is the whole difference between this glow and nothing, so the
+  // number the params file works from is held to the canvas it came from.
+  it('reads the canvas’s resting floor as the params file says', () => {
+    expect(carriedCanvas().knobs['feedback.floor']).toBe(CANVAS_FLOOR)
+  })
+
   it('reads the canvas’s ceiling at a full packet as the header of the params file says', () => {
     expect(ceilingAt(filled(1), 0)).toBeCloseTo(CEILING_AT_FULL_PACKET, 9)
     expect(ceilingAt(filled(1), 1)).toBeCloseTo(CEILING_AT_FULL_PACKET, 9)
@@ -266,9 +273,11 @@ describe('how bright the middle of the canvas can get', () => {
     let canvasCentre = 0
     let canvasPeak = 0
     let highest = 0
+    // The canvas takes its floor off what it kept before the new light goes
+    // in, which is what `settledPeak` allows for.
     for (let frame = 0; frame < frames; frame += 1) {
-      canvasCentre = canvasCentre * FEEDBACK_KEEP + centre
-      canvasPeak = canvasPeak * FEEDBACK_KEEP + peak
+      canvasCentre = Math.max(0, canvasCentre * FEEDBACK_KEEP - CANVAS_FLOOR) + centre
+      canvasPeak = Math.max(0, canvasPeak * FEEDBACK_KEEP - CANVAS_FLOOR) + peak
       highest = Math.max(highest, canvasCentre, canvasPeak)
     }
 
@@ -284,16 +293,18 @@ describe('how bright the middle of the canvas can get', () => {
       expect(highest, `tension ${tension}`).toBeLessThan(ceiling)
       expect(peak, `tension ${tension}`).toBeLessThan(ceiling / 2)
       expect(centre).toBeLessThanOrEqual(peak + 1e-12)
-      // The closed form says the same: `SETTLE` times what one frame adds.
+      // The closed form says the same: `SETTLE` times what one frame adds over the floor.
       expect(peak).toBeCloseTo(settledPeak(params), 3)
     }
   })
 
-  it('rests at a settled peak of about 0.4, which is pale, and is far under the knee', () => {
+  // Pale, and under the knee. It used to be reckoned at 0.4 with the floor
+  // left out, which on the real canvas was 0.14 and could not be seen.
+  it('rests at a settled peak of about a half, which is pale, and is under the knee', () => {
     const rest = haloParams({ ...study.knobs, radius: 0.1 })
-    expect(settledPeak(rest)).toBeGreaterThan(0.35)
-    expect(settledPeak(rest)).toBeLessThan(0.45)
-    expect(settledPeak(rest)).toBeLessThan(KNEE * 0.75)
+    expect(settledPeak(rest)).toBeGreaterThan(0.45)
+    expect(settledPeak(rest)).toBeLessThan(0.6)
+    expect(settledPeak(rest)).toBeLessThan(KNEE)
   })
 
   // Whatever the mapping does, the most light it can reach is the sum of every
@@ -311,11 +322,11 @@ describe('how bright the middle of the canvas can get', () => {
               brightest = Math.max(brightest, knobs.intensity ?? 0)
             }
 
-    expect(brightest).toBeCloseTo(0.038, 9)
+    expect(brightest).toBeCloseTo(0.061, 9)
     expect(brightest).toBeLessThanOrEqual(HALO_INTENSITY_MAX)
-    expect(SETTLE * brightest).toBeLessThan(KNEE)
+    expect(SETTLE * (brightest - CANVAS_FLOOR)).toBeLessThan(KNEE)
     // And it is the range's top, not the mapping's, that the knee holds by construction.
-    expect(SETTLE * HALO_INTENSITY_MAX).toBeCloseTo(KNEE, 12)
+    expect(SETTLE * (HALO_INTENSITY_MAX - CANVAS_FLOOR)).toBeCloseTo(KNEE, 12)
     expect(HALO_RANGES.intensity[1]).toBe(HALO_INTENSITY_MAX)
   })
 

@@ -61,7 +61,7 @@ Nothing in the extractor knows a build from a drop today. It knows `swell` (lift
 | `rest`    | the floor has dropped away                     | energy well under the track's own norm, pace low, low end thin                                                                                    |
 | `impact`  | an event, not a level: the instant of the drop | the frame `release` jumps. Scenes read it from the packet the way they read a hit                                                                 |
 
-`groove` needs no row: it is what is left when the other three are low. `intro` and `outro` are `rest` plus position in the track (nothing recalled yet, or energy falling with no tension).
+`groove` needs no row: it is what is left when the other three are low. `intro` and `outro` are about position in the track and are taken out of `groove` and `rest`, never out of `build` or `drop`: an intro is the first 8 to 30 seconds and the first sections (nothing recalled yet), loud or quiet, and an outro is the last stretch of the track when the host gives the playhead, or otherwise energy falling with no tension.
 
 Rules for it:
 

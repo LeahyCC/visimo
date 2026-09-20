@@ -98,10 +98,14 @@ const name = (cast: PickedCast | undefined): string =>
 const presenceOf = (live: readonly LiveStudy[], id: string): number =>
   live.find((entry) => entry.id === id)?.presence ?? 0
 
+// A track that is already under way: something has come back, so the first
+// seconds of the test are not read as the opening of a track, which is an
+// intro whatever it sounds like. What these tests are about is the choosing.
 const packet = (values: Partial<Record<keyof typeof F, number>>) => {
   const out = new Float32Array(PACKET_LENGTH)
   out[F.energy] = 0.8
   out[F.swell] = 0.5
+  out[F.recall] = 0.9
   for (const [name_, value] of Object.entries(values)) out[F[name_ as keyof typeof F]] = value
   return out
 }

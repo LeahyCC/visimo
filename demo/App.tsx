@@ -189,6 +189,7 @@ export default function App() {
             preset={cast}
             fluidSize={fluidSize}
             track={track}
+            playhead={audio}
             onCharacter={setSaved}
             onUnsupported={() => setUnsupported(true)}
             onBackend={setBackend}

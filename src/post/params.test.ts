@@ -6,6 +6,7 @@ import {
   bloomLevelSize,
   bloomSourceSize,
   defaultPostParams,
+  feedbackStep,
   mergePostParams,
   POST_UNIFORM_FLOATS,
   postIsActive,
@@ -152,5 +153,80 @@ describe('the post uniform', () => {
     const out = write(params)
     expect(out[9]).toBeGreaterThan(0)
     expect(out[21]).toBeLessThan(1)
+  })
+})
+
+describe('feedback per second', () => {
+  const feedback = defaultPostParams().feedback
+  const REFERENCE = 1 / 60
+
+  it('leaves the numbers as written at one 60 Hz frame', () => {
+    const step = feedbackStep(feedback, REFERENCE)
+    expect(step.amount).toBeCloseTo(feedback.amount, 6)
+    expect(step.decay).toBeCloseTo(feedback.decay, 6)
+    expect(step.zoom).toBeCloseTo(feedback.zoom, 6)
+    expect(step.rotate).toBeCloseTo(feedback.rotate, 6)
+  })
+
+  it('compounds two steps of 1/120 to the same as one of 1/60', () => {
+    const half = feedbackStep(feedback, 1 / 120)
+    const whole = feedbackStep(feedback, REFERENCE)
+    expect((half.amount * half.decay) ** 2).toBeCloseTo(whole.amount * whole.decay, 9)
+    expect(half.zoom ** 2).toBeCloseTo(whole.zoom, 9)
+    expect(half.rotate * 2).toBeCloseTo(whole.rotate, 9)
+  })
+
+  it('trails as long in seconds at 144 Hz as at 60 Hz', () => {
+    const gainAfterASecond = (fps: number) => {
+      const step = feedbackStep(feedback, 1 / fps)
+      return (step.amount * step.decay) ** fps
+    }
+    expect(gainAfterASecond(144)).toBeCloseTo(gainAfterASecond(60), 9)
+  })
+
+  it('reads a missing or bad step as one reference frame', () => {
+    const whole = feedbackStep(feedback, REFERENCE)
+    for (const dt of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(feedbackStep(feedback, dt).zoom).toBeCloseTo(whole.zoom, 9)
+    }
+    // A packet with no step in it, as in the older tests, is the same as zero.
+    expect(write(defaultPostParams(), packet())[4]).toBeCloseTo(feedback.amount, 6)
+  })
+
+  it('holds a stalled frame to the longest step', () => {
+    expect(feedbackStep(feedback, 30)).toEqual(feedbackStep(feedback, 0.1))
+
+    // A base above 1 must not grow past what one reference frame gives.
+    const step = feedbackStep({ ...feedback, amount: 1.5, decay: 1.2 }, 0.1)
+    expect(step.amount).toBeLessThanOrEqual(1.5)
+    expect(step.decay).toBeLessThanOrEqual(1.2)
+  })
+
+  it('writes the converted numbers into the uniform', () => {
+    const out = write(defaultPostParams(), packet({ dt: 1 / 120 }))
+    const step = feedbackStep(feedback, Math.fround(1 / 120))
+    const written = [out[4], out[5], out[6], out[7]].map((value) => value ?? 0)
+    const wanted = [step.amount, step.decay, step.zoom, step.rotate].map(Math.fround)
+    written.forEach((value, index) => expect(value).toBeCloseTo(wanted[index] ?? 0, 6))
+  })
+
+  it('still makes a disabled stage vanish at any step', () => {
+    const off = mergePostParams(defaultPostParams(), { feedback: { enabled: false } })
+    for (const dt of [0, 1 / 144, 0.5]) {
+      const out = write(off, packet({ dt }))
+      expect([out[4], out[5], out[6], out[7]]).toEqual([0, 0, 1, 0])
+    }
+  })
+
+  it('never lets a zoom the shader divides by reach zero', () => {
+    for (const zoom of [0, -2, 1e-9]) {
+      for (const dt of [0, 1 / 240, 0.1]) {
+        expect(feedbackStep({ ...feedback, zoom }, dt).zoom).toBeGreaterThan(0)
+      }
+    }
+    // A negative amount or decay is a preset mistake, not a NaN in the history.
+    const bad = feedbackStep({ ...feedback, amount: -1, decay: -1 }, 1 / 144)
+    expect(Number.isNaN(bad.amount)).toBe(false)
+    expect(Number.isNaN(bad.decay)).toBe(false)
   })
 })

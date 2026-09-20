@@ -5,7 +5,7 @@
 struct PostParams {
   resolution: vec2<f32>,
   texel: vec2<f32>,
-  feedback: vec4<f32>,  // amount, decay, zoom, rotate
+  feedback: vec4<f32>,  // amount, decay, zoom, rotate, per drawn frame
   bloom: vec4<f32>,     // threshold, knee, intensity, 0
   weights: vec4<f32>,   // level 0, 1, 2, bloom on
   chroma: vec4<f32>,    // split, 0, 0, 0

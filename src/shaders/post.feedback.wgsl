@@ -1,6 +1,12 @@
 // The previous frame, zoomed and rotated a little about the middle, decayed,
 // and added under the scene. The scene has already drawn into this pass's
 // target, so the pass is additively blended rather than reading it back.
+//
+// The four numbers in post.feedback are what this one drawn frame does. The
+// CPU has already converted them from "one frame at 60 frames a second" by the
+// real step (feedbackStep in post/params.ts), so this shader never sees the
+// frame rate and applies them as they come. amount and decay arrive as their
+// own powers, and their product is the gain on the history.
 
 @group(0) @binding(0) var<uniform> post: PostParams;
 @group(0) @binding(1) var samp: sampler;

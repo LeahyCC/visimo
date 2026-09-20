@@ -14,13 +14,16 @@ export type FeedbackParams = {
   enabled: boolean
   /** How much of the decayed history survives, 0 to 1. */
   amount: number
-  /** Per-frame decay of the history, 0 to 1. */
+  /** Decay of the history, 0 to 1. */
   decay: number
-  /** Scale applied to the history each frame; above 1 pushes trails outward. */
+  /** Scale applied to the history; above 1 pushes trails outward. */
   zoom: number
-  /** Radians of rotation applied to the history each frame. */
+  /** Radians of rotation applied to the history. */
   rotate: number
 }
+// The four numbers above are what one frame does at 60 frames a second.
+// `feedbackStep` converts them by the real step, so a trail lasts and travels
+// the same number of seconds on any display.
 
 export type BloomParams = {
   enabled: boolean
@@ -85,8 +88,8 @@ export const BLOOM_LEVELS = 3
 /**
  * Tuned by eye on real tracks at 3840 by 2160; see docs/visualizer.md. The
  * field already fills most of the frame, so anything generous here turns it
- * into a milky haze. The feedback gain on a still image is
- * 1 / (1 - amount * decay), about 1.19, and the bloom threshold sits high
+ * into a milky haze. The feedback gain on a still image at 60 frames a second
+ * is 1 / (1 - amount * decay), about 1.19, and the bloom threshold sits high
  * enough that only the attractor cores glow.
  */
 export const DEFAULT_POST_PARAMS: PostParams = {
@@ -102,6 +105,53 @@ export const DEFAULT_POST_PARAMS: PostParams = {
   chromatic: { enabled: true, amount: 0.0008, beat: 0.003 },
   tonemap: { enabled: true, exposure: 1, shoulder: 0.6 },
   grain: { enabled: true, amount: 0.02 },
+}
+
+/** The frame length the feedback numbers are written against. */
+export const REFERENCE_FPS = 60
+
+/**
+ * Bounds on the step the feedback conversion trusts. A missing or zero dt
+ * means the first frame, so it reads as one reference frame and changes
+ * nothing; a stalled tab is held to the longest step the renderer allows so
+ * one frame cannot fling the warp across the canvas.
+ */
+const MIN_FEEDBACK_DT = 1 / 480
+const MAX_FEEDBACK_DT = 0.1
+
+/** What the feedback pass applies to the history on one drawn frame. */
+export type FeedbackStep = {
+  amount: number
+  decay: number
+  zoom: number
+  rotate: number
+}
+
+/**
+ * Convert per-reference-frame feedback numbers to the step actually taken.
+ * Amount and decay are each raised to the frame count so their product, which
+ * is what the shader multiplies, compounds like (amount x decay) ^ frames.
+ * Zoom compounds the same way and rotation is linear in time, so two steps of
+ * half the length land where one whole step does.
+ *
+ * Pure and GPU free: it is the only place the frame rate enters the stack.
+ */
+export function feedbackStep(feedback: FeedbackParams, dt: number): FeedbackStep {
+  const step = Number.isFinite(dt) && dt > 0 ? dt : 1 / REFERENCE_FPS
+  const frames = Math.min(Math.max(step, MIN_FEEDBACK_DT), MAX_FEEDBACK_DT) * REFERENCE_FPS
+  // A base above 1 would grow without bound over a long step, so it is held
+  // at what one reference frame gives. Below 1 the power is at most 1 already.
+  const keep = (base: number) => {
+    const safe = Math.max(base, 0)
+    return Math.min(safe ** frames, Math.max(safe, 1))
+  }
+  return {
+    amount: keep(feedback.amount),
+    decay: keep(feedback.decay),
+    // The shader divides by the zoom, so it never reaches zero or goes negative.
+    zoom: Math.max(feedback.zoom, 0.001) ** frames,
+    rotate: feedback.rotate * frames,
+  }
 }
 
 /** Floats in the shared uniform; PostParams in post.common.wgsl must match. */
@@ -280,12 +330,13 @@ export function writePostUniform(
 
   const feedback = params.feedback
   const trails = stageEnabled(params, 'feedback')
-  out[4] = trails ? feedback.amount : 0
-  out[5] = trails ? feedback.decay : 0
+  const step = feedbackStep(feedback, features[F.dt] ?? 0)
+  out[4] = trails ? step.amount : 0
+  out[5] = trails ? step.decay : 0
   // The shader divides by the zoom, so an off stage still writes the identity
   // warp rather than a zero.
-  out[6] = trails ? feedback.zoom : 1
-  out[7] = trails ? feedback.rotate : 0
+  out[6] = trails ? step.zoom : 1
+  out[7] = trails ? step.rotate : 0
 
   const bloom = params.bloom
   const glow = stageEnabled(params, 'bloom')

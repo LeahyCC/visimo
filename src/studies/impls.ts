@@ -29,6 +29,7 @@ export const IMPL_IDS = [
   'dust',
   'caustics',
   'halo',
+  'rings',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -151,6 +152,15 @@ export const HALO_KNOBS = ['radius', 'hollow', 'softness', 'intensity', 'hue'] a
 export type HaloKnob = (typeof HALO_KNOBS)[number]
 
 /**
+ * The rings' numbers. Their ranges and units are in `impls/rings.params.ts`.
+ * `rate` is rings a beat and is snapped to 1, 2 or 4 there, so a build's roll
+ * is the tempo's own subdivisions; `speed` is in frame heights a second and
+ * `life` in seconds.
+ */
+export const RINGS_KNOBS = ['rate', 'speed', 'thickness', 'intensity', 'life', 'hueSpread'] as const
+export type RingsKnob = (typeof RINGS_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -228,6 +238,7 @@ export type ImplKnob =
   | DustKnob
   | CausticsKnob
   | HaloKnob
+  | RingsKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -241,6 +252,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   dust: DUST_KNOBS,
   caustics: CAUSTICS_KNOBS,
   halo: HALO_KNOBS,
+  rings: RINGS_KNOBS,
   look: LOOK_KNOBS,
 }
 

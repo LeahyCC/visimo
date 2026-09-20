@@ -25,7 +25,7 @@ import { AUDIO_FIELDS } from '../presets/knobs'
 import { defaultCanvas, parseCast } from '../studies/cast'
 import { castOrDefault } from '../studies/casts/index'
 import frames from '../studies/casts/preset-frames.json'
-import { CAUSTICS_KNOBS, DUST_KNOBS, HALO_KNOBS } from '../studies/impls'
+import { CAUSTICS_KNOBS, DUST_KNOBS, HALO_KNOBS, RINGS_KNOBS } from '../studies/impls'
 import type { ImplId } from '../studies/impls'
 import { STUDIES } from '../studies/registry'
 import type { LiveCast } from '../studies/resolve'
@@ -290,6 +290,26 @@ vi.mock('../impls/CausticsInk', () => ({
     }
     dispose() {
       impls.disposed.caustics = (impls.disposed.caustics ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/RingsInk', () => ({
+  RingsInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.rings = (impls.built.rings ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('rings', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('rings')
+    }
+    dispose() {
+      impls.disposed.rings = (impls.disposed.rings ?? 0) + 1
     }
   },
 }))
@@ -1560,6 +1580,75 @@ describe('the study bench', () => {
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     expect(() => draw(1000)).not.toThrow()
     expect(impls.built.halo).toBeUndefined()
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('builds the rings ink for its study, hands it its numbers and draws it in cast order', async () => {
+    const { draw } = await start()
+    renderer.setBench({
+      live: live('ribbon', 'beat-rings', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.energy] = 0.3
+        packet[F.tempoConfidence] = 0.9
+        packet[F.tension] = 0
+      },
+    })
+    draw(1000)
+    expect(impls.built.rings).toBe(1)
+    expect(impls.drawn).toEqual(['ribbon', 'rings'])
+    expect(impls.seen.rings?.presence).toBe(1)
+    expect(Object.keys(impls.seen.rings?.knobs ?? {}).sort()).toEqual([...RINGS_KNOBS].sort())
+    // A steady beat has light to draw, and one ring a beat at rest.
+    expect(impls.seen.rings?.knobs.intensity ?? 0).toBeGreaterThan(0.2)
+    expect(impls.seen.rings?.knobs.rate).toBe(1)
+
+    // The study's tension row reaches the ink through the resolver: a build
+    // rolls, which is more rings a beat.
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.energy] = 0.3
+        packet[F.tempoConfidence] = 0.9
+        packet[F.tension] = 1
+      },
+    })
+    draw(2000)
+    expect(impls.seen.rings?.knobs.rate ?? 0).toBe(4)
+  })
+
+  it('is handed no light at a packet with no steady beat, which is how it draws nothing', async () => {
+    const { draw } = await start()
+    renderer.setBench({ live: live('ribbon', 'beat-rings', 'clean-glass') })
+    draw(1000)
+    expect(impls.seen.rings?.knobs.intensity).toBe(0)
+  })
+
+  it('does not build the rings ink for a study that is faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('ribbon', 'beat-rings', 'clean-glass')
+    const rings = cast.studies[1]
+    if (!rings) throw new Error('the rings are in the cast')
+    rings.presence = 0
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.built.rings).toBeUndefined()
+    expect(impls.updates.rings).toBeUndefined()
+    rings.presence = 0.5
+    draw(2000)
+    expect(impls.built.rings).toBe(1)
+    expect(impls.seen.rings?.presence).toBe(0.5)
+  })
+
+  it('skips the rings on the WebGL2 path, which has no compute and draws the fractal alone', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('ribbon', 'beat-rings', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(1000)).not.toThrow()
+    expect(impls.built.rings).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

@@ -15,6 +15,7 @@ struct PostParams {
   floor: vec4<f32>,     // light taken off the history this frame, 0, 0, 0
   ribbon: vec4<f32>,    // intensity, width and amplitude in pixels, circle (0 or 1)
   ribbonTint: vec4<f32>, // colour rgb, circle radius in pixels
+  grade: vec4<f32>,     // vignette (0 none), saturation (1 untouched), vignette edge width, 0
 }
 
 struct Blit {

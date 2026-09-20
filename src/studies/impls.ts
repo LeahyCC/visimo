@@ -14,11 +14,20 @@
  */
 import { POST_KNOBS } from '../post/params'
 import type { PostKnob, PostStage } from '../post/params'
-import { ANALYTIC_KNOBS, KALEIDOSCOPE_KNOBS } from '../presets/knobs'
-import type { AnalyticKnob, FluidKnob, KaleidoscopeKnob } from '../presets/knobs'
+import { ANALYTIC_KNOBS, KALEIDOSCOPE_KNOBS, SHARD_KNOBS } from '../presets/knobs'
+import type { AnalyticKnob, FluidKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs'
 import type { SceneId } from '../scenes/catalog'
 
-export const IMPL_IDS = ['fluid', 'analytic', 'dye', 'fractal', 'ribbon', 'look'] as const
+export const IMPL_IDS = [
+  'fluid',
+  'analytic',
+  'dye',
+  'fractal',
+  'ribbon',
+  'streaks',
+  'shards',
+  'look',
+] as const
 export type ImplId = (typeof IMPL_IDS)[number]
 
 /**
@@ -92,10 +101,24 @@ export const RIBBON_KNOBS = [
 ] as const satisfies readonly PostKnob[]
 
 /**
+ * The streaks' numbers. Their ranges and what each one means in pixels are in
+ * `impls/streaks.params.ts`; this is only the vocabulary a study may name.
+ */
+export const STREAKS_KNOBS = [
+  'count',
+  'length',
+  'speed',
+  'width',
+  'intensity',
+  'hueSpread',
+] as const
+export type StreaksKnob = (typeof STREAKS_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
-export const LOOK_STAGES = ['bloom', 'chromatic', 'tonemap', 'grain'] as const
+export const LOOK_STAGES = ['bloom', 'chromatic', 'grade', 'tonemap', 'grain'] as const
 export type LookStage = (typeof LOOK_STAGES)[number]
 
 const lookStages: readonly PostStage[] = LOOK_STAGES
@@ -107,19 +130,42 @@ export const LOOK_KNOBS: readonly PostKnob[] = POST_KNOBS.filter((knob) =>
 
 /**
  * The knobs that say how much of a stage there is, as opposed to how it is
- * shaped: at zero the stage draws nothing. When one look has a stage and the
- * look it is fading against does not, these are what carry the fade, so the
- * stage thins to nothing before it is switched off. The tonemap has none; it
- * has no amount, only a curve.
+ * shaped: at their neutral value the stage does nothing. When one look has a
+ * stage and the look it is fading against does not, these are what carry the
+ * fade, so the stage thins to nothing before it is switched off. The tonemap
+ * has none; it has no amount, only a curve.
  */
 export const LOOK_STRENGTH_KNOBS = [
   'bloom.intensity',
   'chromatic.amount',
   'chromatic.beat',
+  'grade.vignette',
+  'grade.saturation',
   'grain.amount',
 ] as const satisfies readonly PostKnob[]
 
-export const isLookStrength = (knob: string): boolean =>
+export type LookStrengthKnob = (typeof LOOK_STRENGTH_KNOBS)[number]
+
+/**
+ * What each strength knob is at when its stage does nothing, which is the
+ * value a fade toward "the look that has no such stage" has to head for. It is
+ * 0 for every knob that adds something, and it is not for the saturation,
+ * which rests at 1: 0 there is grey, so a look leaving with a drained colour
+ * would drain toward grey on the way out if the fade went to 0, and the frame
+ * would then snap back to full colour when the stage switched off. Record
+ * typed on the list above, so a strength knob cannot be added without saying
+ * what its neutral is.
+ */
+export const LOOK_NEUTRAL: Readonly<Record<LookStrengthKnob, number>> = {
+  'bloom.intensity': 0,
+  'chromatic.amount': 0,
+  'chromatic.beat': 0,
+  'grade.vignette': 0,
+  'grade.saturation': 1,
+  'grain.amount': 0,
+}
+
+export const isLookStrength = (knob: string): knob is LookStrengthKnob =>
   (LOOK_STRENGTH_KNOBS as readonly string[]).includes(knob)
 
 /**
@@ -134,7 +180,8 @@ export const COUNT_KNOBS = ['emitters', 'events'] as const satisfies readonly Fl
 export const isCountKnob = (knob: string): boolean =>
   (COUNT_KNOBS as readonly string[]).includes(knob)
 
-export type ImplKnob = FluidKnob | AnalyticKnob | KaleidoscopeKnob | PostKnob
+export type ImplKnob =
+  FluidKnob | AnalyticKnob | KaleidoscopeKnob | ShardKnob | PostKnob | StreaksKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -143,6 +190,8 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   dye: FLUID_DYE_KNOBS,
   fractal: KALEIDOSCOPE_KNOBS,
   ribbon: RIBBON_KNOBS,
+  streaks: STREAKS_KNOBS,
+  shards: SHARD_KNOBS,
   look: LOOK_KNOBS,
 }
 

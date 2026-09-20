@@ -119,6 +119,32 @@ export type GrainParams = {
   amount: number
 }
 
+/**
+ * The frame's edges and its colour, in the composite before the tonemap, so
+ * the tonemap still bends the highlights that survive it. Both numbers are
+ * neutral at rest, so switching the stage on with nothing said changes nothing.
+ * `writePostUniform` holds each to its own range, because a row may carry a
+ * lane past its end (an impact undoing what tension did does exactly that) and
+ * the shader should only ever see a number it can use.
+ */
+export type GradeParams = {
+  enabled: boolean
+  /**
+   * How far the frame closes in, 0 for none and 1 for closed down hard to the
+   * centre. See `vignetteLight` for the shape, which is what makes the middle
+   * of the range already plain to see.
+   */
+  vignette: number
+  /**
+   * 1 leaves the colour alone and 0 is grey. Colour is scaled about the pixel's
+   * own luminance and no channel is clamped, so a hue is thinned and not bent.
+   * It stops at 1: above it the smallest channel of a saturated pixel goes
+   * negative, and the composite's last `max` then clips it, which is the hue
+   * shift the tonemap is built to avoid.
+   */
+  saturation: number
+}
+
 export type PostParams = {
   /** Off skips every stage, leaving the composite a straight copy. */
   enabled: boolean
@@ -126,6 +152,7 @@ export type PostParams = {
   feedback: FeedbackParams
   bloom: BloomParams
   chromatic: ChromaticParams
+  grade: GradeParams
   tonemap: TonemapParams
   grain: GrainParams
 }
@@ -137,6 +164,7 @@ export type PostPatch = {
   feedback?: Partial<FeedbackParams>
   bloom?: Partial<BloomParams>
   chromatic?: Partial<ChromaticParams>
+  grade?: Partial<GradeParams>
   tonemap?: Partial<TonemapParams>
   grain?: Partial<GrainParams>
 }
@@ -177,6 +205,9 @@ export const DEFAULT_POST_PARAMS: PostParams = {
     weights: [0.5, 0.32, 0.18],
   },
   chromatic: { enabled: true, amount: 0.0008, beat: 0.003 },
+  // Off, so no shipped cast prints `grade` in `data-post`, and neutral even
+  // when a look switches it on: no vignette and every colour as it was.
+  grade: { enabled: false, vignette: 0, saturation: 1 },
   tonemap: { enabled: true, exposure: 1, shoulder: 0.6 },
   grain: { enabled: true, amount: 0.02 },
 }
@@ -276,8 +307,8 @@ export function freshWeight(params: PostParams, features: Float32Array): number 
   return feedbackStep(params.feedback, features[F.dt] ?? 0).fresh
 }
 
-/** Floats in the shared uniform; PostParams in post.common.wgsl must match. */
-export const POST_UNIFORM_FLOATS = 44
+/** Floats in the shared uniform, twelve vec4s; PostParams in post.common.wgsl must match. */
+export const POST_UNIFORM_FLOATS = 48
 
 /**
  * Points along the ribbon. A few hundred is a smooth line at 4K, and the
@@ -307,7 +338,7 @@ const RIBBON_RADIUS = 0.28
  * palette on is the far side of them, and a line drawn there reads against the
  * dye instead of vanishing into it. It moves with the key like everything else.
  */
-const RIBBON_TINT = 0.5
+export const RIBBON_TINT = 0.5
 
 /** Vertices in the strip: two a point, and one point more than there are to close a circle. */
 export const RIBBON_VERTICES = 2 * (RIBBON_POINTS + 1)
@@ -325,9 +356,23 @@ export const ribbonRuns = (params: PostParams) =>
  * brightest at 0.94, so left as they are the line would be about a third as
  * bright in one key as in another and `intensity` would mean a different
  * thing in each. Scaled, it is the peak brightness whatever the key.
+ *
+ * `offset` moves along the palette from the ribbon's own place in it, so the
+ * streaks can scatter their hues around the ribbon's without a palette of
+ * their own. At 0 it is the ribbon's colour exactly.
  */
-export function ribbonColour(features: Float32Array): [number, number, number] {
-  const [red, green, blue] = paletteAt((features[F.keyHue] ?? 0) + RIBBON_TINT)
+export function ribbonColour(features: Float32Array, offset = 0): [number, number, number] {
+  return peakPaletteAt((features[F.keyHue] ?? 0) + RIBBON_TINT + offset)
+}
+
+/**
+ * The fluid's palette at one coordinate, scaled so its brightest channel is 1.
+ * Split out of `ribbonColour` so an ink that spreads its colour around the
+ * key, the shards, draws from the same palette at the same peak brightness
+ * and does not keep a second one.
+ */
+export function peakPaletteAt(coordinate: number): [number, number, number] {
+  const [red, green, blue] = paletteAt(coordinate)
   const peak = Math.max(red, green, blue)
   // Written so that a NaN from a bad key falls through to white, not to NaN.
   return peak > 1e-4 ? [red / peak, green / peak, blue / peak] : [1, 1, 1]
@@ -367,12 +412,46 @@ const MIN_COVER = 1e-4
 /** The ceiling divides in the shader, so nothing may write it as zero. */
 const MIN_CEILING = 1e-4
 
+/**
+ * How wide the vignette's edge is, in the same units as its distance. It rides
+ * in the uniform, so the two composites read one number and cannot drift.
+ */
+export const VIGNETTE_SOFTNESS = 0.75
+
+/**
+ * The share of light a pixel keeps under the vignette, which the composite
+ * computes on the GPU and this states so the shape can be tested. `distance`
+ * runs from 0 at the centre to 1 at a corner, so the middle of an edge is
+ * about 0.7, and the frame follows its own shape rather than a circle.
+ *
+ * The clear zone shrinks as the number climbs: it reaches the corner at 0,
+ * where nothing is touched, and the centre at 1. The edge is a smoothstep as
+ * wide as `VIGNETTE_SOFTNESS`, which is what keeps the middle of the range
+ * strong: at a half the corners are down to a quarter of their light while the
+ * middle of each edge has lost a fifth, where a plain power of the distance
+ * would spend the whole range before it showed. At 1 the edges are black and
+ * only the middle of the frame is lit.
+ */
+export function vignetteLight(distance: number, vignette: number): number {
+  const inner = 1 - vignette
+  const t = Math.min(Math.max((distance - inner) / VIGNETTE_SOFTNESS, 0), 1)
+  return 1 - t * t * (3 - 2 * t)
+}
+
+/**
+ * A grade number as the shader may see it: held to its own range, and to the
+ * neutral one if it is not a number at all, since a NaN would take the frame.
+ */
+const gradeValue = (value: number, neutral: number) =>
+  Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : neutral
+
 const clone = (params: PostParams): PostParams => ({
   enabled: params.enabled,
   ribbon: { ...params.ribbon },
   feedback: { ...params.feedback },
   bloom: { ...params.bloom, weights: [...params.bloom.weights] },
   chromatic: { ...params.chromatic },
+  grade: { ...params.grade },
   tonemap: { ...params.tonemap },
   grain: { ...params.grain },
 })
@@ -390,6 +469,7 @@ export function patchPostParams(out: PostParams, patch: PostPatch): PostParams {
   Object.assign(out.feedback, patch.feedback)
   Object.assign(out.bloom, patch.bloom)
   Object.assign(out.chromatic, patch.chromatic)
+  Object.assign(out.grade, patch.grade)
   Object.assign(out.tonemap, patch.tonemap)
   Object.assign(out.grain, patch.grain)
   if (patch.bloom?.weights) out.bloom.weights = [...patch.bloom.weights]
@@ -413,11 +493,13 @@ export const mergePostPatch = (base: PostPatch, patch: PostPatch): PostPatch => 
   feedback: { ...base.feedback, ...patch.feedback },
   bloom: { ...base.bloom, ...patch.bloom },
   chromatic: { ...base.chromatic, ...patch.chromatic },
+  grade: { ...base.grade, ...patch.grade },
   tonemap: { ...base.tonemap, ...patch.tonemap },
   grain: { ...base.grain, ...patch.grain },
 })
 
-export type PostStage = 'ribbon' | 'feedback' | 'bloom' | 'chromatic' | 'tonemap' | 'grain'
+export type PostStage =
+  'ribbon' | 'feedback' | 'bloom' | 'chromatic' | 'grade' | 'tonemap' | 'grain'
 
 /**
  * Every stage, in the order the passes run. `postSummary` prints the running
@@ -430,6 +512,7 @@ export const POST_STAGES: readonly PostStage[] = [
   'feedback',
   'bloom',
   'chromatic',
+  'grade',
   'tonemap',
   'grain',
 ]
@@ -538,6 +621,18 @@ export const POST_LANES = {
     read: (p: PostParams) => p.chromatic.beat,
     write: (p: PostParams, value: number) => {
       p.chromatic.beat = value
+    },
+  },
+  'grade.vignette': {
+    read: (p: PostParams) => p.grade.vignette,
+    write: (p: PostParams, value: number) => {
+      p.grade.vignette = value
+    },
+  },
+  'grade.saturation': {
+    read: (p: PostParams) => p.grade.saturation,
+    write: (p: PostParams, value: number) => {
+      p.grade.saturation = value
     },
   },
   'tonemap.exposure': {
@@ -701,5 +796,15 @@ export function writePostUniform(
   out[41] = green ?? 0
   out[42] = blue ?? 0
   out[43] = circle ? RIBBON_RADIUS * short : 0
+
+  // The grade, last, in a vec4 of its own. Off writes the neutral pair, which
+  // the shader turns into no vignette and colour exactly as it was, so no
+  // branch. The softness is a constant that rides along so the composites
+  // share it.
+  const graded = stageEnabled(params, 'grade')
+  out[44] = graded ? gradeValue(params.grade.vignette, 0) : 0
+  out[45] = graded ? gradeValue(params.grade.saturation, 1) : 1
+  out[46] = VIGNETTE_SOFTNESS
+  out[47] = 0
   return out
 }

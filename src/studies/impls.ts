@@ -14,11 +14,11 @@
  */
 import { POST_KNOBS } from '../post/params'
 import type { PostKnob, PostStage } from '../post/params'
-import { KALEIDOSCOPE_KNOBS } from '../presets/knobs'
-import type { FluidKnob, KaleidoscopeKnob } from '../presets/knobs'
+import { ANALYTIC_KNOBS, KALEIDOSCOPE_KNOBS } from '../presets/knobs'
+import type { AnalyticKnob, FluidKnob, KaleidoscopeKnob } from '../presets/knobs'
 import type { SceneId } from '../scenes/catalog'
 
-export const IMPL_IDS = ['fluid', 'dye', 'fractal', 'ribbon', 'look'] as const
+export const IMPL_IDS = ['fluid', 'analytic', 'dye', 'fractal', 'ribbon', 'look'] as const
 export type ImplId = (typeof IMPL_IDS)[number]
 
 /**
@@ -134,11 +134,12 @@ export const COUNT_KNOBS = ['emitters', 'events'] as const satisfies readonly Fl
 export const isCountKnob = (knob: string): boolean =>
   (COUNT_KNOBS as readonly string[]).includes(knob)
 
-export type ImplKnob = FluidKnob | KaleidoscopeKnob | PostKnob
+export type ImplKnob = FluidKnob | AnalyticKnob | KaleidoscopeKnob | PostKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   fluid: FLUID_SOLVER_KNOBS,
+  analytic: ANALYTIC_KNOBS,
   dye: FLUID_DYE_KNOBS,
   fractal: KALEIDOSCOPE_KNOBS,
   ribbon: RIBBON_KNOBS,

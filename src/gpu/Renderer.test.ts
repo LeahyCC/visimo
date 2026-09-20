@@ -25,6 +25,8 @@ import { AUDIO_FIELDS } from '../presets/knobs'
 import { defaultCanvas } from '../studies/cast'
 import { castOrDefault } from '../studies/casts/index'
 import frames from '../studies/casts/preset-frames.json'
+import type { ImplId } from '../studies/impls'
+import { STUDIES } from '../studies/registry'
 import type { LiveCast } from '../studies/resolve'
 import type { Gpu } from './Device'
 
@@ -56,8 +58,8 @@ const audio = vi.hoisted(() => ({ attached: false, packet: null as Float32Array 
  * class an implementation was built from says which study it is drawing for.
  */
 const impls = vi.hoisted(() => ({
-  built: { fluid: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
-  disposed: { fluid: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
+  built: { fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
+  disposed: { fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
   seen: {} as Record<string, { knobs: Record<string, number>; presence: number }>,
   /** How many times each was stepped, so a second solver would double it. */
   updates: {} as Record<string, number>,
@@ -69,8 +71,8 @@ const impls = vi.hoisted(() => ({
   maxFps: undefined as number | undefined,
   maxPixels: undefined as number | undefined,
   reset() {
-    impls.built = { fluid: 0, dye: 0, fractal: 0, ribbon: 0 }
-    impls.disposed = { fluid: 0, dye: 0, fractal: 0, ribbon: 0 }
+    impls.built = { fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 }
+    impls.disposed = { fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 }
     impls.seen = {}
     impls.updates = {}
     impls.drawn = []
@@ -137,6 +139,25 @@ vi.mock('../impls/fluid', () => ({
     }
     dispose() {
       impls.disposed.dye = (impls.disposed.dye ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/analytic', () => ({
+  AnalyticFlow: class {
+    readonly flow = null
+    detail = 'analytic detail'
+    constructor() {
+      impls.built.analytic = (impls.built.analytic ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('analytic', knobs, presence)
+    }
+    simulate() {}
+    dispose() {
+      impls.disposed.analytic = (impls.disposed.analytic ?? 0) + 1
     }
   },
 }))
@@ -579,7 +600,7 @@ describe('the WebGL2 fallback', () => {
     renderer.setPreset(castOrDefault('melt'))
     await expect(renderer.attach(element, canvas(), vi.fn())).resolves.toBe('ok')
     draw(16)
-    expect(impls.built).toEqual({ fluid: 0, dye: 0, fractal: 0, ribbon: 0 })
+    expect(impls.built).toEqual({ fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 })
     expect(graphics.render).toHaveBeenCalledTimes(1)
   })
 
@@ -691,6 +712,16 @@ describe('the director drives the cast', () => {
   const FPS = 30
 
   /**
+   * Which frames of a trace had a study of this implementation live on them,
+   * read from the registry rather than by name, so a study added later is
+   * counted without anyone remembering to add it here.
+   */
+  const liveFrames = (trace: readonly string[], impl: ImplId): boolean[] => {
+    const ids = STUDIES.filter((study) => study.impl === impl).map((study) => study.id)
+    return trace.map((line) => ids.some((id) => new RegExp(`(^|, )${id} `).test(line)))
+  }
+
+  /**
    * A renderer of its own, the scripted song played through it a frame at a
    * time, and what was live on each of those frames. The module is reset so
    * the two plays a determinism test needs start from the same nothing.
@@ -725,14 +756,32 @@ describe('the director drives the cast', () => {
   // The two things the renderer review left for this card, over a whole
   // track rather than over one change: a glide must not empty the canvas,
   // and a fade between two studies of one solver must not build a second.
+  //
+  // The solver is no longer live for the whole song. Implode is a flow of
+  // another implementation entirely and wins this song's build outright, for
+  // long enough that the fluid's grace runs out and it is released, so what
+  // is held to here is the invariant rather than the count: one solver per
+  // stretch in which a fluid study is live, stepped once on each of those
+  // frames whichever of the two studies is fading into the other.
   it('never empties the canvas and never builds a second solver', async () => {
     const song = await playThrough('auto')
     expect(stack.reset).toBe(0)
-    expect(impls.built.fluid).toBe(1)
-    expect(impls.disposed.fluid).toBe(0)
-    // One step of the solver per frame, whatever is fading into what, and
-    // the song does put two flows on it at once.
-    expect(impls.updates.fluid).toBe(song.frames)
+    const stirring = liveFrames(song.trace, 'fluid')
+    const frames = stirring.filter(Boolean).length
+    const stretches = stirring.filter((on, at) => on && !stirring[at - 1]).length
+    expect(frames).toBeGreaterThan(0)
+    expect(stretches).toBeGreaterThan(0)
+    // Never more than one build per stretch; a stretch that starts again
+    // inside the grace takes the solver back rather than building one.
+    expect(impls.built.fluid).toBeLessThanOrEqual(stretches)
+    expect(impls.disposed.fluid).toBeLessThanOrEqual(impls.built.fluid ?? 0)
+    expect(impls.updates.fluid).toBe(frames)
+    // What takes its place through the build, which is the analytic flow.
+    // The two overlap while the change glides, so this is not the rest of
+    // the song; each is stepped on exactly the frames its studies are live.
+    expect(frames).toBeLessThan(song.frames)
+    expect(impls.updates.analytic).toBe(liveFrames(song.trace, 'analytic').filter(Boolean).length)
+    expect(impls.updates.analytic).toBeGreaterThan(0)
     expect(song.trace.some((line) => (line.match(/fluid/g) ?? []).length > 1)).toBe(true)
     expect(new Set(song.trace).size).toBeGreaterThan(1)
     song.renderer.dispose()
@@ -836,10 +885,38 @@ describe('the director drives the cast', () => {
 
     // Nothing is built without compute, nothing throws, and the fractal the
     // stand-in holds is what draws.
-    expect(impls.built).toEqual({ fluid: 0, dye: 0, fractal: 0, ribbon: 0 })
+    expect(impls.built).toEqual({ fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 })
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
     expect(element.dataset.cast).toContain('fractal-glints')
+    fresh.dispose()
+  })
+
+  // The WebGL2 path has no flow at all and the analytic flow is not built
+  // there. This song's build is one the director wants it for, so playing the
+  // whole of it is what proves a cast naming it is skipped rather than thrown
+  // on; when that path grows a flow, this is the test that will catch it.
+  it('does not throw on the frames the song wants the analytic flow', async () => {
+    vi.resetModules()
+    impls.reset()
+    const fresh = (await import('./Renderer')).renderer
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    audio.attached = true
+    const failure = vi.fn()
+    fresh.setPreset('auto')
+    await expect(fresh.attach(element, canvas(), failure)).resolves.toBe('ok')
+    let now = 0
+    for (const frame of playSong(FPS)) {
+      audio.packet = frame.features
+      now += 1000 / FPS
+      draw(now)
+    }
+
+    expect(failure).not.toHaveBeenCalled()
+    expect(impls.built.analytic).toBe(0)
+    expect(impls.updates.analytic).toBeUndefined()
+    expect(graphics.render).toHaveBeenCalled()
     fresh.dispose()
   })
 })
@@ -1002,7 +1079,9 @@ describe('the study bench', () => {
     renderer.setBench({ live: live('lazy-fluid', 'ribbon', 'clean-glass') })
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     draw(1000)
-    expect(impls.built).toEqual({ fluid: 0, dye: 0, fractal: 0, ribbon: 0 })
+    // Nothing is built there, whichever implementations there are: counted
+    // rather than listed, so a new one does not break this by existing.
+    expect(Object.values(impls.built).reduce((sum, count) => sum + count, 0)).toBe(0)
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

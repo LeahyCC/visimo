@@ -126,6 +126,12 @@ const SPARE_SECONDS = 6
 const CHARACTER_SECONDS = 30
 
 /**
+ * How far the playhead may drift from the frame clock before it counts as a
+ * seek. Well over any stutter or a slow frame, well under the shortest drag.
+ */
+const SEEK_SECONDS = 1.5
+
+/**
  * Nothing on screen. What is live between a host turning the director on and
  * the first frame it steps, so the cast a host has just stopped pinning is
  * not built for one frame and torn down again.
@@ -247,6 +253,8 @@ class Renderer {
   private onCharacter: ((character: Character) => void) | null = null
   private characterDue = 0
   private playhead: PlayheadSource | null = null
+  /** Where the playhead was on the last frame, to see it jump; null before the first. */
+  private playheadAt: number | null = null
   /** The development handle's override, over whatever the cast resolved to. */
   private postPatch: PostPatch | null = null
   // The live list split by kind, rebuilt only when what is live changes, so a
@@ -518,6 +526,8 @@ class Renderer {
   newTrack() {
     this.director = new Director({ start: this.opening })
     this.characterDue = 0
+    this.client?.newTrack()
+    this.playheadAt = null
   }
 
   /**
@@ -530,6 +540,21 @@ class Renderer {
    */
   setPlayhead(source: PlayheadSource | null) {
     this.playhead = source
+  }
+
+  /**
+   * A playhead that moved by much more or less than the frame did has been
+   * dragged, and the extractor is told, since a seek reads to it as the
+   * biggest change the track ever made. Only a host that gives a playhead can
+   * be watched; without one a seek costs a dense track its sections until the
+   * next track. A tab that was hidden reads as a jump too, which is harmless:
+   * the scales start over and are back within half a minute.
+   */
+  private watchForSeek(position: number | undefined, dt: number) {
+    if (position === undefined || !Number.isFinite(position)) return
+    const last = this.playheadAt
+    this.playheadAt = position
+    if (last !== null && Math.abs(position - last - dt) > SEEK_SECONDS) this.client?.seeked()
   }
 
   /**
@@ -889,7 +914,9 @@ class Renderer {
     // saves one for the next play of the track and shows the other. What it
     // chose is what is live unless a host has pinned something.
     this.stepped = true
-    const chosen = this.director.step(this.packet, dt, this.playhead?.current ?? undefined)
+    const playhead = this.playhead?.current ?? undefined
+    this.watchForSeek(playhead?.currentTime, dt)
+    const chosen = this.director.step(this.packet, dt, playhead)
     this.reportCharacter(dt)
     const shown = this.bench?.live ?? (this.pinned ? this.pinnedLive : chosen)
     const next = compatibility ? this.withoutCompute(shown) : shown

@@ -667,6 +667,31 @@ describe('the structure on a dense song', () => {
         expect(peakOf(packets, F.recall, CHORUS_ENDS, frameRate)).toBeGreaterThan(0.7)
       })
 
+      // A listener drags the playhead out of a sparse intro into the wall.
+      // The present against ten seconds ago is then one part of the song
+      // against another, the widest thing the extractor ever sees, and as
+      // the most the track has done it pins the scale at the top: the fixed
+      // bar back again, and the dense song one section from there on. Told
+      // of the seek, the scales start over and the song's own changes show.
+      it('does not take a seek for the widest change the track makes', () => {
+        const before = 20
+        const samples = synthesize(
+          [{ pattern: padOnly(90, 0.3), seconds: before }, ...song],
+          SAMPLE_RATE,
+        )
+        const frames = analyse(samples, { sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, frameRate })
+        const found = (told: boolean) => {
+          const extractor = new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE })
+          const packets = frames.map((frame, index) => {
+            if (told && index === Math.round(before * frameRate)) extractor.seeked()
+            return extractor.update(frame, 1 / frameRate).slice()
+          })
+          return boundaries(packets, frameRate).filter(({ at }) => at > before + LAG + 5)
+        }
+        expect(found(false).length).toBeLessThan(2)
+        expect(found(true)).toHaveLength(2)
+      })
+
       it('finds nothing in ninety seconds of one passage', () => {
         const steady = play([{ pattern: denseVerse(), seconds: 90 }], frameRate)
         expect(boundaries(steady, frameRate)).toHaveLength(0)

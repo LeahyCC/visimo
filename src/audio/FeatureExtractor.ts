@@ -506,6 +506,13 @@ const NOVELTY_REACH_FLOOR = 0.05
 // itself; thirty seconds is what it took all four measured tracks to show
 // their widest change.
 const SCALE_WARM_SECONDS = 30
+// How long after a start or a seek before either scale takes anything in. The
+// novelty's lag is ten seconds and the snapshot it reaches back to is itself a
+// mean over the two before that, and after a seek the section the window is
+// measured against is still the one the playhead left until the jump has been
+// confirmed as a boundary, six seconds after six. Eighteen clears both, and at
+// the start of a track it is inside the warm-up, where the scales are not read.
+const SCALE_SETTLE_SECONDS = 18
 // Distances mapped onto recall, as shares of the reach. At a full reach they
 // are the 0.94 and 0.99 similarities the map was read off a real track with:
 // the drops matched one another at 1.00 and a verse its own return at 0.98
@@ -1149,6 +1156,8 @@ export class Structure {
    */
   private reachSeen = 0
   private gapSeen = 0
+  /** When the two scales were last started over; see `rescale`. */
+  private scaleFrom = 0
   private reach = NOVELTY_REACH_FULL
   private gap = GAP_FULL
   private distance = 0
@@ -1167,6 +1176,22 @@ export class Structure {
   private sections = 1
   private recallTarget = 0
   private noveltyTarget = 0
+
+  /**
+   * Start the two scales over, because the playhead has jumped. Both are the
+   * most the track has done so far, and a seek is the one thing that is not the
+   * track doing anything: the present against ten seconds ago is then one part
+   * of the song against another, which reads as the widest change it ever made
+   * and pins the reach at the top for the rest of the play. On a dense track
+   * that is the fixed bar back again, and no boundary after the first seek.
+   * The scales sit at their starting values through the warm-up, as they do at
+   * the start of a track, and take nothing in until the jump has left the lag.
+   */
+  rescale() {
+    this.reachSeen = 0
+    this.gapSeen = 0
+    this.scaleFrom = this.elapsed
+  }
 
   /**
    * `packet` supplies the band levels, energy and hits; `chroma` is the
@@ -1211,7 +1236,7 @@ export class Structure {
     } else if (this.elapsed - this.candidateAt >= CANDIDATE_MEAN_FROM_SECONDS)
       this.candidateMean.add(now)
 
-    const warm = this.elapsed < SCALE_WARM_SECONDS
+    const warm = this.elapsed - this.scaleFrom < SCALE_WARM_SECONDS
     this.reach = warm
       ? NOVELTY_REACH_FULL
       : Math.min(NOVELTY_REACH_FULL, Math.max(NOVELTY_REACH_FLOOR, this.reachSeen))
@@ -1294,14 +1319,18 @@ export class Structure {
       }
     }
     this.distance = past ? 1 - cosine(this.now, past) : 0
-    this.reachSeen = Math.max(this.reachSeen, this.distance)
+    // Not for the first lag after a seek: until the snapshots have caught up,
+    // "ten seconds ago" is another part of the track and the distance to it is
+    // no measure of how far this track moves.
+    if (this.elapsed - this.scaleFrom >= SCALE_SETTLE_SECONDS)
+      this.reachSeen = Math.max(this.reachSeen, this.distance)
     this.noveltyTarget = clamp01(this.distance / this.reach)
 
     // The gap is measured through the changes as well as between them, since
     // what it is for is the size of a change; the window has to have filled
     // first, or its climb out of nothing would be the widest thing the track
     // ever did.
-    if (this.sectionMean.count > 0 && this.elapsed >= 2 * (STRUCTURE_WINDOW_MS / 1000))
+    if (this.sectionMean.count > 0 && this.elapsed - this.scaleFrom >= SCALE_SETTLE_SECONDS)
       this.gapSeen = Math.max(this.gapSeen, 1 - cosine(this.window, this.sectionMean.value))
 
     if (
@@ -2182,6 +2211,11 @@ export class FeatureExtractor {
     for (let bin = 0; bin < this.bins; bin++)
       this.logFrequencies[bin] = Math.log2(Math.max(bin, 0.5) * this.binHz)
     this.tempo = new TempoTracker(this.bands.length)
+  }
+
+  /** The playhead jumped. Only the structure keeps anything a jump spoils. */
+  seeked() {
+    this.structure.rescale()
   }
 
   /**

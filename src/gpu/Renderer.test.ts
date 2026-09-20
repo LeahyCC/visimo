@@ -25,7 +25,7 @@ import { AUDIO_FIELDS } from '../presets/knobs'
 import { defaultCanvas, parseCast } from '../studies/cast'
 import { castOrDefault } from '../studies/casts/index'
 import frames from '../studies/casts/preset-frames.json'
-import { DUST_KNOBS } from '../studies/impls'
+import { CAUSTICS_KNOBS, DUST_KNOBS } from '../studies/impls'
 import type { ImplId } from '../studies/impls'
 import { STUDIES } from '../studies/registry'
 import type { LiveCast } from '../studies/resolve'
@@ -270,6 +270,26 @@ vi.mock('../impls/DustInk', () => ({
     }
     dispose() {
       impls.disposed.dust = (impls.disposed.dust ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/CausticsInk', () => ({
+  CausticsInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.caustics = (impls.built.caustics ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('caustics', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('caustics')
+    }
+    dispose() {
+      impls.disposed.caustics = (impls.disposed.caustics ?? 0) + 1
     }
   },
 }))
@@ -1383,6 +1403,74 @@ describe('the study bench', () => {
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     expect(() => draw(1000)).not.toThrow()
     expect(impls.built.dust).toBeUndefined()
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('builds the caustics ink for its study, hands it its numbers and draws it in cast order', async () => {
+    const { draw } = await start()
+    renderer.setBench({
+      live: live('ribbon', 'caustics', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.energy] = 0.3
+        packet[F.keyClarity] = 0.8
+        packet[F.tension] = 0
+      },
+    })
+    draw(1000)
+    expect(impls.built.caustics).toBe(1)
+    expect(impls.drawn).toEqual(['ribbon', 'caustics'])
+    expect(impls.seen.caustics?.presence).toBe(1)
+    expect(Object.keys(impls.seen.caustics?.knobs ?? {}).sort()).toEqual([...CAUSTICS_KNOBS].sort())
+    // A tonal quiet passage has light to draw.
+    expect(impls.seen.caustics?.knobs.intensity ?? 0).toBeGreaterThan(0.1)
+    const calm = impls.seen.caustics?.knobs.sharpness ?? 0
+
+    // The study's tension row reaches the ink through the resolver.
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.energy] = 0.3
+        packet[F.keyClarity] = 0.8
+        packet[F.tension] = 1
+      },
+    })
+    draw(2000)
+    expect(impls.seen.caustics?.knobs.sharpness ?? 0).toBeGreaterThan(calm + 2)
+  })
+
+  it('is handed no light at a silent packet, which is how it draws nothing', async () => {
+    const { draw } = await start()
+    renderer.setBench({ live: live('ribbon', 'caustics', 'clean-glass') })
+    draw(1000)
+    expect(impls.seen.caustics?.knobs.intensity).toBe(0)
+  })
+
+  it('does not build the caustics ink for a study that is faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('ribbon', 'caustics', 'clean-glass')
+    const caustics = cast.studies[1]
+    if (!caustics) throw new Error('the caustics are in the cast')
+    caustics.presence = 0
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.built.caustics).toBeUndefined()
+    expect(impls.updates.caustics).toBeUndefined()
+    caustics.presence = 0.5
+    draw(2000)
+    expect(impls.built.caustics).toBe(1)
+    expect(impls.seen.caustics?.presence).toBe(0.5)
+  })
+
+  it('skips the caustics on the WebGL2 path, which has no compute and draws the fractal alone', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('ribbon', 'caustics', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(1000)).not.toThrow()
+    expect(impls.built.caustics).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

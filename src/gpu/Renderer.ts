@@ -33,6 +33,7 @@ import { Director } from '../director/director'
 import type { MomentWeights } from '../director/moment'
 import { Hud } from '../hud/Hud'
 import { AnalyticFlow } from '../impls/analytic'
+import { CausticsInk } from '../impls/CausticsInk'
 import { DustInk } from '../impls/DustInk'
 import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
@@ -598,6 +599,7 @@ class Renderer {
         : null
     if (impl === 'streaks') return new StreaksInk()
     if (impl === 'dust') return new DustInk()
+    if (impl === 'caustics') return new CausticsInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

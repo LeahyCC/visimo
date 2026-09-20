@@ -27,6 +27,7 @@ export const IMPL_IDS = [
   'streaks',
   'shards',
   'dust',
+  'caustics',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -132,6 +133,15 @@ export const DUST_KNOBS = [
 export type DustKnob = (typeof DUST_KNOBS)[number]
 
 /**
+ * The caustics' numbers. Their ranges and units are in
+ * `impls/caustics.params.ts`. `sharpness` is the one that keeps the ink
+ * sparse: it raises the pattern to a power, so a higher one leaves thinner
+ * lines and more black between them.
+ */
+export const CAUSTICS_KNOBS = ['intensity', 'scale', 'speed', 'sharpness', 'hueSpread'] as const
+export type CausticsKnob = (typeof CAUSTICS_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -200,7 +210,14 @@ export const isCountKnob = (knob: string): boolean =>
   (COUNT_KNOBS as readonly string[]).includes(knob)
 
 export type ImplKnob =
-  FluidKnob | AnalyticKnob | KaleidoscopeKnob | ShardKnob | PostKnob | StreaksKnob | DustKnob
+  | FluidKnob
+  | AnalyticKnob
+  | KaleidoscopeKnob
+  | ShardKnob
+  | PostKnob
+  | StreaksKnob
+  | DustKnob
+  | CausticsKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -212,6 +229,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   streaks: STREAKS_KNOBS,
   shards: SHARD_KNOBS,
   dust: DUST_KNOBS,
+  caustics: CAUSTICS_KNOBS,
   look: LOOK_KNOBS,
 }
 

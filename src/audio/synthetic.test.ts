@@ -398,8 +398,21 @@ describe('the moment on a synthesised story', () => {
     { pattern: groove, seconds: 20 },
   ]
 
-  const heard = (fizzle: boolean, frameRate: number, gain = LOUD) =>
-    run(atLevel(synthesize(story(fizzle), SAMPLE_RATE), gain), frameRate)
+  // Rendered once per story and kept. Several tests below listen to the same
+  // ninety seconds at the same frame rate, and rendering it again for each of
+  // them made this block most of the suite's running time.
+  const stories = new Map<string, Float32Array[]>()
+  const heard = (fizzle: boolean, frameRate: number, gain = LOUD) => {
+    const key = `${fizzle} ${frameRate} ${gain}`
+    let packets = stories.get(key)
+    if (!packets) {
+      packets = run(atLevel(synthesize(story(fizzle), SAMPLE_RATE), gain), frameRate)
+      stories.set(key, packets)
+    }
+
+    return packets
+  }
+
   const peak = (packets: Float32Array[], row: number, from: number, to: number, rate: number) => {
     let best = 0
     for (let i = Math.round(from * rate); i < Math.min(packets.length, Math.round(to * rate)); i++)
@@ -476,6 +489,58 @@ describe('the moment on a synthesised story', () => {
       for (const row of [F.tension, F.release, F.rest])
         expect(peak(packets, row, 4, 60, rate)).toBeLessThan(0.1)
       expect(impacts(packets, rate)).toHaveLength(0)
+    }
+  }, 300000)
+
+  // Nothing to hear: a pause, a seek, the gap between two tracks. The arms
+  // are means of dB, and stepped through five seconds of silence they sank so
+  // far that the groove coming back read as rest at a half for twenty more.
+  const silence: Pattern = { ...groove, hits: [], pad: 0 }
+  const around = (gap: number): Section[] => [
+    { pattern: groove, seconds: 30 },
+    { pattern: silence, seconds: gap },
+    { pattern: groove, seconds: 24 },
+  ]
+
+  it('reads rest through a pause and lets it go when the music comes back', () => {
+    for (const rate of [60, 144]) {
+      const back = 35
+      const packets = run(atLevel(synthesize(around(5), SAMPLE_RATE), LOUD), rate)
+      expect(peak(packets, F.rest, 33, back, rate)).toBeGreaterThan(0.6)
+      // Rest is slow on purpose, so it is given its own ramp twice over.
+      expect(peak(packets, F.rest, back + 6, back + 24, rate)).toBeLessThan(0.1)
+      expect(peak(packets, F.tension, back, back + 24, rate)).toBeLessThan(0.1)
+      expect(impacts(packets, rate)).toHaveLength(0)
+    }
+  }, 300000)
+
+  // Longer than any break a track would hold: what follows is another track,
+  // and it opens the way the first one did.
+  it('starts again after a gap too long to be a break', () => {
+    const back = 42
+    const packets = run(atLevel(synthesize(around(12), SAMPLE_RATE), LOUD), 60)
+    expect(peak(packets, F.rest, back + 6, back + 24, 60)).toBeLessThan(0.1)
+    expect(peak(packets, F.tension, back, back + 24, 60)).toBeLessThan(0.1)
+    expect(impacts(packets, 60)).toHaveLength(0)
+  }, 300000)
+
+  // The bar of nothing some tracks put before the drop. It is the top of the
+  // build and not the end of it, so the drop after it still has to land.
+  it('still lands the drop after a bar of silence', () => {
+    const bar = (4 * 60) / BPM
+    const held: Section[] = [
+      { pattern: groove, seconds: BREAKDOWN_AT },
+      { pattern: breakdown(BPM, 0.12), seconds: 16 },
+      { pattern: groove, seconds: 16 },
+      ...build(BPM, 0.25, false),
+      { pattern: silence, seconds: bar },
+      { pattern: groove, seconds: 20 },
+    ]
+    for (const rate of [60, 144]) {
+      const packets = run(atLevel(synthesize(held, SAMPLE_RATE), LOUD), rate)
+      const found = impacts(packets, rate)
+      expect(found).toHaveLength(1)
+      expect(Math.abs((found[0] ?? 0) - (DROP_AT + bar))).toBeLessThan(60 / BPM)
     }
   }, 300000)
 

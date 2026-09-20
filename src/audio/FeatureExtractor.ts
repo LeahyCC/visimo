@@ -537,6 +537,17 @@ const NOVELTY_RAMP_MS = 500
 // `rest` read nothing at all. Low enough that nothing audible reaches it,
 // and not zero, so that true silence is a number.
 const MOMENT_FLOOR = 1e-7
+// Under this there is nothing to hear and the arms are held rather than
+// stepped. It sits 20 dB over the floor and some 50 dB under a mix that has
+// been turned down by 20, so a reverb tail is still music and a paused
+// element, which the analyser reads as exact silence, is not.
+const MOMENT_SILENCE = 1e-6
+// Silence this long is the end of a track and not a break in one. The
+// longest break a track puts before a drop is a bar or two, a few seconds.
+const MOMENT_NEW_TRACK_SECONDS = 8
+// How long the arms go on being seeded for, from the loudest reading so far.
+// One beat at 60 BPM, the slowest tempo the tracker follows, so a kick is in it.
+const MOMENT_SEED_SECONDS = 1
 const MOMENT_PEAK_ATTACK_MS = 60
 const MOMENT_PEAK_RELEASE_MS = 600
 const MOMENT_RECENT_MS = 2000
@@ -1689,9 +1700,54 @@ export class Moment {
   private fired = false
   private warm = false
   private elapsed = 0
+  /** How long there has been nothing to hear, in seconds. */
+  private silentFor = 0
+
+  /**
+   * A step with nothing to hear in it: a pause, a seek, the gap between two
+   * tracks, or the bar of silence some tracks put before a drop. Every arm is
+   * held where the music left it rather than stepped, because the arms are
+   * means of dB and silence is a hundred dB down. Stepped through five
+   * seconds of it, the four-second arm sank so far that it took twenty more
+   * to climb back, and for all of that time a groove at full energy read as
+   * `rest` at a half and more, since it was quiet against nothing but its
+   * own arm. The hit counts are held for the same reason: left to decay, the
+   * quick count recovers first and the ratio of the two reads as a roll.
+   *
+   * Tension is held and not let go. The bar of silence before a drop is the
+   * top of the build, and what it was armed at still decays on its own
+   * clock, so a payoff that never comes is forgotten as it always was.
+   */
+  private hold(dt: number): MomentReading {
+    this.silentFor += dt
+    this.armed *= Math.exp(-dt / RELEASE_ARM_SECONDS)
+    this.release *= Math.exp(-dt / (RELEASE_PHRASE_DEFAULT_SECONDS / 2))
+    if (this.release < IMPACT_OFF) this.fired = false
+    this.impact *= Math.exp(-dt / IMPACT_DECAY_SECONDS)
+    // Silence is the floor gone altogether, so rest climbs to the top.
+    const rest = this.restRamp.step(1, dt)
+    return { tension: this.tension, release: clamp01(this.release), rest, impact: this.impact }
+  }
 
   step(frame: MomentFrame, dt: number): MomentReading {
     const { loudness, low, high, struck, novelty, harmonicChange, beatSeconds } = frame
+    if (loudness < MOMENT_SILENCE) return this.hold(dt)
+    // A gap this long is not a break in the music but the end of it, and
+    // what follows is another track with norms of its own. Every arm starts
+    // again from its first reading, as it did when this one began.
+    if (this.silentFor > MOMENT_NEW_TRACK_SECONDS) {
+      this.warm = false
+      this.elapsed = 0
+      this.hitFast = 0
+      this.hitSlow = 0
+      this.spanFast = 0
+      this.spanSlow = 0
+      this.armed = 0
+      this.tension = 0
+      this.tensionRamp.value = 0
+    }
+
+    this.silentFor = 0
     const loud = 20 * Math.log10(Math.max(loudness, MOMENT_FLOOR))
     // Each group's own level, in the same dB as the whole mix: the share of
     // the power it holds, times the power there is. A share on its own will
@@ -1715,6 +1771,22 @@ export class Moment {
       for (const arm of [this.highMid, this.highSlow]) arm.value = highLevel
       this.shareMid.value = share
       this.loudTop = loud
+    }
+
+    // The first reading is a poor seed when it is the front edge of a sound:
+    // the analyser's window is 85 ms long, so the first frame that is not
+    // silent after a gap, or the first of a track that fades in, holds a
+    // sliver of what is coming and reads fifty dB under it. Seeded from that,
+    // the four-second arm was still climbing when the slow arms were let go
+    // at sixteen seconds, and its last dB of climb read as lift: a tenth of
+    // tension and rising, on a steady groove. So for the first second each
+    // arm is lifted to the loudest reading so far. That seeds a few dB high,
+    // off a kick's peak, which the hold below has fifteen seconds to settle.
+    if (this.elapsed < MOMENT_SEED_SECONDS) {
+      for (const arm of [this.loudMid, this.loudSlow]) arm.value = Math.max(arm.value, loud)
+      for (const arm of [this.lowPeak, this.lowRecent, this.lowSlow])
+        arm.value = Math.max(arm.value, lowLevel)
+      for (const arm of [this.highMid, this.highSlow]) arm.value = Math.max(arm.value, highLevel)
     }
 
     this.elapsed += dt
@@ -1778,9 +1850,16 @@ export class Moment {
       clamp01((lowSlow - lowRecent) / TENSION_HOLLOW_DB) *
       (1 - clamp01((highSlow - highMid) / TENSION_HOLLOW_DB))
 
-    // The mean of the best two of the four.
-    const evidence = [lift, riser, busier, hollow].sort((a, b) => b - a)
-    const winding = ((evidence[0] ?? 0) + (evidence[1] ?? 0)) / 2
+    // The mean of the best two of the four, which is their sum less the
+    // worst two. Found with four comparisons rather than a sort, since this
+    // runs on every frame and a sort would build an array to throw away.
+    const lowerA = Math.min(lift, riser)
+    const lowerB = Math.min(busier, hollow)
+    const upperA = Math.max(lift, riser)
+    const upperB = Math.max(busier, hollow)
+    const best = Math.max(upperA, upperB)
+    const second = Math.max(Math.min(upperA, upperB), Math.max(lowerA, lowerB))
+    const winding = (best + second) / 2
 
     // The payoff is the low end coming back hard, and it is only a payoff if
     // something was wound up for it to pay off. That split is what makes it

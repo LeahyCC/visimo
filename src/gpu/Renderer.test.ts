@@ -5,6 +5,10 @@
  * The lifetime: what is built, handed on and released as the cast changes,
  * the canvas resizes, the device is lost and the stage unmounts.
  *
+ * And the director at the seam it meets the renderer at, played the scripted
+ * song of `director/song.fixture.ts` a frame at a time: what a whole track
+ * does to what is built, and that two plays of it are the same picture.
+ *
  * And the numbers. `casts/preset-frames.json` is what the preset path
  * resolved to before it was deleted, and these tests drive real frames and
  * compare what each implementation and the post stack are handed against it.
@@ -14,6 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { playSong, SONG_SECONDS } from '../director/song.fixture'
 import { POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
@@ -52,6 +57,8 @@ const impls = vi.hoisted(() => ({
   built: { fluid: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
   disposed: { fluid: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
   seen: {} as Record<string, { knobs: Record<string, number>; presence: number }>,
+  /** How many times each was stepped, so a second solver would double it. */
+  updates: {} as Record<string, number>,
   drawn: [] as string[],
   resized: [] as [number, number][],
   size: 0,
@@ -61,6 +68,7 @@ const impls = vi.hoisted(() => ({
     impls.built = { fluid: 0, dye: 0, fractal: 0, ribbon: 0 }
     impls.disposed = { fluid: 0, dye: 0, fractal: 0, ribbon: 0 }
     impls.seen = {}
+    impls.updates = {}
     impls.drawn = []
     impls.resized = []
   },
@@ -68,6 +76,7 @@ const impls = vi.hoisted(() => ({
 
 const record = (name: string, knobs: Record<string, number>, presence: number) => {
   impls.seen[name] = { knobs: { ...knobs }, presence }
+  impls.updates[name] = (impls.updates[name] ?? 0) + 1
 }
 
 vi.mock('../audio/AudioGraph', () => ({
@@ -187,7 +196,7 @@ vi.mock('../impls/FlowBlend', () => ({
 
 // What the stack was handed. The renderer resolves into one object and keeps
 // it, so holding the reference is holding the live numbers.
-const stack = vi.hoisted(() => ({ params: null as unknown, cleared: 0, prepared: 0 }))
+const stack = vi.hoisted(() => ({ params: null as unknown, cleared: 0, prepared: 0, reset: 0 }))
 
 vi.mock('../post/PostStack', () => ({
   SCENE_FORMAT: 'rgba16float',
@@ -209,7 +218,9 @@ vi.mock('../post/PostStack', () => ({
       stack.prepared++
     }
     render() {}
-    resetHistory() {}
+    resetHistory() {
+      stack.reset++
+    }
     dispose() {}
   },
 }))
@@ -254,9 +265,13 @@ beforeEach(async () => {
   impls.maxPixels = undefined
   audio.attached = false
   audio.packet = null
+  // One test makes this throw, and a mock implementation outlives the test
+  // that set it.
+  graphics.render.mockImplementation(() => {})
   stack.params = null
   stack.cleared = 0
   stack.prepared = 0
+  stack.reset = 0
   renderer = (await import('./Renderer')).renderer
 })
 
@@ -322,6 +337,13 @@ function sizedCanvas(width: number, height: number) {
   return { element, draw: (now: number) => held.frame?.(now) }
 }
 
+/** Draw for this many seconds, at the longest frame the renderer will take. */
+function seconds(draw: (now: number) => void, span: number, from = 0) {
+  const step = 100
+  for (let at = 1; at <= Math.round((span * 1000) / step); at += 1) draw(from + at * step)
+  return from + Math.round((span * 1000) / step) * step
+}
+
 /**
  * The moment rows. The preset frames were captured before these existed, so
  * every preset saw them at 0, and a packet that is to land on those frames
@@ -370,14 +392,31 @@ describe('renderer attachment lifetime', () => {
   })
 
   it('keeps a flowless cast as it was, and drops the flow when one stops asking', async () => {
-    const { element } = sizedCanvas(1280, 720)
+    const { element, draw } = sizedCanvas(1280, 720)
     renderer.setPreset(castOrDefault('prism'))
     await expect(renderer.attach(element, canvas(), vi.fn())).resolves.toBe('ok')
     expect(impls.built.fluid).toBe(0)
     renderer.setPreset(castOrDefault('melt'))
     expect(impls.built.fluid).toBe(1)
     renderer.setPreset(castOrDefault('prism'))
+    // Nothing is torn down on the frame its study left: a study that comes
+    // straight back finds its implementation still here.
+    expect(impls.disposed.fluid).toBe(0)
+    seconds(draw, 1)
+    expect(impls.disposed.fluid).toBe(0)
+    seconds(draw, 7)
     expect(impls.disposed.fluid).toBe(1)
+  })
+
+  it('hands a held implementation back rather than building a second', async () => {
+    const { element, draw } = sizedCanvas(1280, 720)
+    renderer.setPreset(castOrDefault('melt'))
+    await expect(renderer.attach(element, canvas(), vi.fn())).resolves.toBe('ok')
+    renderer.setPreset(castOrDefault('prism'))
+    seconds(draw, 2)
+    renderer.setPreset(castOrDefault('melt'))
+    expect(impls.built.fluid).toBe(1)
+    expect(impls.disposed.fluid).toBe(0)
   })
 
   // Two casts that draw the same way are a change of numbers, not of
@@ -639,5 +678,162 @@ describe('a pinned cast reaches its implementations unchanged', () => {
     const element = await drawWith('plume', 0.3, 0.5)
     expect(element.dataset.scene).toBe('fluid')
     expect(element.dataset.cast).toBe('lazy-fluid dye-plumes warm-soft')
+  })
+})
+
+describe('the director drives the cast', () => {
+  const FPS = 30
+
+  /**
+   * A renderer of its own, the scripted song played through it a frame at a
+   * time, and what was live on each of those frames. The module is reset so
+   * the two plays a determinism test needs start from the same nothing.
+   */
+  async function playThrough(preset: 'auto' | ReturnType<typeof castOrDefault>) {
+    vi.resetModules()
+    impls.reset()
+    stack.reset = 0
+    const fresh = (await import('./Renderer')).renderer
+    const { element, draw } = sizedCanvas(1280, 720)
+    audio.attached = true
+    fresh.setPreset(preset)
+    await fresh.attach(element, canvas(), vi.fn())
+    const trace: string[] = []
+    let now = 0
+    let frames = 0
+    for (const frame of playSong(FPS)) {
+      audio.packet = frame.features
+      now += 1000 / FPS
+      draw(now)
+      frames += 1
+      trace.push(
+        fresh.liveCast.studies
+          .map((entry) => `${entry.id} ${entry.presence.toFixed(6)}`)
+          .join(', '),
+      )
+    }
+
+    return { renderer: fresh, element, trace, frames }
+  }
+
+  // The two things the renderer review left for this card, over a whole
+  // track rather than over one change: a glide must not empty the canvas,
+  // and a fade between two studies of one solver must not build a second.
+  it('never empties the canvas and never builds a second solver', async () => {
+    const song = await playThrough('auto')
+    expect(stack.reset).toBe(0)
+    expect(impls.built.fluid).toBe(1)
+    expect(impls.disposed.fluid).toBe(0)
+    // One step of the solver per frame, whatever is fading into what, and
+    // the song does put two flows on it at once.
+    expect(impls.updates.fluid).toBe(song.frames)
+    expect(song.trace.some((line) => (line.match(/fluid/g) ?? []).length > 1)).toBe(true)
+    expect(new Set(song.trace).size).toBeGreaterThan(1)
+    song.renderer.dispose()
+  })
+
+  it('plays the same song the same way twice', async () => {
+    const first = await playThrough('auto')
+    first.renderer.dispose()
+    const second = await playThrough('auto')
+    second.renderer.dispose()
+    expect(second.trace).toEqual(first.trace)
+    expect(first.trace.at(-1)).not.toBe('')
+  })
+
+  it('prints auto and the live study ids on the canvas', async () => {
+    const song = await playThrough('auto')
+    expect(song.element.dataset.preset).toBe('auto')
+    const ids = song.element.dataset.cast?.split(' ') ?? []
+    expect(ids.length).toBeGreaterThan(1)
+    for (const id of ids) expect(typeof id).toBe('string')
+    expect(song.element.dataset.scene).toBeTypeOf('string')
+    song.renderer.dispose()
+  })
+
+  // A pinned cast is what it always was, and the director still reads the
+  // song behind it, which is what a host saving the character wants.
+  it('leaves a pinned cast alone and still reads the song behind it', async () => {
+    const song = await playThrough(castOrDefault('plume'))
+    expect(song.element.dataset.preset).toBe('plume')
+    expect(song.element.dataset.cast).toBe('lazy-fluid dye-plumes warm-soft')
+    expect(new Set(song.trace).size).toBe(1)
+    expect(song.renderer.settled).toBe(1)
+    song.renderer.dispose()
+  })
+
+  // Everything the director holds is about one song. Carried into the next,
+  // the second track never opens on a guess, its sections are handed the
+  // casts the first track's had, and its starting character is never read.
+  it('starts the director again for a new track, from that track’s starting character', async () => {
+    const song = await playThrough('auto')
+    const played = song.renderer
+    expect(played.settled).toBe(1)
+    const { element, draw } = sizedCanvas(1280, 720)
+    await played.attach(element, canvas(), vi.fn())
+    played.setStartCharacter({ hardness: 0.95 })
+    // Ignored while the first track plays, as it always was.
+    draw(1_000_000)
+    expect(played.character.hardness).toBeLessThan(0.9)
+    played.newTrack()
+    draw(1_000_017)
+    expect(played.settled).toBe(0)
+    expect(played.character.hardness).toBeGreaterThan(0.9)
+    // The canvas is left alone: one track into the next is a change of cast.
+    expect(stack.reset).toBe(0)
+    played.dispose()
+  })
+
+  it('reports the character once it has settled and rarely after that', async () => {
+    vi.resetModules()
+    impls.reset()
+    const fresh = (await import('./Renderer')).renderer
+    const { element, draw } = sizedCanvas(1280, 720)
+    audio.attached = true
+    const saved = vi.fn()
+    fresh.setStartCharacter({ drive: 0.9 })
+    fresh.setOnCharacter(saved)
+    fresh.setPreset('auto')
+    await fresh.attach(element, canvas(), vi.fn())
+    let now = 0
+    for (const frame of playSong(FPS)) {
+      audio.packet = frame.features
+      now += 1000 / FPS
+      draw(now)
+    }
+
+    // Settled inside the first half minute, then once every thirty seconds
+    // of the four minutes that follow.
+    expect(saved.mock.calls.length).toBeGreaterThan(2)
+    expect(saved.mock.calls.length).toBeLessThan(SONG_SECONDS / 10)
+    const [character] = saved.mock.calls.at(-1) ?? []
+    expect(character?.drive).toBeGreaterThan(0)
+    fresh.dispose()
+  })
+
+  it('stands a drawable cast in when the WebGL2 path has nothing of the chosen one', async () => {
+    vi.resetModules()
+    impls.reset()
+    const fresh = (await import('./Renderer')).renderer
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    audio.attached = true
+    const failure = vi.fn()
+    fresh.setPreset('auto')
+    await expect(fresh.attach(element, canvas(), failure)).resolves.toBe('ok')
+    let now = 0
+    for (const frame of playSong(FPS, undefined, 40)) {
+      audio.packet = frame.features
+      now += 1000 / FPS
+      draw(now)
+    }
+
+    // Nothing is built without compute, nothing throws, and the fractal the
+    // stand-in holds is what draws.
+    expect(impls.built).toEqual({ fluid: 0, dye: 0, fractal: 0, ribbon: 0 })
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+    expect(element.dataset.cast).toContain('fractal-glints')
+    fresh.dispose()
   })
 })

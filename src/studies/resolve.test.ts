@@ -6,7 +6,7 @@ import type { PostParams } from '../post/params'
 import type { CastCanvas } from './cast'
 import { LOOK_KNOBS } from './impls'
 import { findStudy } from './registry'
-import { castFrame, resolveLive, resolveStudy, studyFeature } from './resolve'
+import { blendKnobs, castFrame, resolveLive, resolveStudy, studyFeature } from './resolve'
 import type { LiveStudy } from './resolve'
 import type { InkStudy } from './types'
 
@@ -109,6 +109,72 @@ const live = (...studies: LiveStudy[]): PostParams =>
   resolveLive(studies, STILL, FEATURES, 0, castFrame()).post
 
 const alone = (id: string, presence = 1) => live({ id, presence })
+
+describe('blendKnobs', () => {
+  // Lazy fluid's numbers and turbulent fluid's, near enough: the two studies
+  // one solver is shared between.
+  const lazy = { vorticity: 12, viscosity: 0.2, emitters: 5, events: 12 }
+  const turbulent = { vorticity: 34, viscosity: 0.12, emitters: 3, events: 20 }
+
+  it('is the one study when the other is at nothing', () => {
+    const out = {}
+    expect(
+      blendKnobs(
+        [
+          { knobs: lazy, presence: 1 },
+          { knobs: turbulent, presence: 0 },
+        ],
+        2,
+        out,
+      ),
+    ).toEqual(lazy)
+  })
+
+  it('is halfway at a half each, with the counts whole', () => {
+    const out = blendKnobs(
+      [
+        { knobs: lazy, presence: 0.5 },
+        { knobs: turbulent, presence: 0.5 },
+      ],
+      2,
+      {},
+    )
+    expect(out.vorticity).toBeCloseTo(23, 10)
+    expect(out.viscosity).toBeCloseTo(0.16, 10)
+    // Half an emitter is not a thing the solver can place.
+    expect(out.emitters).toBe(4)
+    expect(out.events).toBe(16)
+  })
+
+  // The presences are normalised, so two studies a third of the way through
+  // a fade stir as hard as either of them alone.
+  it('normalises, so a pair mid-fade is not a fraction of either', () => {
+    const out = blendKnobs(
+      [
+        { knobs: lazy, presence: 0.2 },
+        { knobs: turbulent, presence: 0.2 },
+      ],
+      2,
+      {},
+    )
+    expect(out.vorticity).toBeCloseTo(23, 10)
+  })
+
+  it('takes only as much of the buffer as the count says', () => {
+    const parts = [
+      { knobs: lazy, presence: 1 },
+      { knobs: turbulent, presence: 1 },
+    ]
+    expect(blendKnobs(parts, 1, {})).toEqual(lazy)
+  })
+
+  it('writes into the object it is handed, since it runs every frame', () => {
+    const out = { vorticity: 0, gone: 1 }
+    const result = blendKnobs([{ knobs: lazy, presence: 1 }], 1, out)
+    expect(result).toBe(out)
+    expect(out.gone).toBeUndefined()
+  })
+})
 
 describe('the looks, blended', () => {
   it('at full presence is the look’s own numbers', () => {

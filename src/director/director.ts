@@ -29,17 +29,18 @@
  * arrives as a cut, because it is the biggest moment in most tracks and a
  * two-second crossfade throws it away.
  *
- * The output is a `LiveStudy[]`, which `studies/resolve.ts` takes straight:
- * unlike a cast it may hold two flows or two looks at once, which is what the
- * middle of a change looks like. A study at presence 0 is not in it at all,
- * so the renderer never touches one that is not on screen. The list and its
- * entries are the same objects every frame.
+ * The output is the `LiveCast` of `studies/resolve.ts`, which is what the
+ * renderer draws and what a pinned cast is turned into: unlike a cast it may
+ * hold two flows or two looks at once, which is what the middle of a change
+ * looks like. A study at presence 0 is not in it at all, so the renderer
+ * never touches one that is not on screen. The cast, its list and its entries
+ * are the same objects every frame.
  */
 import { F } from '../audio/FeatureExtractor'
 import { defaultCanvas, MAX_INKS } from '../studies/cast'
-import type { Cast, CastCanvas, CastOverride } from '../studies/cast'
+import type { Cast, CastOverride } from '../studies/cast'
 import { STUDIES } from '../studies/registry'
-import type { LiveStudy } from '../studies/resolve'
+import type { LiveCast, LiveStudy } from '../studies/resolve'
 import { CHARACTER_AXES } from '../studies/types'
 import type { Character, Cost, Study } from '../studies/types'
 import { CharacterReader } from './character'
@@ -92,6 +93,18 @@ const IMPACT_OFF = 0.3
  * every time the groove returned.
  */
 const MEMORY_SETTLED = 0.5
+
+/**
+ * The extractor confirms a section about this long after it began, and how
+ * far either side of that a confirmation may fall. Together they say when a
+ * confirmed section began relative to an impact: confirmed inside
+ * `SECTION_LAG + SECTION_SLACK` of the impact, it began before the drop or
+ * at it; confirmed within `SECTION_SLACK` of the lag itself, it began at the
+ * drop and is the section the drop opened. These are spans the evidence
+ * stays good for and not timers: nothing changes when one runs out.
+ */
+const SECTION_LAG = 6
+const SECTION_SLACK = 1.5
 
 /** What the extractor itself calls a candidate boundary, and where it rearms. */
 const NOVELTY_ON = 0.4
@@ -280,14 +293,6 @@ export type DirectorOptions = {
   pinned?: Cast
 }
 
-/** What the renderer is handed every frame. The same object every frame. */
-export type DirectorFrame = {
-  live: readonly LiveStudy[]
-  canvas: CastCanvas
-  /** Packet row 47, passed on so every live study is handed the same one. */
-  tension: number
-}
-
 export class Director {
   private readonly studies: readonly Study[]
   private readonly budget: number
@@ -306,7 +311,7 @@ export class Director {
   private readonly presence = new Map<string, number>()
   private readonly entries = new Map<string, LiveStudy>()
   private readonly live: LiveStudy[] = []
-  private readonly frame: DirectorFrame
+  private readonly frame: LiveCast
 
   /** The cast a section had, so a section that comes back comes back to it. */
   private readonly memory = new Map<number, PickedCast>()
@@ -325,6 +330,19 @@ export class Director {
    * Undefined until then, and the seed is the section's alone.
    */
   private trackSeed: number | undefined
+  /** Seconds since the last impact, for `settle` to know whose section this is. */
+  private sinceImpact = Infinity
+  /**
+   * A drop has cut to a cast and no section that began after it has been
+   * confirmed yet. While it stands, novelty spikes choose nothing. Seen on a
+   * real track: the drop cut at 1:46, something new entered eight seconds in,
+   * novelty spiked, and the pick that followed read a moment whose `release`
+   * had already fallen away as plain groove and glided back to the groove's
+   * cast. `release` lasts a phrase by design and a drop section lasts many,
+   * so the cast a drop chose is kept until the music confirms a new section
+   * rather than until the first thing that flickers.
+   */
+  private holding = false
   private ramp = DEFAULT_GLIDE_SECONDS
   private impactHeld = false
   private noveltyHeld = false
@@ -340,7 +358,7 @@ export class Director {
     this.reader = new CharacterReader({ start: options.start })
     this.ramp = this.glideSeconds
     this.frame = {
-      live: this.live,
+      studies: this.live,
       canvas: this.pinned?.canvas ?? defaultCanvas(),
       tension: 0,
     }
@@ -366,7 +384,7 @@ export class Director {
     return this.current
   }
 
-  step(features: Float32Array, dt: number): DirectorFrame {
+  step(features: Float32Array, dt: number): LiveCast {
     this.frame.tension = features[F.tension] ?? 0
     // Read even when a cast is pinned and nothing will be chosen by them: a
     // host saves the character for the next play of the track, and the
@@ -385,9 +403,12 @@ export class Director {
       this.rank += 1
     }
 
+    this.sinceImpact = impact ? 0 : this.sinceImpact + dt
     if (boundary || !this.current) this.settle(section, character, weights, settled, impact)
     else if (impact) this.challenge(character, weights, settled, this.cutSeconds)
-    else if (novelty) this.challenge(character, weights, settled, this.glideSeconds)
+    else if (novelty && !this.holding)
+      this.challenge(character, weights, settled, this.glideSeconds)
+    if (impact) this.holding = true
 
     this.fade(dt)
     return this.frame
@@ -405,6 +426,26 @@ export class Director {
     settled: number,
     cut: boolean,
   ) {
+    // A section confirmed this soon after an impact began before the drop or
+    // at it, so it has nothing to say about the cast the drop cut to: by now
+    // `release` has fallen away and the moment reads as groove again, and a
+    // pick made from that undoes the drop. This comes before recall for the
+    // same reason. The section just confirmed may be the build, coming back
+    // as itself, and handing it the cast it had would undo the drop as surely.
+    // Not when the impact is this very frame: then nothing has chosen yet.
+    if (!cut && section > 0 && this.current && this.sinceImpact <= SECTION_LAG + SECTION_SLACK) {
+      // Only the section the drop itself opened is remembered by the drop's
+      // cast. One confirmed sooner began before the drop, is the build, and
+      // would be handed the drop's cast the next time the track builds.
+      const opened = this.sinceImpact >= SECTION_LAG - SECTION_SLACK
+      if (opened && settled >= MEMORY_SETTLED && !this.memory.has(section))
+        this.memory.set(section, this.current)
+      return
+    }
+
+    // A section that began after the drop. The drop's cast has had its
+    // section, and what follows is chosen the way anything is.
+    this.holding = false
     const remembered = section > 0 ? this.memory.get(section) : undefined
     if (remembered) {
       this.take(remembered, cut ? this.cutSeconds : this.glideSeconds)

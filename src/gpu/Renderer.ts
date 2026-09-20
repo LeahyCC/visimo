@@ -32,6 +32,7 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { Director } from '../director/director'
 import type { MomentWeights } from '../director/moment'
 import { Hud } from '../hud/Hud'
+import { AnalyticFlow } from '../impls/analytic'
 import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
@@ -539,6 +540,7 @@ class Renderer {
   // post stack, and so nothing in the studies layer has to import a shader.
   private buildFlow(impl: ImplId): FlowImpl | null {
     if (impl === 'fluid') return new FluidFlow(this.fluidSize)
+    if (impl === 'analytic') return new AnalyticFlow()
     return null
   }
 

@@ -16,6 +16,7 @@ import { useEffect, useState } from 'react'
 
 import { renderer } from '../src'
 import { FLUID_SIZES } from '../src/catalog'
+import { ANALYTIC_RANGES } from '../src/impls/analytic.params'
 import { CANVAS_KNOBS, castStudyIds, MAX_INKS } from '../src/presets'
 import type {
   CanvasKnob,
@@ -108,10 +109,14 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
 /**
  * A study's own table. The fractal's knobs share four names with the dye's
  * and do not share their ranges, so the table is picked by implementation
- * rather than merged.
+ * rather than merged. The analytic flow's are signed, which `spanOf` cannot
+ * guess from a resting value of zero.
  */
-const rangesOf = (impl: ImplId): Partial<Record<string, readonly [number, number]>> =>
-  impl === 'fractal' ? KALEIDOSCOPE_RANGES : RANGES
+const rangesOf = (impl: ImplId): Partial<Record<string, readonly [number, number]>> => {
+  if (impl === 'fractal') return KALEIDOSCOPE_RANGES
+  if (impl === 'analytic') return ANALYTIC_RANGES
+  return RANGES
+}
 
 /** Knobs the slider must step in whole numbers, whatever the range implies. */
 const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity', 'ribbon.shape'])

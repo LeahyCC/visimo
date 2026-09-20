@@ -314,17 +314,20 @@ flow: the field it just wrote        maxFps, maxPixels: its budgets
 
 Both are handed a `presence`, 0 to 1, with their knobs. At 0 a study is not in the live list at all, so nothing is resolved, no pass is encoded, no buffer is uploaded and, unless something else needs it, no object is constructed. Between 0 and 1 an ink scales its light and a flow scales its velocity, and what that means is the implementation's business, because thinning a fluid is not the same operation as thinning a line.
 
-| `impl`    | What draws it                   | Kind |
-| --------- | ------------------------------- | ---- |
-| `fluid`   | `impls/fluid.ts`, `FluidFlow`   | flow |
-| `dye`     | `impls/fluid.ts`, `DyeInk`      | ink  |
-| `fractal` | `scenes/Kaleidoscope.ts`        | ink  |
-| `ribbon`  | `impls/RibbonInk.ts`            | ink  |
-| `look`    | nothing; a look is `PostParams` | look |
+| `impl`     | What draws it                       | Kind |
+| ---------- | ----------------------------------- | ---- |
+| `fluid`    | `impls/fluid.ts`, `FluidFlow`       | flow |
+| `analytic` | `impls/analytic.ts`, `AnalyticFlow` | flow |
+| `dye`      | `impls/fluid.ts`, `DyeInk`          | ink  |
+| `fractal`  | `scenes/Kaleidoscope.ts`            | ink  |
+| `ribbon`   | `impls/RibbonInk.ts`                | ink  |
+| `look`     | nothing; a look is `PostParams`     | look |
 
 **Every ink adds light.** The renderer clears the shared target once a frame and each ink then draws over what is there, blended as its own colour times the presence, with the alpha left where the clear put it (`INK_BLEND`). For one ink at presence 1 that is exactly the opaque draw each of them used to make on its own, which is why the five look as they did. They draw in cast order, so a cast reads the same way every time.
 
 **The fluid is one object split between two studies.** `Fluid.ts` owns the field; `simulate` is the solve and `drawDye` is the dye drawn out of it. The split cannot be two objects, because one splat carries both an impulse and a puff of dye, written by the same compute step out of the same uniform, so `fluidTuning` in `fluid.params.ts` is where a flow's knobs and an ink's meet. That is why the dye study carries `requires: ['fluid']`: without a fluid flow in the cast there is no field for it to draw, and the renderer builds it against the flow that is already live. With no dye ink on it the ink's knobs are simply absent and the fluid falls back to its own defaults, which is what a flow under another ink was always handed. Presence scales `force`, `hitForce` and `eventForce` and nothing else: the field has momentum, so a fade reads as the current easing off rather than the picture stopping dead.
+
+**The analytic flow is a velocity you can write down.** About a dozen of the flows in the catalogue are not simulations at all: implode, radial burst, tunnel, vortex, polar twist, shear bands, ripple, lattice warp, drip, curl drift. Each of them is a function of position and time, so they share one implementation and a study on it is nothing but numbers. `impls/analytic.ts` writes one fragment pass into a 128 texel square `rgba16float` field, in the same units and through the same `cover` the fluid's field uses, and the maths is in `impls/analytic.params.ts` with the shader as a line-for-line transcription of it. See "Adding a study" below for how a term is added.
 
 **A flow offers its field** as a texture view, the `cover` that maps canvas uv to that field's own uv, and its size. The feedback pass reads the last frame back along it, which is `feedback.carry` under Post stack below; with no flow live the stack binds one zero texel in its place.
 
@@ -399,6 +402,29 @@ Five emitters can say which part of the spectrum is playing; they cannot single 
 What this cannot do is tell a vocal from a lead synth in the same range. Two sounds that share a band and a pitch get one splat between them; that is source separation, a different order of problem.
 
 The two sizes are not just detail levels. 512 fills the frame with bold, soft-edged plumes; 1024 draws finer, wispier ones, because the same emitter radius is a smaller fraction of the larger grid.
+
+#### The analytic flow
+
+`src/impls/analytic.ts` with `shaders/analytic.field.wgsl` and the numbers in `impls/analytic.params.ts`. One fragment pass, no compute, no state: the field is a pure function of this frame's knobs, so there is nothing to warm up, nothing to reset and nothing that could depend on the frame rate. The velocity is per second, exactly as the fluid's is, and the feedback pass multiplies by the real step.
+
+The field is the SUM of a fixed set of terms, each scaled by one coefficient:
+
+| Knob      | The term                                                                                                                                                                                          |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `radial`  | speed along the line to the centre, in field widths a second at the peak of the profile. Negative pulls in (implode, tunnel), positive pushes out (burst).                                        |
+| `falloff` | where along that line the speed peaks. 0 is speed proportional to radius, a plain zoom about the middle; above 1 the peak is `1 / falloff` of the way to the corner and the rim is left standing. |
+| `swirl`   | turns a second about the centre, the same at every radius, so the picture turns without shearing (vortex).                                                                                        |
+| `twist`   | turns a second added at the centre alone and gone by the corner, so the middle outruns the rim and the picture winds into a spiral (polar twist).                                                 |
+
+`radial` is divided by the most the shape reaches inside the canvas, so it always means the speed at the peak whatever `falloff` is doing. Without that, a study driving the two from different rows would find each row changing what the other meant. Both rotations are signed, and positive is clockwise on screen, because a texture's y runs down.
+
+Presence scales every coefficient and leaves `falloff` alone: a shape faded toward zero would turn a burst into a zoom on the way in. With every coefficient at zero, which is what implode at a tension of zero is, no pass is encoded, no buffer is written and no field is offered, so the stack binds its own zero texel and the study genuinely costs nothing until it has something to say.
+
+The grid is 128 texels square and does not follow the canvas, so nothing is rebuilt on a resize; it covers the canvas with the overflow cropped, exactly as the fluid's does, which is what keeps one field width one canvas width on both axes so that "the centre" and "a ring" mean the same thing on a wide canvas and a tall one. 128 is enough because every term is smooth and the sampler reads it back with linear filtering: a 16 by 9 canvas sees 128 by 72 texels of it, and the sharpest thing in the field is the turn of direction around the centre, which the profile takes to zero anyway. It costs 16384 fragment invocations and 128 KB, against the fluid's nine dispatches and 14 MB.
+
+The fluid and this can be live at once, which is what the middle of a change between them is. `impls/FlowBlend.ts` sums them by presence, and `blendTarget` takes the LARGEST of their grids rather than the first: the blend shader samples by uv, so a 128 field lands correctly in a 1024 target, but a 1024 fluid written into a 128 target would spend the whole change at a sixty-fourth of its resolution. Every flow's `cover` comes from the canvas alone, so the two share it.
+
+Adding a term is three things: its coefficient in `ANALYTIC_KNOBS` (`presets/knobs.ts`) with a range in `ANALYTIC_RANGES`, a field of `AnalyticField` written into a vec4 of its own by `writeAnalyticUniform`, appended after the vec4s that are already there so nothing moves, and the same few lines in `analyticVelocity` and, transcribed, in the shader. The WGSL struct is one vec4 per term family for exactly that reason.
 
 ### Post stack
 
@@ -570,6 +596,8 @@ A mapping row reads what a preset's does, plus one field that is not in the pack
 | ----------------- | ---- | -------------- | ------- | ------ |
 | `lazy-fluid`      | flow | `fluid`        | I G R O | medium |
 | `turbulent-fluid` | flow | `fluid`        | G D     | medium |
+| `implode`         | flow | `analytic`     | B       | cheap  |
+| `radial-burst`    | flow | `analytic`     | D       | cheap  |
 | `dye-plumes`      | ink  | `dye`          | I G R   | cheap  |
 | `ribbon`          | ink  | `ribbon`       | G B D   | cheap  |
 | `fractal-glints`  | ink  | `fractal`      | G D     | heavy  |
@@ -729,7 +757,7 @@ The renderer steps the director on every frame whatever is drawing, and what it 
 ## Adding a study
 
 1. Its entry in `STUDIES` (`src/studies/registry.ts`): an id, a kind, the implementation that draws it, where it sits in the character space, how it suits each moment, its resting knobs, its mapping and its cost. `registry.test.ts` then holds it to the bar in `docs/studies-handoff.md` without anyone adding a line.
-2. If it needs an implementation that does not exist: an id in `IMPL_IDS` and its knob list in `IMPL_KNOBS` (`src/studies/impls.ts`), a `FlowImpl` or `InkImpl` under `src/impls/` or `src/scenes/`, shaders under `src/shaders/`, and a branch in the renderer's `buildFlow` or `buildInk`.
+2. If it needs an implementation that does not exist: an id in `IMPL_IDS` and its knob list in `IMPL_KNOBS` (`src/studies/impls.ts`), a `FlowImpl` or `InkImpl` under `src/impls/` or `src/scenes/`, shaders under `src/shaders/`, and a branch in the renderer's `buildFlow` or `buildInk`. A flow that is a velocity you can write down needs none of that: it is a term on the analytic flow, which is a coefficient and a few lines, under The analytic flow above.
 3. A `*.params.ts` holding the pure numbers, with a `*.params.test.ts` beside it. Keep the GPU objects out of it, the way `fluid.params.ts` and `post/params.ts` do; that file is where the implementation's decisions are testable.
 4. A row in the study table above.
 5. To ship it as a preset, a cast JSON under `src/studies/casts/` and a line in `src/studies/casts/index.ts`.
@@ -782,6 +810,8 @@ Tempo was the weak part. Replaying those recordings through the extractor as it 
 | Breakdown, no drums        | none  | 0     | under 0.1  | held the last reading    |
 
 The two-step is the hard case because nothing in it plays on every beat: the kicks are a dotted quarter apart and the snares a half bar, and every band on its own is periodic at the half-bar or the bar. It reads 174 because the summed envelope has an event on every beat, kick or snare or hat, and reads 87 when it does not; the half-bar is a level of the metre and reading it is a choice of octave, where the 116 the old tracker read on real tracks was no level at all and gave a phase that drifted against the music. On a 30 Hz frame the 30 ms flux lag is a single frame and the choice is marginal: without the octave hysteresis it flipped between the two every few seconds, and with it the half-bar, which the first full window chose, is held. The hysteresis only counts once the window has filled, because the first readings come from a window too short to reach the bar and lean to the half-bar at every frame rate; locked in from there, the two-step read 87 at 60 and 120 frames a second as well. Nothing drives off the tempo in the shipped studies yet; the phase and the confidence are there for the study that will.
+
+The analytic flow was measured separately, on Windows in headless Edge against a real NVIDIA Blackwell WebGPU adapter (RTX 5080), at 2560 by 1440, playing the demo's own track under Auto for three minutes: 720 half-second samples of `data-frame-ms`. The 239 samples on which the cast held Implode read 6.670 ms on average and the 481 without it read 6.673, both sitting at the animation loop's own cap of about 6.67 ms, so nothing left the cap and the flow cost nothing measurable. `data-detail` read `512 fluid + 128 analytic` through the change, which is the mismatched-size blend running, and the console carried no WGSL or validation message on any frame. What that run also says is that the moment rows are still calibrated for synthetic structure: over the whole three minutes `tension` never passed 0.49 and `release` never passed 0.41, so Implode reaches about half the pull its numbers describe and Radial burst is never cast at all, since a flow whose only moment is the drop cannot outscore one that also suits the groove while `drop` and `groove` are complements. Neither is a property of the studies; both are the estimator's, and the handoff says those rows have not been tried on real tracks.
 
 Not checked: a mid-range desktop GPU, and the fluid on a software rasteriser, which the reduced grid and sweep counts are written for but no machine here can run.
 

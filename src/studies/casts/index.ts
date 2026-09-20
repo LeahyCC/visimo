@@ -17,8 +17,10 @@
  *   rather than lazy because Melt's flow rests at a thin viscosity, 0.12
  *   against Plume's 0.2, and the lazy fluid gives the treble 0.18 of it,
  *   which from 0.12 is a negative viscosity and no solve at all.
- * - Every study carries a `tension` row, and tension is zero everywhere until
- *   the estimator card lands. At zero these are the presets exactly.
+ * - Every study carries a `tension` row, and the renderer reads tension from
+ *   the packet for a pinned cast as for any other. With nothing winding up,
+ *   which is most of a track, tension is 0 and these are the presets exactly;
+ *   through a build they now wind up with it, which no preset ever did.
  *
  * These five are what the stage draws and what a host picks between, so the
  * names the preset list had are kept beside the cast ones: a host written

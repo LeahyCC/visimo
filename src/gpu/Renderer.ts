@@ -472,6 +472,11 @@ class Renderer {
     }
   }
 
+  /** A study's knobs for this frame, or nothing when its implementation takes none. */
+  private knobsOf(id: string): Tuning {
+    return this.resolved.knobs.get(id) ?? NO_KNOBS
+  }
+
   private drawFrame(now: number) {
     this.frame = 0
     const { canvas, context, gpu, post, compatibility } = this
@@ -507,25 +512,35 @@ class Renderer {
 
     // The mapping is applied here, on the CPU, and nowhere else: every
     // implementation and the stack read numbers already modulated.
+    // Tension is packet row 47 and is read from there, for a pinned cast as
+    // much as a chosen one. A pinned cast used to carry a tension of its own,
+    // fixed at 0 from before the row existed, which left every study's
+    // tension row dead under all five shipped casts: nothing wound up with a
+    // build unless a director was choosing.
     const live = this.live
-    resolveLive(live.studies, live.canvas, this.packet, live.tension, this.resolved)
+    const tension = this.packet[F.tension] ?? 0
+    resolveLive(live.studies, live.canvas, this.packet, tension, this.resolved)
     if (this.postPatch) patchPostParams(this.resolved.post, this.postPatch)
     const flows = this.liveFlowStudies
-    const knobsOf = (id: string): Tuning => this.resolved.knobs.get(id) ?? NO_KNOBS
 
     if (compatibility) {
       // One program and no compute: the fractal is the only study this path
       // draws, and the rest of the cast is skipped. Presence is not read
       // here, because nothing fades a cast until the director lands.
       const fractal = inks.find((entry) => entry.impl === 'fractal')
-      if (fractal) compatibility.render(this.packet, dt, knobsOf(fractal.id), this.resolved.post)
+      if (fractal)
+        compatibility.render(this.packet, dt, this.knobsOf(fractal.id), this.resolved.post)
     } else if (gpu && context && post) {
       // Flows first and inks second, because a dye ink's numbers reach the
       // solver's uniform through the flow it draws.
       for (const entry of flows)
-        this.flows.get(entry.id)?.object.update(this.packet, dt, knobsOf(entry.id), entry.presence)
+        this.flows
+          .get(entry.id)
+          ?.object.update(this.packet, dt, this.knobsOf(entry.id), entry.presence)
       for (const entry of inks)
-        this.inks.get(entry.id)?.object.update(this.packet, dt, knobsOf(entry.id), entry.presence)
+        this.inks
+          .get(entry.id)
+          ?.object.update(this.packet, dt, this.knobsOf(entry.id), entry.presence)
       const encoder = gpu.device.createCommandEncoder()
       const offscreen = post.target(this.drawWidth, this.drawHeight)
       if (!offscreen) return

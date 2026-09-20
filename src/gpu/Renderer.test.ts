@@ -322,10 +322,18 @@ function sizedCanvas(width: number, height: number) {
   return { element, draw: (now: number) => held.frame?.(now) }
 }
 
+/**
+ * The moment rows. The preset frames were captured before these existed, so
+ * every preset saw them at 0, and a packet that is to land on those frames
+ * has to say the same. Tension in particular is read by every study.
+ */
+const MOMENT_FIELDS: readonly string[] = ['tension', 'release', 'rest', 'impact']
+
 /** Every field a mapping can read at one level; `lowEnd` is derived and follows. */
 const packetAt = (level: number, swell: number) => {
   const out = new Float32Array(PACKET_LENGTH)
-  for (const field of AUDIO_FIELDS) if (field !== 'lowEnd') out[F[field]] = level
+  for (const field of AUDIO_FIELDS)
+    if (field !== 'lowEnd' && !MOMENT_FIELDS.includes(field)) out[F[field]] = level
   out[F.swell] = swell
   return out
 }
@@ -590,6 +598,22 @@ describe('a pinned cast reaches its implementations unchanged', () => {
     if (!golden?.flow) throw new Error('Expected Melt at silence')
     await drawWith('melt', 0, 0)
     expect(impls.seen.fluid?.knobs).toEqual(golden.flow)
+  })
+
+  // A pinned cast used to carry a tension of its own, fixed at 0, so nothing
+  // under the five shipped casts wound up with a build. It is read from the
+  // packet now, the way a chosen cast's is.
+  it('winds a pinned cast up with the packet’s tension', async () => {
+    await drawWith('melt', 0, 0)
+    const rest = impls.seen.fluid?.knobs.vorticity ?? 0
+    const wound = packetAt(0, 0)
+    wound[F.tension] = 1
+    audio.packet = wound
+    const { element, draw } = sizedCanvas(1280, 720)
+    await renderer.attach(element, canvas(), vi.fn())
+    draw(2000)
+    // Turbulent fluid's own row: tension climbs the vorticity by 12 at full.
+    expect(impls.seen.fluid?.knobs.vorticity).toBeCloseTo(rest + 12, 10)
   })
 
   it('draws the inks in cast order, once each, into a cleared target', async () => {

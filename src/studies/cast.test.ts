@@ -9,8 +9,9 @@
  * written by running it over the same five packets these tests use. It is a
  * record of what shipped in 0.1 and nothing regenerates it.
  *
- * Tension is zero throughout, which is what it is until the estimator lands,
- * and every study's tension row is written so that zero adds nothing.
+ * Tension is zero throughout, which is what every preset saw when the frames
+ * were recorded, and every study's tension row is written so that zero adds
+ * nothing.
  */
 import { describe, expect, it } from 'vitest'
 

@@ -82,6 +82,35 @@ export class FeatureClient {
     this.elapsed = 0
   }
 
+  /**
+   * A new track. The extractor is built again, because everything it keeps is
+   * about the track it has been hearing: the sections and what they sounded
+   * like, the scales a boundary is measured against, the tempo, the loudest
+   * the song has been. Carried into the next song, a dance track's wide scale
+   * left the metal track after it with no sections at all.
+   */
+  newTrack() {
+    if (this.disposed) return
+    const options = { sampleRate: this.analyser.context.sampleRate, fftSize: this.analyser.fftSize }
+    if (this.extractor) this.extractor = new FeatureExtractor(options)
+    try {
+      this.worker?.postMessage({ type: 'configure', options })
+    } catch {
+      this.useLocalExtractor()
+    }
+  }
+
+  /** The playhead jumped within the track; see `Structure.rescale`. */
+  seeked() {
+    if (this.disposed) return
+    this.extractor?.seeked()
+    try {
+      this.worker?.postMessage({ type: 'seek' })
+    } catch {
+      this.useLocalExtractor()
+    }
+  }
+
   /** Levels hold between worker replies, but one hit must spawn only once. */
   readInto(out: Float32Array) {
     out.set(this.packet)

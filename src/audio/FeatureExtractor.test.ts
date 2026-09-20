@@ -113,7 +113,7 @@ describe('FeatureExtractor', () => {
   const make = (fftSize = FFT_SIZE) => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize })
 
   it('has the documented packet length and indices', () => {
-    expect(PACKET_LENGTH).toBe(51)
+    expect(PACKET_LENGTH).toBe(52)
     expect(F.treble).toBe(4)
     expect(F.tempoBpm).toBe(21)
     expect(F.dt).toBe(23)
@@ -130,6 +130,7 @@ describe('FeatureExtractor', () => {
     expect(F.release).toBe(48)
     expect(F.rest).toBe(49)
     expect(F.impact).toBe(50)
+    expect(F.grit).toBe(51)
     expect(make().packet).toHaveLength(PACKET_LENGTH)
   })
 
@@ -503,6 +504,48 @@ describe('the song rather than the frame', () => {
   })
 
   /**
+   * Grit off a spectrum held for `seconds` at `fps`. Two shapes stand for the
+   * two ends of it: a wall, flat from the sub band to the top, which is what
+   * distortion and noise do to a spectrum, and a couple of partials over the
+   * floor, which is what a bass note under a pad is.
+   */
+  function gritOf(shape: Float32Array, seconds: number, fps: number) {
+    const extractor = make()
+    const dt = 1 / fps
+    let packet: Float32Array = extractor.packet
+    for (let frame = 0; frame < Math.round(seconds * fps); frame++)
+      packet = extractor.update(shape, dt)
+    return packet[F.grit] ?? 0
+  }
+
+  const WALL = spectrum(flat(-30))
+  const PARTIALS = spectrum(only(200, 260, -30))
+
+  it('reads a wall of noise as gritty and a handful of partials as not', () => {
+    expect(gritOf(WALL, 30, 60)).toBeGreaterThan(0.5)
+    expect(gritOf(PARTIALS, 30, 60)).toBeLessThan(0.1)
+  })
+
+  // Three slow means over the real dt and nothing per frame, so the reading is
+  // the same however often it is asked for.
+  it('reads the same grit at 60 and at 144 frames a second', () => {
+    for (const shape of [WALL, PARTIALS])
+      expect(Math.abs(gritOf(shape, 30, 144) - gritOf(shape, 30, 60))).toBeLessThan(0.01)
+  })
+
+  // A pause, a seek or the gap between two tracks is not a track that has
+  // gone soft, so the means are held rather than stepped, the way the
+  // centroid `weight` reads is.
+  it('holds grit through silence rather than letting it fall', () => {
+    const extractor = make()
+    for (let frame = 0; frame < 30 * 60; frame++) extractor.update(WALL, DT)
+    const heard = extractor.packet[F.grit] ?? 0
+    const quiet = spectrum(silence)
+    for (let frame = 0; frame < 30 * 60; frame++) extractor.update(quiet, DT)
+    expect(extractor.packet[F.grit] ?? 0).toBeCloseTo(heard, 5)
+  })
+
+  /**
    * A hit every half second for `seconds`, fed to the song bare, at `fps`. Each
    * hit trips three detectors at `spread` seconds after it, the way a kick
    * trips the mids first and the sub band about 70 ms behind, and lifts the
@@ -527,7 +570,10 @@ describe('the song rather than the frame', () => {
       })
       const since = from >= FIRST ? (from - FIRST) % EVERY : Infinity
       const loudness = bed * (1 + bump * Math.exp(-since / 0.1))
-      pace = song.step({ onset, loudness, brightness: NaN, bpm: 0, spread: 0.01 }, dt).pace
+      pace = song.step(
+        { onset, loudness, brightness: NaN, bpm: 0, spread: 0.01, energy: 0.5, upperMid: 0.1 },
+        dt,
+      ).pace
     }
 
     return pace

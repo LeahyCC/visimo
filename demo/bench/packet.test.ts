@@ -1,9 +1,24 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, IMPACT_DECAY_SECONDS, PACKET_LENGTH } from '../../src/audio/FeatureExtractor'
+import { CharacterReader } from '../../src/director/character'
 import { BENCH_ROWS, overridePacket, overridesFor, ROWS_OF, stepImpact } from './packet'
 
 const filled = () => Float32Array.from({ length: PACKET_LENGTH }, (_, at) => 0.001 * (at + 1))
+
+/**
+ * What the character settles on when this packet plays for two minutes. A
+ * slider is named for an axis and writes rows, and the reader stretches those
+ * rows back onto the axis, so this is the only thing a test should assert:
+ * the numbers in between are the reader's business.
+ */
+const readsBack = (packet: Float32Array) => {
+  const sounding = packet.slice()
+  sounding[F.energy] = 0.9
+  const reader = new CharacterReader()
+  for (let frame = 0; frame < 120 * 60; frame += 1) reader.step(sounding, 1 / 60)
+  return reader.character
+}
 
 describe('overridePacket', () => {
   it('hands back the packet it was given, changed in place', () => {
@@ -17,11 +32,11 @@ describe('overridePacket', () => {
     const packet = filled()
     const before = packet.slice()
     overridePacket(packet, overridesFor({ tension: 0.8, hardness: 0.2 }, false))
-    const touched = new Set<number>([F.tension, F.hardness])
+    const touched = new Set<number>(ROWS_OF.tension.concat(ROWS_OF.hardness))
     for (let row = 0; row < PACKET_LENGTH; row += 1)
       if (!touched.has(row)) expect(packet[row]).toBe(before[row])
     expect(packet[F.tension]).toBeCloseTo(0.8)
-    expect(packet[F.hardness]).toBeCloseTo(0.2)
+    expect(readsBack(packet).hardness).toBeCloseTo(0.2, 2)
   })
 
   it('raises a row without ever lowering it, so a real impact under a fired one stays a 1', () => {
@@ -66,15 +81,16 @@ describe('overridesFor', () => {
     expect(packet[F.release]).toBe(0)
     expect(packet[F.rest]).toBe(0)
     // An axis nobody holds is no opinion, and no opinion is the middle.
-    expect(packet[F.weight]).toBeCloseTo(0.5)
-    expect(packet[F.hardness]).toBeCloseTo(0.5)
+    const character = readsBack(packet)
+    expect(character.weight).toBeCloseTo(0.5, 2)
+    expect(character.hardness).toBeCloseTo(0.5, 2)
   })
 
   it('writes drive to both rows the character reader averages, so it reads back whole', () => {
     const packet = new Float32Array(PACKET_LENGTH)
     overridePacket(packet, overridesFor({ drive: 0.8 }, false))
-    expect(packet[F.pace]).toBeCloseTo(0.8)
-    expect(packet[F.tempo]).toBeCloseTo(0.8)
+    expect(packet[F.pace]).toBe(packet[F.tempo])
+    expect(readsBack(packet).drive).toBeCloseTo(0.8, 2)
   })
 
   it('keeps a value inside 0 to 1, since a hash can say anything', () => {

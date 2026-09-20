@@ -9,6 +9,8 @@ import type { FeatureOptions } from './FeatureExtractor'
 export type ToWorker =
   | { type: 'configure'; options: FeatureOptions }
   | { type: 'frame'; spectrum: Float32Array<ArrayBuffer>; dt: number }
+  /** The playhead jumped within the track. */
+  | { type: 'seek' }
 
 export type FromWorker = {
   type: 'features'
@@ -27,6 +29,11 @@ export function createFeatureWorkerSession(post: Post) {
     handle(message: ToWorker) {
       if (message.type === 'configure') {
         extractor = new FeatureExtractor(message.options)
+        return
+      }
+
+      if (message.type === 'seek') {
+        extractor?.seeked()
         return
       }
       const { spectrum, dt } = message

@@ -18,6 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { rowsForAxis } from '../director/character'
 import { LOFI, METAL, playSong, SONG_SECONDS } from '../director/song.fixture'
 import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
@@ -61,7 +62,12 @@ const graphics = vi.hoisted(() => ({ render: vi.fn(), dispose: vi.fn() }))
 
 // The packet the mocked feature client writes, so a frame can be driven at
 // any level without an AudioContext.
-const audio = vi.hoisted(() => ({ attached: false, packet: null as Float32Array | null }))
+const audio = vi.hoisted(() => ({
+  attached: false,
+  packet: null as Float32Array | null,
+  newTracks: 0,
+  seeks: 0,
+}))
 
 /**
  * What the implementations saw. Each cast holds at most one of each, so the
@@ -106,6 +112,12 @@ vi.mock('../audio/FeatureClient', () => ({
     pump() {}
     readInto(out: Float32Array) {
       if (audio.packet) out.set(audio.packet)
+    }
+    newTrack() {
+      audio.newTracks += 1
+    }
+    seeked() {
+      audio.seeks += 1
     }
     dispose() {}
   },
@@ -462,6 +474,8 @@ beforeEach(async () => {
   impls.maxPixels = undefined
   audio.attached = false
   audio.packet = null
+  audio.newTracks = 0
+  audio.seeks = 0
   // One test makes this throw, and a mock implementation outlives the test
   // that set it.
   graphics.render.mockImplementation(() => {})
@@ -1079,6 +1093,49 @@ describe('the director drives the cast', () => {
     fresh.dispose()
   })
 
+  // The extractor keeps the track it has been hearing: its sections, and the
+  // scales a boundary is measured against. A seek reads to it as the widest
+  // change the track ever made, and the song before reads as this one's past.
+  it('tells the extractor of a seek and of a new track, and of nothing else', async () => {
+    vi.resetModules()
+    impls.reset()
+    const fresh = (await import('./Renderer')).renderer
+    const { element, draw } = sizedCanvas(1280, 720)
+    audio.attached = true
+    const source = { current: { currentTime: 0, duration: 240 } }
+    fresh.setPlayhead(source)
+    fresh.setPreset('auto')
+    await fresh.attach(element, canvas(), vi.fn())
+    audio.packet = new Float32Array(PACKET_LENGTH)
+    let now = 0
+    const play = (seconds: number) => {
+      for (let frame = 0; frame < seconds * FPS; frame += 1) {
+        source.current.currentTime += 1 / FPS
+        draw((now += 1000 / FPS))
+      }
+    }
+    play(3)
+    expect(audio.seeks).toBe(0)
+    // Paused: the frames go on and the playhead does not.
+    for (let frame = 0; frame < FPS; frame += 1) draw((now += 1000 / FPS))
+    expect(audio.seeks).toBe(0)
+    source.current.currentTime = 120
+    play(1)
+    expect(audio.seeks).toBe(1)
+    source.current.currentTime = 10
+    play(1)
+    expect(audio.seeks).toBe(2)
+
+    expect(audio.newTracks).toBe(0)
+    fresh.newTrack()
+    expect(audio.newTracks).toBe(1)
+    // The next track starts at its own beginning, which is not a seek.
+    source.current.currentTime = 0
+    play(1)
+    expect(audio.seeks).toBe(2)
+    fresh.dispose()
+  })
+
   it('prints auto and the live study ids on the canvas', async () => {
     const song = await playThrough('auto')
     expect(song.element.dataset.preset).toBe('auto')
@@ -1283,7 +1340,8 @@ describe('the study bench', () => {
       live: live('lazy-fluid', 'ribbon', 'clean-glass'),
       frame: (packet) => {
         packet[F.energy] = 0.8
-        packet[F.hardness] = 1
+        // The hardness slider's rows, as the bench writes them.
+        for (const { row, value } of rowsForAxis('hardness', 1)) packet[row] = value
       },
     })
     audio.packet = sliders

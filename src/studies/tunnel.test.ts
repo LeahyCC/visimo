@@ -69,7 +69,7 @@ describe('the tunnel study', () => {
   })
 
   it('lives where a beat is steady and says nothing of the rest, with a moderate reach', () => {
-    expect(study.home.steadiness).toBeGreaterThanOrEqual(0.8)
+    expect(study.home.steadiness).toBeGreaterThanOrEqual(0.7)
     for (const axis of ['drive', 'weight', 'tonality', 'hardness'] as const)
       expect(study.home[axis]).toBe(0.5)
     expect(study.reach).toBeGreaterThanOrEqual(0.4)

@@ -6,11 +6,14 @@ import { CASTS } from '../studies/casts'
 import { findStudy, STUDIES } from '../studies/registry'
 import { castFrame, resolveLive } from '../studies/resolve'
 import type { LiveStudy } from '../studies/resolve'
+import { CHARACTER_AXES, MOMENTS } from '../studies/types'
 import type { Character, FlowStudy, InkStudy, LookStudy, Moments, Study } from '../studies/types'
+import { rowsForAxis } from './character'
 import { COST_OF, Director, pickCast } from './director'
 import type { PickedCast } from './director'
 import type { MomentWeights } from './moment'
 import { DROP_AT, HARDSTYLE, HOUSE, LOFI, PARTS, playSong } from './song.fixture'
+import { TRACKS } from './tracks.fixture'
 
 const NOTHING: MomentWeights = { intro: 0, groove: 0, build: 0, drop: 0, rest: 0, outro: 0 }
 
@@ -107,6 +110,13 @@ const packet = (values: Partial<Record<keyof typeof F, number>>) => {
   out[F.swell] = 0.5
   out[F.recall] = 0.9
   for (const [name_, value] of Object.entries(values)) out[F[name_ as keyof typeof F]] = value
+  return out
+}
+
+/** The rows a character is read back from, written into a packet. */
+const sounding = (out: Float32Array, character: Character) => {
+  for (const axis of CHARACTER_AXES)
+    for (const { row, value } of rowsForAxis(axis, character[axis])) out[row] = value
   return out
 }
 
@@ -362,32 +372,12 @@ describe('Director', () => {
     const near = ink('near-ink', moments({ groove: 1 }), { reach: 0.2, home: track })
     const studies = [GROOVE_FLOW, ONE_LOOK, wide, near]
     const director = new Director({ studies, budget: 4 })
-    const early = packet({
-      section: 1,
-      pace: 0.9,
-      tempo: 0.9,
-      hardness: 0.95,
-      weight: 0.5,
-      keyClarity: 0.5,
-      tempoConfidence: 0.5,
-    })
+    const early = sounding(packet({ section: 1 }), track)
     run(director, early, 4)
     expect(director.cast?.inks).toEqual(['wide-ink'])
     run(director, early, 60)
     // Settled, and a boundary to act on it.
-    run(
-      director,
-      packet({
-        section: 2,
-        pace: 0.9,
-        tempo: 0.9,
-        hardness: 0.95,
-        weight: 0.5,
-        keyClarity: 0.5,
-        tempoConfidence: 0.5,
-      }),
-      2,
-    )
+    run(director, sounding(packet({ section: 2 }), track), 2)
     expect(director.cast?.inks).toEqual(['near-ink'])
   })
 
@@ -809,5 +799,61 @@ describe('the whole song', () => {
 
     expect(after).not.toBe(before)
     expect(presence).toBe(1)
+  })
+})
+
+/**
+ * The library against the music people actually put on. Everything else in
+ * this file asks whether the director chooses well given a character; these
+ * ask whether the twenty characters in `tracks.fixture.ts`, which are
+ * measured and not invented, reach the whole library and pull it apart.
+ */
+describe('the library over twenty real tracks', () => {
+  const ROTATIONS = [0, 1, 2]
+
+  /** Every cast the twenty tracks can be given, over every moment. */
+  const everyCast = (): PickedCast[] => {
+    const out: PickedCast[] = []
+    for (const { character } of TRACKS)
+      for (const moment of MOMENTS)
+        for (const rotation of ROTATIONS) {
+          const cast = pickCast({ character, weights: moments({ [moment]: 1 }), rotation })
+          if (cast) out.push(cast)
+        }
+
+    return out
+  }
+
+  // A study nothing can reach is a study nobody will ever see, whatever its
+  // home says. This is the test that holds a home honest: move one too far
+  // into a corner of the space and it drops out here.
+  it('gives every study a seat for some track at some moment', () => {
+    const seated = new Set<string>()
+    for (const cast of everyCast()) {
+      if (cast.flow) seated.add(cast.flow)
+      seated.add(cast.look)
+      for (const ink of cast.inks) seated.add(ink)
+    }
+
+    const missing = STUDIES.filter((study) => !seated.has(study.id)).map((study) => study.id)
+    expect(missing).toEqual([])
+  })
+
+  // The complaint this was all built to answer: heavy metal looked like
+  // everything else. In a groove, with nothing but the character to go on,
+  // the twenty tracks have to be told apart.
+  it('casts a groove differently for different kinds of track', () => {
+    const groove = TRACKS.map(({ name: track, character }) => ({
+      track,
+      cast: name(pickCast({ character, weights: moments({ groove: 1 }) })),
+    }))
+    expect(new Set(groove.map((at) => at.cast)).size).toBeGreaterThanOrEqual(8)
+
+    const castOf = (track: string) => groove.find((at) => at.track.startsWith(track))?.cast
+    // A wall of guitars and a piano over a pad are the two ends of the axis
+    // that was wrong, so they are the two that must not meet in the middle.
+    expect(castOf('August Burns Red')).not.toBe(castOf('Christian Loffler'))
+    expect(castOf('Bring Me The Horizon')).not.toBe(castOf('Wilco'))
+    expect(castOf('Pendulum')).not.toBe(castOf('Daft Punk'))
   })
 })

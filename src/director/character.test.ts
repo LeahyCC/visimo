@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { CHARACTER_AXES } from '../studies/types'
 import type { Character } from '../studies/types'
-import { CharacterReader, NEUTRAL_CHARACTER } from './character'
+import { CharacterReader, NEUTRAL_CHARACTER, rowsForAxis } from './character'
 
 const packet = (values: Partial<Record<keyof typeof F, number>>) => {
   const out = new Float32Array(PACKET_LENGTH)
@@ -11,14 +11,24 @@ const packet = (values: Partial<Record<keyof typeof F, number>>) => {
   return out
 }
 
-/** A track with an opinion on every axis, loud enough to be heard. */
-const TRACK = packet({
-  energy: 0.9,
-  pace: 0.8,
-  tempo: 0.6,
+/**
+ * A packet that reads back as this character, loud enough to be heard. The
+ * rows are worked out by `rowsForAxis`, which is the inverse of the reading
+ * under test, so a test says which axis it means and not which row.
+ */
+const track = (character: Character) => {
+  const out = packet({ energy: 0.9 })
+  for (const axis of CHARACTER_AXES)
+    for (const { row, value } of rowsForAxis(axis, character[axis])) out[row] = value
+  return out
+}
+
+/** A track with an opinion on every axis. */
+const TRACK = track({
+  drive: 0.7,
   weight: 0.2,
-  keyClarity: 0.9,
-  tempoConfidence: 0.85,
+  tonality: 0.9,
+  steadiness: 0.85,
   hardness: 0.95,
 })
 

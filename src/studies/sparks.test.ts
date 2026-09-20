@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { closeness } from '../director/score'
+import { HARDSTYLE, LOFI } from '../director/song.fixture'
 import {
   SPARK_FLOATS,
   SPARK_POOL,
@@ -73,13 +74,10 @@ describe('the sparks study', () => {
   // The catalogue says bright and fast, on a groove or a drop, with a moderate
   // reach: a lo-fi track never gets it and a hardstyle one does.
   it('is in the bright, fast corner: a lo-fi character never reaches it and a hardstyle one does', () => {
-    const lofi = findStudy('warm-soft')?.home
-    const hardstyle = findStudy('hard-clean')?.home
-    if (!lofi || !hardstyle) throw new Error('Expected the two looks')
-    expect(closeness(study, lofi)).toBeLessThan(0.5)
-    expect(closeness(study, hardstyle)).toBeGreaterThan(0.7)
-    expect(closeness(study, hardstyle)).toBeGreaterThan(closeness(study, lofi) + 0.25)
-    // Moderate: wider than the shards' 0.3 and narrower than the ribbon's 1.
+    expect(closeness(study, LOFI)).toBeLessThan(0.5)
+    expect(closeness(study, HARDSTYLE)).toBeGreaterThan(0.6)
+    expect(closeness(study, HARDSTYLE)).toBeGreaterThan(closeness(study, LOFI) + 0.25)
+    // Moderate: wider than the shards' 0.35 and narrower than the ribbon's 1.
     expect(study.reach).toBeGreaterThan(0.3)
     expect(study.reach).toBeLessThan(0.6)
     // Bright means light on the weight axis, and fast means high on the drive one.

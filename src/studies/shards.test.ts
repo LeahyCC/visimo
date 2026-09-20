@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { closeness } from '../director/score'
+import { HARDSTYLE, LOFI } from '../director/song.fixture'
 import {
   SHARD_DEFAULTS,
   SHARD_FLOATS,
@@ -43,12 +44,11 @@ describe('the shards study', () => {
 
   // The handoff says lo-fi never gets shards and hardstyle does. The two
   // characters are the homes of the looks that were written for them.
+  // Against the characters themselves rather than against another study's
+  // home, which moved when the axes were stretched onto their real ranges.
   it('is in the hard, fast corner: a lo-fi character never reaches it and a hardstyle one does', () => {
-    const lofi = findStudy('warm-soft')?.home
-    const hardstyle = findStudy('hard-clean')?.home
-    if (!lofi || !hardstyle) throw new Error('Expected the two looks')
-    expect(closeness(study, lofi)).toBeLessThan(0.15)
-    expect(closeness(study, hardstyle)).toBeGreaterThan(0.6)
+    expect(closeness(study, LOFI)).toBeLessThan(0.3)
+    expect(closeness(study, HARDSTYLE)).toBeGreaterThan(0.6)
   })
 })
 

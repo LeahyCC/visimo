@@ -18,13 +18,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { playSong, SONG_SECONDS } from '../director/song.fixture'
+import { HARDSTYLE, playSong, SONG_SECONDS } from '../director/song.fixture'
 import { POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
-import { parseCast } from '../studies/cast'
+import { defaultCanvas, parseCast } from '../studies/cast'
 import { castOrDefault } from '../studies/casts/index'
 import frames from '../studies/casts/preset-frames.json'
+import type { ImplId } from '../studies/impls'
+import { STUDIES } from '../studies/registry'
+import type { LiveCast } from '../studies/resolve'
+import type { Character } from '../studies/types'
 import type { Gpu } from './Device'
 
 type PresetFrame = {
@@ -55,22 +59,25 @@ const audio = vi.hoisted(() => ({ attached: false, packet: null as Float32Array 
  * class an implementation was built from says which study it is drawing for.
  */
 const impls = vi.hoisted(() => ({
-  built: { fluid: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
-  disposed: { fluid: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
+  built: { fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
+  disposed: { fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 } as Record<string, number>,
   seen: {} as Record<string, { knobs: Record<string, number>; presence: number }>,
   /** How many times each was stepped, so a second solver would double it. */
   updates: {} as Record<string, number>,
   drawn: [] as string[],
+  /** What the ribbon was told to read its samples from. */
+  waveform: null as (() => Float32Array | null) | null,
   resized: [] as [number, number][],
   size: 0,
   maxFps: undefined as number | undefined,
   maxPixels: undefined as number | undefined,
   reset() {
-    impls.built = { fluid: 0, dye: 0, fractal: 0, ribbon: 0 }
-    impls.disposed = { fluid: 0, dye: 0, fractal: 0, ribbon: 0 }
+    impls.built = { fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 }
+    impls.disposed = { fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 }
     impls.seen = {}
     impls.updates = {}
     impls.drawn = []
+    impls.waveform = null
     impls.resized = []
   },
 }))
@@ -137,6 +144,25 @@ vi.mock('../impls/fluid', () => ({
   },
 }))
 
+vi.mock('../impls/analytic', () => ({
+  AnalyticFlow: class {
+    readonly flow = null
+    detail = 'analytic detail'
+    constructor() {
+      impls.built.analytic = (impls.built.analytic ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('analytic', knobs, presence)
+    }
+    simulate() {}
+    dispose() {
+      impls.disposed.analytic = (impls.disposed.analytic ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../scenes/Kaleidoscope', () => ({
   Kaleidoscope: class {
     readonly detail = 'fractal detail'
@@ -168,8 +194,9 @@ vi.mock('../scenes/Kaleidoscope', () => ({
 vi.mock('../impls/RibbonInk', () => ({
   RibbonInk: class {
     readonly detail = ''
-    constructor() {
+    constructor(_post: unknown, waveform: () => Float32Array | null) {
       impls.built.ribbon = (impls.built.ribbon ?? 0) + 1
+      impls.waveform = waveform
     }
     init() {}
     resize() {}
@@ -608,7 +635,7 @@ describe('the WebGL2 fallback', () => {
     renderer.setPreset(castOrDefault('melt'))
     await expect(renderer.attach(element, canvas(), vi.fn())).resolves.toBe('ok')
     draw(16)
-    expect(impls.built).toEqual({ fluid: 0, dye: 0, fractal: 0, ribbon: 0 })
+    expect(impls.built).toEqual({ fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 })
     expect(graphics.render).toHaveBeenCalledTimes(1)
   })
 
@@ -780,11 +807,24 @@ describe('the director drives the cast', () => {
   const FPS = 30
 
   /**
+   * Which frames of a trace had a study of this implementation live on them,
+   * read from the registry rather than by name, so a study added later is
+   * counted without anyone remembering to add it here.
+   */
+  const liveFrames = (trace: readonly string[], impl: ImplId): boolean[] => {
+    const ids = STUDIES.filter((study) => study.impl === impl).map((study) => study.id)
+    return trace.map((line) => ids.some((id) => new RegExp(`(^|, )${id} `).test(line)))
+  }
+
+  /**
    * A renderer of its own, the scripted song played through it a frame at a
    * time, and what was live on each of those frames. The module is reset so
    * the two plays a determinism test needs start from the same nothing.
    */
-  async function playThrough(preset: 'auto' | ReturnType<typeof castOrDefault>) {
+  async function playThrough(
+    preset: 'auto' | ReturnType<typeof castOrDefault>,
+    character?: Character,
+  ) {
     vi.resetModules()
     impls.reset()
     stack.reset = 0
@@ -796,7 +836,7 @@ describe('the director drives the cast', () => {
     const trace: string[] = []
     let now = 0
     let frames = 0
-    for (const frame of playSong(FPS)) {
+    for (const frame of playSong(FPS, character)) {
       audio.packet = frame.features
       now += 1000 / FPS
       draw(now)
@@ -814,14 +854,35 @@ describe('the director drives the cast', () => {
   // The two things the renderer review left for this card, over a whole
   // track rather than over one change: a glide must not empty the canvas,
   // and a fade between two studies of one solver must not build a second.
+  //
+  // The solver is no longer live for the whole song. Implode is a flow of
+  // another implementation entirely and wins this song's build outright, for
+  // long enough that the fluid's grace runs out and it is released, so what
+  // is held to here is the invariant rather than the count: one solver per
+  // stretch in which a fluid study is live, stepped once on each of those
+  // frames whichever of the two studies is fading into the other.
   it('never empties the canvas and never builds a second solver', async () => {
-    const song = await playThrough('auto')
+    // The hardstyle song, because it is the one that fades lazy fluid into
+    // turbulent fluid: two studies of one solver live at once, which is the
+    // case a second solver would be built for.
+    const song = await playThrough('auto', HARDSTYLE)
     expect(stack.reset).toBe(0)
-    expect(impls.built.fluid).toBe(1)
-    expect(impls.disposed.fluid).toBe(0)
-    // One step of the solver per frame, whatever is fading into what, and
-    // the song does put two flows on it at once.
-    expect(impls.updates.fluid).toBe(song.frames)
+    const stirring = liveFrames(song.trace, 'fluid')
+    const frames = stirring.filter(Boolean).length
+    const stretches = stirring.filter((on, at) => on && !stirring[at - 1]).length
+    expect(frames).toBeGreaterThan(0)
+    expect(stretches).toBeGreaterThan(0)
+    // Never more than one build per stretch; a stretch that starts again
+    // inside the grace takes the solver back rather than building one.
+    expect(impls.built.fluid).toBeLessThanOrEqual(stretches)
+    expect(impls.disposed.fluid).toBeLessThanOrEqual(impls.built.fluid ?? 0)
+    expect(impls.updates.fluid).toBe(frames)
+    // What takes its place through the build, which is the analytic flow.
+    // The two overlap while the change glides, so this is not the rest of
+    // the song; each is stepped on exactly the frames its studies are live.
+    expect(frames).toBeLessThan(song.frames)
+    expect(impls.updates.analytic).toBe(liveFrames(song.trace, 'analytic').filter(Boolean).length)
+    expect(impls.updates.analytic).toBeGreaterThan(0)
     expect(song.trace.some((line) => (line.match(/fluid/g) ?? []).length > 1)).toBe(true)
     expect(new Set(song.trace).size).toBeGreaterThan(1)
     song.renderer.dispose()
@@ -925,10 +986,211 @@ describe('the director drives the cast', () => {
 
     // Nothing is built without compute, nothing throws, and the fractal the
     // stand-in holds is what draws.
-    expect(impls.built).toEqual({ fluid: 0, dye: 0, fractal: 0, ribbon: 0 })
+    expect(impls.built).toEqual({ fluid: 0, analytic: 0, dye: 0, fractal: 0, ribbon: 0 })
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
     expect(element.dataset.cast).toContain('fractal-glints')
     fresh.dispose()
+  })
+
+  // The WebGL2 path has no flow at all and the analytic flow is not built
+  // there. This song's build is one the director wants it for, so playing the
+  // whole of it is what proves a cast naming it is skipped rather than thrown
+  // on; when that path grows a flow, this is the test that will catch it.
+  it('does not throw on the frames the song wants the analytic flow', async () => {
+    vi.resetModules()
+    impls.reset()
+    const fresh = (await import('./Renderer')).renderer
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    audio.attached = true
+    const failure = vi.fn()
+    fresh.setPreset('auto')
+    await expect(fresh.attach(element, canvas(), failure)).resolves.toBe('ok')
+    let now = 0
+    for (const frame of playSong(FPS)) {
+      audio.packet = frame.features
+      now += 1000 / FPS
+      draw(now)
+    }
+
+    expect(failure).not.toHaveBeenCalled()
+    expect(impls.built.analytic).toBe(0)
+    expect(impls.updates.analytic).toBeUndefined()
+    expect(graphics.render).toHaveBeenCalled()
+    fresh.dispose()
+  })
+})
+
+describe('the study bench', () => {
+  const live = (...ids: string[]): LiveCast => ({
+    studies: ids.map((id) => ({ id, presence: 1 })),
+    canvas: defaultCanvas(),
+    tension: 0,
+  })
+
+  // Prism is the pinned cast and holds the fractal; the bench's cast holds a
+  // ribbon and a lazy fluid and no fractal at all, so what is built says which
+  // of the two the renderer is drawing.
+  const start = async () => {
+    const { element, draw } = sizedCanvas(1280, 720)
+    renderer.setPreset(castOrDefault('prism'))
+    await renderer.attach(element, canvas(), vi.fn())
+    return { element, draw }
+  }
+
+  it('draws its own cast in place of the pinned one, and gives the picture back when cleared', async () => {
+    const { draw } = await start()
+    renderer.setBench({ live: live('lazy-fluid', 'ribbon', 'clean-glass') })
+    draw(1000)
+    expect(impls.drawn).toEqual(['ribbon'])
+    expect(impls.built.fractal).toBe(1)
+    expect(renderer.liveCast.studies.map((entry) => entry.id)).toEqual([
+      'lazy-fluid',
+      'ribbon',
+      'clean-glass',
+    ])
+    // What data-preset prints is still what the host pinned.
+    expect(renderer.presetId).toBe('prism')
+
+    impls.drawn = []
+    renderer.setBench(null)
+    draw(2000)
+    expect(impls.drawn).toEqual(['fractal'])
+  })
+
+  // What the director read in the bench was the sliders and not a song. Left
+  // standing it would choose for that character, fully settled, under Auto.
+  it('starts the director again when the bench is left', async () => {
+    const { draw } = await start()
+    audio.attached = true
+    const sliders = new Float32Array(PACKET_LENGTH)
+    renderer.setBench({
+      live: live('lazy-fluid', 'ribbon', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.energy] = 0.8
+        packet[F.hardness] = 1
+      },
+    })
+    audio.packet = sliders
+    let now = 0
+    for (let frame = 0; frame < 60 * 45; frame += 1) {
+      now += 1000 / 60
+      draw(now)
+    }
+
+    expect(renderer.settled).toBe(1)
+    expect(renderer.character.hardness).toBeGreaterThan(0.8)
+    renderer.setBench(null)
+    draw(now + 17)
+    expect(renderer.settled).toBe(0)
+    expect(renderer.character.hardness).toBeLessThan(0.6)
+  })
+
+  it('hands the frame hook the packet and the real dt before anything reads it', async () => {
+    const { draw } = await start()
+    const seen: { dt: number; time: number }[] = []
+    renderer.setBench({
+      live: live('lazy-fluid', 'ribbon', 'clean-glass'),
+      frame: (packet, dt) => {
+        seen.push({ dt, time: packet[F.time] ?? 0 })
+        packet[F.tension] = 0.7
+      },
+    })
+    draw(1000)
+    draw(1016)
+    expect(seen).toHaveLength(2)
+    expect(seen[0]?.dt).toBeCloseTo(0.1, 5)
+    expect(seen[1]?.dt).toBeCloseTo(0.016, 5)
+    // The renderer wrote its clock before the hook ran, so the hook sees it.
+    expect(seen[1]?.time).toBeGreaterThan(seen[0]?.time ?? 0)
+    // Every reader saw the row: the studies through the packet, the director
+    // through its moment weights.
+    expect(renderer.features[F.tension]).toBeCloseTo(0.7, 5)
+    // 0.7 is past what the row reads when a build is wholly there.
+    expect(renderer.moments.build).toBeCloseTo(1, 5)
+    const width = impls.seen.ribbon?.knobs['ribbon.width'] ?? 0
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.tension] = 0
+      },
+    })
+    draw(2000)
+    // Tension narrows the ribbon, so the same study with none is wider.
+    expect(impls.seen.ribbon?.knobs['ribbon.width']).toBeGreaterThan(width)
+  })
+
+  it('stops calling the hook once it is cleared', async () => {
+    const { draw } = await start()
+    const frame = vi.fn()
+    renderer.setBench({ live: live('lazy-fluid', 'ribbon', 'clean-glass'), frame })
+    draw(1000)
+    renderer.setBench(null)
+    draw(2000)
+    expect(frame).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads a presence moved in place, and does not step a study faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('lazy-fluid', 'ribbon', 'clean-glass')
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.seen.ribbon?.presence).toBe(1)
+    const stepped = impls.updates.ribbon ?? 0
+    const ribbon = cast.studies[1]
+    if (!ribbon) throw new Error('the ribbon is in the cast')
+    ribbon.presence = 0.4
+    draw(2000)
+    expect(impls.seen.ribbon?.presence).toBe(0.4)
+    ribbon.presence = 0
+    draw(3000)
+    draw(4000)
+    expect(impls.updates.ribbon).toBe(stepped + 1)
+  })
+
+  it('empties the canvas for a different cast and leaves it for the same one handed again', async () => {
+    const { draw } = await start()
+    const cast = live('lazy-fluid', 'ribbon', 'clean-glass')
+    renderer.setBench({ live: cast })
+    draw(1000)
+    const reset = stack.reset
+    renderer.setBench({ live: cast, frame: () => {} })
+    draw(2000)
+    expect(stack.reset).toBe(reset)
+    renderer.setBench({ live: live('lazy-fluid', 'dye-plumes', 'clean-glass') })
+    expect(stack.reset).toBeGreaterThan(reset)
+  })
+
+  it('feeds the ribbon the bench’s samples, and the analyser’s when it has none', async () => {
+    const { draw } = await start()
+    const samples = new Float32Array(8).fill(0.5)
+    renderer.setBench({ live: live('ribbon', 'clean-glass'), waveform: () => samples })
+    draw(1000)
+    expect(impls.waveform?.()).toBe(samples)
+    renderer.setBench({ live: renderer.liveCast, waveform: () => null })
+    // The mocked client has no waveform, which is what the ribbon then reads.
+    expect(impls.waveform?.()).toBeNull()
+  })
+
+  it('stands the fractal in on the WebGL2 path, which draws nothing else, rather than failing', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('lazy-fluid', 'ribbon', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    draw(1000)
+    // Nothing is built there, whichever implementations there are: counted
+    // rather than listed, so a new one does not break this by existing.
+    expect(Object.values(impls.built).reduce((sum, count) => sum + count, 0)).toBe(0)
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('does not change what a renderer with no bench draws', async () => {
+    const { draw } = await start()
+    draw(1000)
+    expect(impls.drawn).toEqual(['fractal'])
   })
 })

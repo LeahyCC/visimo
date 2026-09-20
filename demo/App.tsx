@@ -3,6 +3,12 @@
  * what it draws with, and a dropped file plays through the same `attachAudio`
  * path a host app uses, so what is tuned here is the real thing.
  *
+ * The panel has two modes. Presets is the picker and the cast's knobs; Bench
+ * solos a study, or a small cast, under sliders and a synthetic packet, and
+ * keeps its whole setup in the URL hash so a tuned one can be sent on. The
+ * bench is held here and not in its panel so the full view, which hides the
+ * panel, still shows what it is drawing.
+ *
  * The picker's first entry is Auto, which pins nothing and lets the director
  * choose from the song; the five below it pin a cast. The panel shows what
  * the director is doing either way, since it reads the song under a pinned
@@ -15,7 +21,12 @@ import { DEFAULT_FLUID_SIZE } from '../src/catalog'
 import { castOrDefault } from '../src/presets'
 import type { Character, PinnedCast } from '../src/presets'
 import VisualizerStage from '../src/Visualizer'
+import { BenchPanel } from './bench/BenchPanel'
+import { decodeBench, encodeBench, initialBench } from './bench/state'
+import type { BenchState } from './bench/state'
+import { useBench } from './bench/useBench'
 import { Controls } from './controls'
+import type { Mode } from './controls'
 
 const stage = {
   position: 'relative',
@@ -47,7 +58,53 @@ const elapsed = (seconds: number) =>
     .toString()
     .padStart(2, '0')}`
 
+/**
+ * Keep the bench in the address, a moment after the last change so a slider
+ * drag is one entry and not a hundred, and take the bench back out of it when
+ * the mode is left. `replaceState` and never a push: the back button should
+ * leave the page and not walk through every slider position.
+ */
+function useBenchHash(mode: Mode, bench: BenchState, onBench: (bench: BenchState) => void) {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        const { pathname, search, hash } = window.location
+        if (mode === 'presets' && decodeBench(hash) === null) return
+        const next = mode === 'bench' ? `#${encodeBench(bench)}` : ''
+        window.history.replaceState(null, '', `${pathname}${search}${next}`)
+      } catch {
+        // A sandboxed frame may refuse to touch the address. The bench still
+        // works; it just cannot be shared.
+      }
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [mode, bench])
+
+  // Someone pasting a bench link into the tab they already have open.
+  useEffect(() => {
+    const onHash = () => {
+      const next = decodeBench(window.location.hash)
+      if (next) onBench(next)
+    }
+
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [onBench])
+}
+
 export default function App() {
+  const [mode, setMode] = useState<Mode>(() =>
+    decodeBench(window.location.hash) ? 'bench' : 'presets',
+  )
+  const [bench, setBench] = useState<BenchState>(
+    () => decodeBench(window.location.hash) ?? initialBench(),
+  )
+  const session = useBench(bench, mode === 'bench')
+  const openBench = useCallback((next: BenchState) => {
+    setBench(next)
+    setMode('bench')
+  }, [])
+  useBenchHash(mode, bench, openBench)
   const [cast, setCast] = useState<PinnedCast | 'auto'>(() => castOrDefault('prism'))
   // What a host would write down against this track and hand back as
   // `startCharacter` the next time it played.
@@ -235,18 +292,30 @@ export default function App() {
           {audioError && <p role="status">{audioError}</p>}
         </div>
       </div>
-      {!expanded && (
-        <Controls
-          cast={cast}
-          onCast={setCast}
-          saved={saved}
-          fluidSize={fluidSize}
-          onFluidSize={setFluidSize}
-          hud={hud}
-          onHud={setHud}
-          webGpuAvailable={backend !== 'webgl2'}
-        />
-      )}
+      {!expanded &&
+        (mode === 'bench' ? (
+          <BenchPanel
+            state={bench}
+            onState={setBench}
+            session={session}
+            mode={mode}
+            onMode={setMode}
+            webGpuAvailable={backend !== 'webgl2'}
+          />
+        ) : (
+          <Controls
+            mode={mode}
+            onMode={setMode}
+            cast={cast}
+            onCast={setCast}
+            saved={saved}
+            fluidSize={fluidSize}
+            onFluidSize={setFluidSize}
+            hud={hud}
+            onHud={setHud}
+            webGpuAvailable={backend !== 'webgl2'}
+          />
+        ))}
     </>
   )
 }

@@ -16,11 +16,12 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { ANALYTIC_RANGES } from '../impls/analytic.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
 import { POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostKnob } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
-import type { KaleidoscopeKnob } from '../presets/knobs'
+import type { AnalyticKnob, KaleidoscopeKnob } from '../presets/knobs'
 import { KALEIDOSCOPE_RANGES } from '../scenes/kaleidoscope.params'
 import { CASTS } from './casts/index'
 import { IMPL_IDS, implKnobs, isImplId, isImplKnob } from './impls'
@@ -84,6 +85,8 @@ const isPostSafe = (knob: string): knob is PostKnob =>
 const isKaleidoscopeKnob = (knob: string): knob is KaleidoscopeKnob =>
   Object.prototype.hasOwnProperty.call(KALEIDOSCOPE_RANGES, knob)
 
+const isAnalyticKnob = (knob: string): knob is AnalyticKnob =>
+  Object.prototype.hasOwnProperty.call(ANALYTIC_RANGES, knob)
 const isStreaksKnob = (knob: string): knob is StreaksKnob =>
   Object.prototype.hasOwnProperty.call(STREAK_RANGES, knob)
 
@@ -91,13 +94,20 @@ const isStreaksKnob = (knob: string): knob is StreaksKnob =>
 const SIGNED = new Set(['colourDrift'])
 
 /**
- * The safe range for one knob of one implementation. The fractal's are the
- * scene's own, which it clamps to anyway; the post ones are the table above;
- * the fluid has no table, so the rule is the preset guard's, that nothing but
- * a signed knob may go negative.
+ * The safe range for one knob of one implementation. The fractal's and the
+ * analytic flow's are their own files' tables; the post ones are the table
+ * above; the fluid has no table, so the rule is the preset guard's, that
+ * nothing but a signed knob may go negative.
+ *
+ * The analytic flow needs a table of its own rather than the fluid's rule,
+ * because a pull and a push are one term at two signs: its `radial` is
+ * meant to go negative and the ceiling on it is what matters, since a
+ * velocity of a field width a second already carries the whole picture off
+ * the edge in about one.
  */
 function safeRange(impl: ImplId, knob: string): readonly [number, number] | undefined {
   if (impl === 'fractal' && isKaleidoscopeKnob(knob)) return KALEIDOSCOPE_RANGES[knob]
+  if (impl === 'analytic' && isAnalyticKnob(knob)) return ANALYTIC_RANGES[knob]
   if (impl === 'streaks' && isStreaksKnob(knob)) return STREAK_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
@@ -147,6 +157,16 @@ const ALLOWED: Record<string, Record<string, string>> = {
     eventLife: 'how long one hit lasts, so that a hit reads as a hit at any level',
     eventForce: 'what one hit is worth over its life; the hit’s own strength is the drive',
     eventRadius: 'the size of one hit before its band and its width scale it',
+  },
+  'implode': {
+    falloff:
+      'a plain zoom about the middle: the shape of the pull is what makes it read as gathering',
+    swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
+    twist: 'the same, and a twist that varies with radius is the polar twist study',
+  },
+  'radial-burst': {
+    swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
+    twist: 'the same, and a twist that varies with radius is the polar twist study',
   },
   'dye-plumes': {
     hitDye: 'which sound fires it differs by cast, the low end in Plume and the treble in Wash',

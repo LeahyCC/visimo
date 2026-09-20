@@ -613,8 +613,9 @@ const MOMENT_TEMPO_TRUSTED = 0.4
 const IMPACT_ON = 0.35
 const IMPACT_OFF = 0.12
 // The same fall as `beatPulse`, so a scene that reads impact reads it the way
-// it reads a hit.
-const IMPACT_DECAY_SECONDS = 0.18
+// it reads a hit. Exported so the demo's bench fires one by hand with the
+// same fall, and does not keep a second copy that drifts.
+export const IMPACT_DECAY_SECONDS = 0.18
 // Rest. This far under the loudest the track has lately been, in dB, is the
 // floor beginning to go, and this far is gone.
 const REST_QUIET_LOW_DB = 2

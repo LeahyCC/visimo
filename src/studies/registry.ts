@@ -112,6 +112,77 @@ const TURBULENT_FLUID: FlowStudy = {
 }
 
 /**
+ * Everything drawn to the middle, as a build winds up. The pull IS the
+ * tension: at 0 the radial coefficient is a hundredth of a field width a
+ * second, which shrinks the picture by under two percent over a whole second
+ * and reads as nothing, and at 1 it is half a field width and the frame is
+ * gathered firmly into its own centre. Its tension row is the study; the
+ * `energy` row beside it only lets a loud build pull a little harder than a
+ * quiet one.
+ *
+ * `falloff` stays at 0, which makes the pull grow with the radius: a plain
+ * zoom about the middle, everything converging at one rate. A pull that was
+ * strongest near the centre would read as a hole in the picture rather than
+ * as the picture gathering, which is the opposite of what a build wants.
+ *
+ * Its home is the middle of the character space with the widest reach there
+ * is, because the catalogue gives it no character at all: any song that winds
+ * up can implode.
+ */
+const IMPLODE: FlowStudy = {
+  id: 'implode',
+  kind: 'flow',
+  name: 'Implode',
+  impl: 'analytic',
+  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.5 },
+  reach: 1,
+  moments: { intro: 0, groove: 0, build: 1, drop: 0, rest: 0, outro: 0 },
+  knobs: { radial: -0.01, falloff: 0, swirl: 0, twist: 0 },
+  mapping: [
+    { from: 'tension', to: 'radial', gain: -0.4, curve: 'linear' },
+    { from: 'energy', to: 'radial', gain: -0.08, curve: 'linear' },
+  ],
+  cost: 'cheap',
+}
+
+/**
+ * The drop, thrown outward from the middle. It fires on `impact`, which is 1
+ * on the frame the payoff lands and is down to a third of that within a fifth
+ * of a second, so the push is a punch and not a level; `release` carries a
+ * quarter of it for the phrase that follows, so the payoff keeps opening long
+ * after the hit itself is gone.
+ *
+ * `falloff` is what makes it read as a burst rather than as a zoom out. At
+ * rest it is 2, which puts the fastest ring halfway to the corner; `impact`
+ * takes it to 4 on the frame of the drop, which pulls that ring in to a
+ * quarter of the way out and leaves the rim standing. As the hit decays the
+ * ring travels back outward, so the push sweeps out of the middle.
+ *
+ * It has no real use for tension, and the one row it has says so honestly
+ * rather than inventing a job: the slow outward drift it carries at rest is
+ * taken away exactly as tension reaches 1, so through a build the frame is
+ * held still and nothing is opening when the drop arrives. The catalogue's
+ * entry is "none; fires on impact", and that is what this is.
+ */
+const RADIAL_BURST: FlowStudy = {
+  id: 'radial-burst',
+  kind: 'flow',
+  name: 'Radial burst',
+  impl: 'analytic',
+  home: { drive: 0.75, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.85 },
+  reach: 0.55,
+  moments: { intro: 0, groove: 0, build: 0, drop: 1, rest: 0, outro: 0 },
+  knobs: { radial: 0.05, falloff: 2, swirl: 0, twist: 0 },
+  mapping: [
+    { from: 'impact', to: 'radial', gain: 1.1, curve: 'linear' },
+    { from: 'release', to: 'radial', gain: 0.3, curve: 'linear' },
+    { from: 'tension', to: 'radial', gain: -0.05, curve: 'linear' },
+    { from: 'impact', to: 'falloff', gain: 2, curve: 'linear' },
+  ],
+  cost: 'cheap',
+}
+
+/**
  * The fluid's dye, one emitter per band. It has nothing to draw into unless a
  * fluid flow is stirring the field, hence `requires`, and it covers most of
  * the frame, so it does not share a cast with the fractal. Tension thins the
@@ -394,6 +465,8 @@ const HARD_CLEAN: LookStudy = {
 export const STUDIES: readonly Study[] = [
   LAZY_FLUID,
   TURBULENT_FLUID,
+  IMPLODE,
+  RADIAL_BURST,
   DYE_PLUMES,
   RIBBON,
   FRACTAL_GLINTS,

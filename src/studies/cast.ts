@@ -110,13 +110,54 @@ const defaultCanvasKnobs = (): Record<CanvasKnob, number> => ({
 /**
  * The canvas a cast draws on when nothing says otherwise: the post stack's
  * own feedback numbers, switched on and undriven. A cast file that leaves
- * `canvas` out gets this, and so does every cast the director builds, which
- * has no file to read numbers from.
+ * `canvas` out gets this. A cast the director builds does not: see
+ * `carriedCanvas`.
  */
 export const defaultCanvas = (): CastCanvas => ({
   enabled: true,
   knobs: defaultCanvasKnobs(),
   mapping: [],
+})
+
+/**
+ * The canvas a chosen cast draws on, which has no file to read numbers from:
+ * the one persistent picture of docs/canvas-plan.md. It keeps nearly all of
+ * itself, reads the last frame back along whatever flow is live, and holds a
+ * floor and a ceiling so long trails neither haze nor burn.
+ *
+ * It used to be `defaultCanvas`, whose carry is 0, and under the director no
+ * flow moved the picture at all: the fluid showed only through its dye, and
+ * a flow that draws nothing, as implode and radial burst do, did nothing.
+ *
+ * The numbers are Drift's, which were tuned by eye on real tracks for a dye
+ * ink and the ribbon, the cast the director reaches for most. One row is
+ * added: tension shortens the trails, so a build tightens the picture as
+ * well as whatever its studies do, and the drop opens it again.
+ */
+export const carriedCanvas = (): CastCanvas => ({
+  enabled: true,
+  knobs: {
+    'feedback.amount': 1,
+    'feedback.decay': 0.93,
+    'feedback.zoom': 1.0015,
+    'feedback.rotate': 0,
+    'feedback.carry': 1,
+    'feedback.floor': 0.018,
+    'feedback.ceiling': 1.8,
+  },
+  mapping: [
+    { from: 'energy', to: 'feedback.decay', gain: 0.02, curve: 'linear' },
+    { from: 'swell', to: 'feedback.decay', gain: 0.02, curve: 'linear' },
+    { from: 'tension', to: 'feedback.decay', gain: -0.04, curve: 'linear' },
+    { from: 'beatPhase', to: 'feedback.zoom', gain: 0.003, curve: 'invert' },
+    { from: 'harmonicChange', to: 'feedback.rotate', gain: 0.0015, curve: 'linear' },
+    { from: 'energy', to: 'feedback.carry', gain: 0.4, curve: 'linear' },
+    { from: 'energy', to: 'feedback.floor', gain: 0.001, curve: 'linear' },
+    { from: 'swell', to: 'feedback.floor', gain: 0.001, curve: 'linear' },
+    { from: 'energy', to: 'feedback.ceiling', gain: -0.25, curve: 'square' },
+    { from: 'swell', to: 'feedback.ceiling', gain: -0.15, curve: 'square' },
+    { from: 'hardness', to: 'feedback.ceiling', gain: -0.15, curve: 'square' },
+  ],
 })
 
 function readField(value: unknown, source: string, path: string): StudyField {

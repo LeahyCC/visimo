@@ -22,10 +22,12 @@ import { playSong, SONG_SECONDS } from '../director/song.fixture'
 import { POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
+import { defaultCanvas } from '../studies/cast'
 import { castOrDefault } from '../studies/casts/index'
 import frames from '../studies/casts/preset-frames.json'
 import type { ImplId } from '../studies/impls'
 import { STUDIES } from '../studies/registry'
+import type { LiveCast } from '../studies/resolve'
 import type { Gpu } from './Device'
 
 type PresetFrame = {
@@ -62,6 +64,8 @@ const impls = vi.hoisted(() => ({
   /** How many times each was stepped, so a second solver would double it. */
   updates: {} as Record<string, number>,
   drawn: [] as string[],
+  /** What the ribbon was told to read its samples from. */
+  waveform: null as (() => Float32Array | null) | null,
   resized: [] as [number, number][],
   size: 0,
   maxFps: undefined as number | undefined,
@@ -72,6 +76,7 @@ const impls = vi.hoisted(() => ({
     impls.seen = {}
     impls.updates = {}
     impls.drawn = []
+    impls.waveform = null
     impls.resized = []
   },
 }))
@@ -188,8 +193,9 @@ vi.mock('../scenes/Kaleidoscope', () => ({
 vi.mock('../impls/RibbonInk', () => ({
   RibbonInk: class {
     readonly detail = ''
-    constructor() {
+    constructor(_post: unknown, waveform: () => Float32Array | null) {
       impls.built.ribbon = (impls.built.ribbon ?? 0) + 1
+      impls.waveform = waveform
     }
     init() {}
     resize() {}
@@ -912,5 +918,175 @@ describe('the director drives the cast', () => {
     expect(impls.updates.analytic).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     fresh.dispose()
+  })
+})
+
+describe('the study bench', () => {
+  const live = (...ids: string[]): LiveCast => ({
+    studies: ids.map((id) => ({ id, presence: 1 })),
+    canvas: defaultCanvas(),
+    tension: 0,
+  })
+
+  // Prism is the pinned cast and holds the fractal; the bench's cast holds a
+  // ribbon and a lazy fluid and no fractal at all, so what is built says which
+  // of the two the renderer is drawing.
+  const start = async () => {
+    const { element, draw } = sizedCanvas(1280, 720)
+    renderer.setPreset(castOrDefault('prism'))
+    await renderer.attach(element, canvas(), vi.fn())
+    return { element, draw }
+  }
+
+  it('draws its own cast in place of the pinned one, and gives the picture back when cleared', async () => {
+    const { draw } = await start()
+    renderer.setBench({ live: live('lazy-fluid', 'ribbon', 'clean-glass') })
+    draw(1000)
+    expect(impls.drawn).toEqual(['ribbon'])
+    expect(impls.built.fractal).toBe(1)
+    expect(renderer.liveCast.studies.map((entry) => entry.id)).toEqual([
+      'lazy-fluid',
+      'ribbon',
+      'clean-glass',
+    ])
+    // What data-preset prints is still what the host pinned.
+    expect(renderer.presetId).toBe('prism')
+
+    impls.drawn = []
+    renderer.setBench(null)
+    draw(2000)
+    expect(impls.drawn).toEqual(['fractal'])
+  })
+
+  // What the director read in the bench was the sliders and not a song. Left
+  // standing it would choose for that character, fully settled, under Auto.
+  it('starts the director again when the bench is left', async () => {
+    const { draw } = await start()
+    audio.attached = true
+    const sliders = new Float32Array(PACKET_LENGTH)
+    renderer.setBench({
+      live: live('lazy-fluid', 'ribbon', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.energy] = 0.8
+        packet[F.hardness] = 1
+      },
+    })
+    audio.packet = sliders
+    let now = 0
+    for (let frame = 0; frame < 60 * 45; frame += 1) {
+      now += 1000 / 60
+      draw(now)
+    }
+
+    expect(renderer.settled).toBe(1)
+    expect(renderer.character.hardness).toBeGreaterThan(0.8)
+    renderer.setBench(null)
+    draw(now + 17)
+    expect(renderer.settled).toBe(0)
+    expect(renderer.character.hardness).toBeLessThan(0.6)
+  })
+
+  it('hands the frame hook the packet and the real dt before anything reads it', async () => {
+    const { draw } = await start()
+    const seen: { dt: number; time: number }[] = []
+    renderer.setBench({
+      live: live('lazy-fluid', 'ribbon', 'clean-glass'),
+      frame: (packet, dt) => {
+        seen.push({ dt, time: packet[F.time] ?? 0 })
+        packet[F.tension] = 0.7
+      },
+    })
+    draw(1000)
+    draw(1016)
+    expect(seen).toHaveLength(2)
+    expect(seen[0]?.dt).toBeCloseTo(0.1, 5)
+    expect(seen[1]?.dt).toBeCloseTo(0.016, 5)
+    // The renderer wrote its clock before the hook ran, so the hook sees it.
+    expect(seen[1]?.time).toBeGreaterThan(seen[0]?.time ?? 0)
+    // Every reader saw the row: the studies through the packet, the director
+    // through its moment weights.
+    expect(renderer.features[F.tension]).toBeCloseTo(0.7, 5)
+    expect(renderer.moments.build).toBeCloseTo(0.7, 5)
+    const width = impls.seen.ribbon?.knobs['ribbon.width'] ?? 0
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.tension] = 0
+      },
+    })
+    draw(2000)
+    // Tension narrows the ribbon, so the same study with none is wider.
+    expect(impls.seen.ribbon?.knobs['ribbon.width']).toBeGreaterThan(width)
+  })
+
+  it('stops calling the hook once it is cleared', async () => {
+    const { draw } = await start()
+    const frame = vi.fn()
+    renderer.setBench({ live: live('lazy-fluid', 'ribbon', 'clean-glass'), frame })
+    draw(1000)
+    renderer.setBench(null)
+    draw(2000)
+    expect(frame).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads a presence moved in place, and does not step a study faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('lazy-fluid', 'ribbon', 'clean-glass')
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.seen.ribbon?.presence).toBe(1)
+    const stepped = impls.updates.ribbon ?? 0
+    const ribbon = cast.studies[1]
+    if (!ribbon) throw new Error('the ribbon is in the cast')
+    ribbon.presence = 0.4
+    draw(2000)
+    expect(impls.seen.ribbon?.presence).toBe(0.4)
+    ribbon.presence = 0
+    draw(3000)
+    draw(4000)
+    expect(impls.updates.ribbon).toBe(stepped + 1)
+  })
+
+  it('empties the canvas for a different cast and leaves it for the same one handed again', async () => {
+    const { draw } = await start()
+    const cast = live('lazy-fluid', 'ribbon', 'clean-glass')
+    renderer.setBench({ live: cast })
+    draw(1000)
+    const reset = stack.reset
+    renderer.setBench({ live: cast, frame: () => {} })
+    draw(2000)
+    expect(stack.reset).toBe(reset)
+    renderer.setBench({ live: live('lazy-fluid', 'dye-plumes', 'clean-glass') })
+    expect(stack.reset).toBeGreaterThan(reset)
+  })
+
+  it('feeds the ribbon the bench’s samples, and the analyser’s when it has none', async () => {
+    const { draw } = await start()
+    const samples = new Float32Array(8).fill(0.5)
+    renderer.setBench({ live: live('ribbon', 'clean-glass'), waveform: () => samples })
+    draw(1000)
+    expect(impls.waveform?.()).toBe(samples)
+    renderer.setBench({ live: renderer.liveCast, waveform: () => null })
+    // The mocked client has no waveform, which is what the ribbon then reads.
+    expect(impls.waveform?.()).toBeNull()
+  })
+
+  it('stands the fractal in on the WebGL2 path, which draws nothing else, rather than failing', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('lazy-fluid', 'ribbon', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    draw(1000)
+    expect(impls.built).toEqual({ fluid: 0, dye: 0, fractal: 0, ribbon: 0 })
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('does not change what a renderer with no bench draws', async () => {
+    const { draw } = await start()
+    draw(1000)
+    expect(impls.drawn).toEqual(['fractal'])
   })
 })

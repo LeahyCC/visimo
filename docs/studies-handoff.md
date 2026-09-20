@@ -278,6 +278,7 @@ This run used Colin's Kungfu Kanban board at `http://localhost:4747`. Load the `
 - The demo's default track is git-ignored. A copy lives at `C:\Users\cclea\.codex\worktrees\3ba7\visimo\demo\public\audio\Ecstasy Of Soul.flac`; copy it into `demo/public/audio/` of whichever checkout you serve. Drops are near 1:35.
 - **The analyser hears the element after its volume control.** Setting the volume near zero to keep the room quiet silences the features and Prism goes black, which looks like a bug and is not. Use about 0.05 to 0.1.
 - `window.visimo.setPost({...})` in the dev build changes post numbers live. It is how Melt was tuned.
+- The demo's **Bench** mode (the switch at the top of the right panel) is the study bench from step 3: solo a study, drive the packet from sliders or a synthetic beat, watch the knobs resolve, read the frame time. Judge every new study there at a quiet passage, a build and a drop before it goes on a real track. README, "The study bench".
 - `data-scene`, `data-detail`, `data-post` and `data-preset` on the canvas are public API that Musimo's tests assert on. Extend them; do not change what they print for existing presets.
 
 ## Repo rules that bit or nearly did

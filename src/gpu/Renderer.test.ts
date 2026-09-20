@@ -18,7 +18,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { playSong, SONG_SECONDS } from '../director/song.fixture'
+import { HARDSTYLE, playSong, SONG_SECONDS } from '../director/song.fixture'
 import { POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
@@ -28,6 +28,7 @@ import frames from '../studies/casts/preset-frames.json'
 import type { ImplId } from '../studies/impls'
 import { STUDIES } from '../studies/registry'
 import type { LiveCast } from '../studies/resolve'
+import type { Character } from '../studies/types'
 import type { Gpu } from './Device'
 
 type PresetFrame = {
@@ -726,7 +727,10 @@ describe('the director drives the cast', () => {
    * time, and what was live on each of those frames. The module is reset so
    * the two plays a determinism test needs start from the same nothing.
    */
-  async function playThrough(preset: 'auto' | ReturnType<typeof castOrDefault>) {
+  async function playThrough(
+    preset: 'auto' | ReturnType<typeof castOrDefault>,
+    character?: Character,
+  ) {
     vi.resetModules()
     impls.reset()
     stack.reset = 0
@@ -738,7 +742,7 @@ describe('the director drives the cast', () => {
     const trace: string[] = []
     let now = 0
     let frames = 0
-    for (const frame of playSong(FPS)) {
+    for (const frame of playSong(FPS, character)) {
       audio.packet = frame.features
       now += 1000 / FPS
       draw(now)
@@ -764,7 +768,10 @@ describe('the director drives the cast', () => {
   // stretch in which a fluid study is live, stepped once on each of those
   // frames whichever of the two studies is fading into the other.
   it('never empties the canvas and never builds a second solver', async () => {
-    const song = await playThrough('auto')
+    // The hardstyle song, because it is the one that fades lazy fluid into
+    // turbulent fluid: two studies of one solver live at once, which is the
+    // case a second solver would be built for.
+    const song = await playThrough('auto', HARDSTYLE)
     expect(stack.reset).toBe(0)
     const stirring = liveFrames(song.trace, 'fluid')
     const frames = stirring.filter(Boolean).length
@@ -1006,7 +1013,8 @@ describe('the study bench', () => {
     // Every reader saw the row: the studies through the packet, the director
     // through its moment weights.
     expect(renderer.features[F.tension]).toBeCloseTo(0.7, 5)
-    expect(renderer.moments.build).toBeCloseTo(0.7, 5)
+    // 0.7 is past what the row reads when a build is wholly there.
+    expect(renderer.moments.build).toBeCloseTo(1, 5)
     const width = impls.seen.ribbon?.knobs['ribbon.width'] ?? 0
     renderer.setBench({
       live: renderer.liveCast,

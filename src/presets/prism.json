@@ -33,6 +33,18 @@
     { "from": "swell", "to": "depth", "gain": 0.15 },
     { "from": "harmonicChange", "to": "warp", "gain": 0.2 },
     { "from": "keyHue", "to": "colourShift", "gain": 1 },
-    { "from": "energy", "to": "intensity", "gain": 0.1 }
+    { "from": "energy", "to": "rotationSpeed", "gain": 0.02 },
+    { "from": "weight", "to": "thickness", "gain": 0.08 },
+    { "from": "beatPulse", "to": "bloom.intensity", "gain": 0.06 },
+    { "from": "treble", "to": "bloom.threshold", "gain": -0.08 },
+    { "from": "energy", "to": "tonemap.exposure", "gain": -0.04, "curve": "square" },
+    { "from": "swell", "to": "tonemap.exposure", "gain": -0.05, "curve": "square" },
+    { "from": "hardness", "to": "tonemap.exposure", "gain": -0.05, "curve": "square" },
+    { "from": "energy", "to": "intensity", "gain": -0.08, "curve": "square" },
+    { "from": "swell", "to": "intensity", "gain": -0.05, "curve": "square" },
+    { "from": "hardness", "to": "intensity", "gain": -0.06, "curve": "square" },
+    { "from": "energy", "to": "saturation", "gain": -0.08, "curve": "square" },
+    { "from": "swell", "to": "saturation", "gain": -0.06, "curve": "square" },
+    { "from": "hardness", "to": "saturation", "gain": -0.08, "curve": "square" }
   ]
 }

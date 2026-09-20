@@ -27,11 +27,11 @@
     "eventRadius": 0.014
   },
   "postParams": {
-    "feedback": { "amount": 0.3, "decay": 0.7, "zoom": 1.004, "rotate": 0.0006 },
+    "feedback": { "amount": 0.3, "decay": 0.68, "zoom": 1.00275, "rotate": 0.0006 },
     "bloom": { "threshold": 0.9, "intensity": 0.28 },
-    "chromatic": { "amount": 0.0004, "beat": 0.0015 },
+    "chromatic": { "amount": 0.0001, "beat": 0.0015 },
     "tonemap": { "shoulder": 0.55 },
-    "grain": { "amount": 0.012 }
+    "grain": { "amount": 0.008 }
   },
   "audioMapping": [
     { "from": "treble", "to": "hitForce", "gain": 1.4 },
@@ -42,10 +42,26 @@
     { "from": "energy", "to": "velocityDecay", "gain": 0.14 },
     { "from": "energy", "to": "dyeDecay", "gain": 0.3 },
     { "from": "energy", "to": "spread", "gain": 0.16 },
-    { "from": "beatPulse", "to": "intensity", "gain": 0.8 },
+    { "from": "beatPulse", "to": "intensity", "gain": 0.6 },
     { "from": "lowEnd", "to": "colourShift", "gain": 0.25, "curve": "square" },
     { "from": "beatPulse", "to": "bloom.intensity", "gain": 0.2 },
     { "from": "keyHue", "to": "colourShift", "gain": 1 },
-    { "from": "energy", "to": "dye", "gain": 3 }
+    { "from": "energy", "to": "dye", "gain": 3 },
+    { "from": "swell", "to": "feedback.decay", "gain": 0.04 },
+    { "from": "beatPhase", "to": "feedback.zoom", "gain": 0.0025, "curve": "invert" },
+    { "from": "harmonicChange", "to": "feedback.rotate", "gain": 0.001 },
+    { "from": "energy", "to": "feedback.carry", "gain": 0.4 },
+    { "from": "treble", "to": "bloom.threshold", "gain": -0.1 },
+    { "from": "hardness", "to": "chromatic.amount", "gain": 0.0006 },
+    { "from": "hardness", "to": "grain.amount", "gain": 0.008, "curve": "invert" },
+    { "from": "energy", "to": "tonemap.exposure", "gain": -0.04, "curve": "square" },
+    { "from": "swell", "to": "tonemap.exposure", "gain": -0.05, "curve": "square" },
+    { "from": "hardness", "to": "tonemap.exposure", "gain": -0.05, "curve": "square" },
+    { "from": "energy", "to": "intensity", "gain": -0.26, "curve": "square" },
+    { "from": "swell", "to": "intensity", "gain": -0.18, "curve": "square" },
+    { "from": "hardness", "to": "intensity", "gain": -0.18, "curve": "square" },
+    { "from": "energy", "to": "saturation", "gain": -0.1, "curve": "square" },
+    { "from": "swell", "to": "saturation", "gain": -0.08, "curve": "square" },
+    { "from": "hardness", "to": "saturation", "gain": -0.08, "curve": "square" }
   ]
 }

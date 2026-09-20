@@ -16,10 +16,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { SHARD_RANGES } from '../impls/shards.params'
 import { POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostKnob } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
-import type { KaleidoscopeKnob } from '../presets/knobs'
+import type { KaleidoscopeKnob, ShardKnob } from '../presets/knobs'
 import { KALEIDOSCOPE_RANGES } from '../scenes/kaleidoscope.params'
 import { CASTS } from './casts/index'
 import { IMPL_IDS, implKnobs, isImplId, isImplKnob } from './impls'
@@ -83,17 +84,21 @@ const isPostSafe = (knob: string): knob is PostKnob =>
 const isKaleidoscopeKnob = (knob: string): knob is KaleidoscopeKnob =>
   Object.prototype.hasOwnProperty.call(KALEIDOSCOPE_RANGES, knob)
 
+const isShardKnob = (knob: string): knob is ShardKnob =>
+  Object.prototype.hasOwnProperty.call(SHARD_RANGES, knob)
+
 /** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
 const SIGNED = new Set(['colourDrift'])
 
 /**
  * The safe range for one knob of one implementation. The fractal's are the
- * scene's own, which it clamps to anyway; the post ones are the table above;
- * the fluid has no table, so the rule is the preset guard's, that nothing but
- * a signed knob may go negative.
+ * scene's own, which it clamps to anyway, and so are the shards'; the post
+ * ones are the table above; the fluid has no table, so the rule is the preset
+ * guard's, that nothing but a signed knob may go negative.
  */
 function safeRange(impl: ImplId, knob: string): readonly [number, number] | undefined {
   if (impl === 'fractal' && isKaleidoscopeKnob(knob)) return KALEIDOSCOPE_RANGES[knob]
+  if (impl === 'shards' && isShardKnob(knob)) return SHARD_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
 }

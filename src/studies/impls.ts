@@ -14,11 +14,11 @@
  */
 import { POST_KNOBS } from '../post/params'
 import type { PostKnob, PostStage } from '../post/params'
-import { KALEIDOSCOPE_KNOBS } from '../presets/knobs'
-import type { FluidKnob, KaleidoscopeKnob } from '../presets/knobs'
+import { KALEIDOSCOPE_KNOBS, SHARD_KNOBS } from '../presets/knobs'
+import type { FluidKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs'
 import type { SceneId } from '../scenes/catalog'
 
-export const IMPL_IDS = ['fluid', 'dye', 'fractal', 'ribbon', 'look'] as const
+export const IMPL_IDS = ['fluid', 'dye', 'fractal', 'ribbon', 'shards', 'look'] as const
 export type ImplId = (typeof IMPL_IDS)[number]
 
 /**
@@ -134,7 +134,7 @@ export const COUNT_KNOBS = ['emitters', 'events'] as const satisfies readonly Fl
 export const isCountKnob = (knob: string): boolean =>
   (COUNT_KNOBS as readonly string[]).includes(knob)
 
-export type ImplKnob = FluidKnob | KaleidoscopeKnob | PostKnob
+export type ImplKnob = FluidKnob | KaleidoscopeKnob | ShardKnob | PostKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -142,6 +142,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   dye: FLUID_DYE_KNOBS,
   fractal: KALEIDOSCOPE_KNOBS,
   ribbon: RIBBON_KNOBS,
+  shards: SHARD_KNOBS,
   look: LOOK_KNOBS,
 }
 

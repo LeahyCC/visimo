@@ -16,7 +16,7 @@ Batch 1 of the canvas plan is merged. Two cards may still be open when you start
 | Emitters kept off the walls                      | merged, PR 11                 |
 | Fluid as a flow under Kaleidoscope, Melt         | merged, PR 12                 |
 | Waveform ribbon, line and circle, auto-levelled  | merged, PR 13                 |
-| Every post stage moves with the music (card F)   | running when this was written |
+| Every post stage moves with the music (card F)   | merged, PR 15                 |
 | `pace` reads the same at any frame rate (card G) | running when this was written |
 
 Colin has watched Drift and Melt on real tracks. His words: it looks great, a bit oversaturated on intense songs, and it needs a bunch of studies rolling in and out. The oversaturation note is inside card F. The rest is this document.
@@ -139,6 +139,12 @@ Things to get right:
 - **Determinism.** Same song, same picture. Seed any choice from the section id and the track's character, not from `Math.random`.
 - **The first thirty seconds.** Character needs 10 to 30 s to settle, so open on a neutral cast and drift. Add an optional host prop for a starting character (a genre tag, or the values saved from the last play of this track).
 - **Variety without randomness.** With a big library, several studies will score close. Rotate among the top few by section rank, so the second verse is a cousin of the first and not a copy, while a returning section still recalls its own cast.
+
+## Known problem to fix first: Melt washes out on a drop
+
+Card F added the easing on loud passages that Colin asked for, and it helps, but Melt still fills the frame with flat colour on a drop. Preset numbers cannot fix it. The cause is that the Kaleidoscope scene is a full-frame image: on a loud passage every band is lit, the fractal covers nearly every pixel, and the canvas sums it. Floor and ceiling only trim the result.
+
+The fix belongs in the ink, which is why "fractal glints" is listed below as bright parts only. When Prism is ported to a study, give it an ink threshold of its own: only light above a level enters the canvas, the level rises with `energy`, and the rest is dropped before the feedback pass ever sees it. The same rule holds for every ink: state its worst-case coverage of the frame and keep it sparse.
 
 ## The catalogue
 

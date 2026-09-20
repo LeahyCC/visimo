@@ -27,7 +27,7 @@
  *   21     tempoBpm        bpm       0 until the tempo tracker settles on a period
  *   22     time            s         seconds of features so far
  *   23     dt              s         this frame's step
- *   24     pace            0..1      onsets a second, decayed over half a minute
+ *   24     pace            0..1      audible hits a second, decayed over half a minute
  *   25     swell           0..1      loudness now against the last half minute, in dB; 0.5 is steady
  *   26     weight          0..1      where the spectral centroid sits over ten seconds; 1 is bass-led
  *   27     tempo           0..1      `tempoBpm` across 60 to 200, smoothed so it ramps
@@ -328,10 +328,16 @@ const FLUX_COMPRESSION = 1000
 // over ten seconds; the tempo ramp over five, which is only there to stop the
 // guess stepping.
 const PACE_SECONDS = 30
-// Onsets a second, in any band, that counts as fully busy. A pad with a pulse
-// runs about 2, a full kit with hats about 6 and drum and bass past 12, so
-// this puts most tracks across the useful middle.
-const PACE_FULL = 12
+// Audible hits a second, in any band, that counts as fully busy. A hit is one
+// struck sound however many bands it trips, so this is a rate of sounds and
+// not of detector firings: four to the floor at 128 BPM settles at 2.1 and a
+// two-step at 174 at 2.9, since a hat under a kick or a pad is worth little.
+// Full is 4 a second, which puts 80 BPM near a third, 128 near a half and
+// drum and bass near three quarters. It was 12 while the count ran two or
+// three times the true rate, and left at 12 every track would sit in the
+// bottom quarter of the range with nothing to tell them apart. Not yet
+// re-measured on real tracks.
+const PACE_FULL = 4
 const SWELL_SHORT_MS = 2000
 const SWELL_LONG_MS = 30000
 // A passage this many dB above its half-minute average reads as a full drop,
@@ -1190,12 +1196,20 @@ export class Hardness {
   private elapsed = 0
   private spread = 0
   private open = false
+  /**
+   * How audible the hit whose window closed on the last step was, 0 to 1, and
+   * 0 on every other step. `pace` counts hits from here, so that a hit is one
+   * hit however many bands it tripped and however many frames they were
+   * spread over.
+   */
+  settled = 0
 
   /**
    * `loudness` is the raw RMS across the span, the same one `swell` reads,
    * and `spread` is how much of the spectrum this frame's power covers.
    */
   step(hit: boolean, loudness: number, spread: number, dt: number): number {
+    this.settled = 0
     // Nothing in the frame and no hit being measured: the mean is left
     // exactly where the last sound put it.
     if (loudness <= 0 && !hit && !this.open) return this.value()
@@ -1256,7 +1270,10 @@ export class Hardness {
   /** Score the hit whose window has just ended, and fold it into the mean. */
   private close() {
     this.open = false
-    if (this.frames < HARDNESS_MIN_FRAMES || this.peak <= 0 || this.peakRise <= 0) return
+    if (this.peak <= 0 || this.peakRise <= 0) return
+    const presence = clamp01((this.peakRise / this.peak - LIFT_BURIED) / (LIFT_CLEAR - LIFT_BURIED))
+    this.settled = presence
+    if (this.frames < HARDNESS_MIN_FRAMES) return
     // Weighted by time and not by frame, so the window reads the same at any
     // frame rate.
     let held = 0
@@ -1272,7 +1289,6 @@ export class Hardness {
     const spread = clamp01(
       Math.log(Math.max(this.spread, 1e-9) / SPREAD_TONAL) / Math.log(SPREAD_BROAD / SPREAD_TONAL),
     )
-    const presence = clamp01((this.peakRise / this.peak - LIFT_BURIED) / (LIFT_CLEAR - LIFT_BURIED))
     // A geometric mean rather than an average: a hit has to both hold and
     // fill the spectrum to be a hard one, and either alone is a hat or a
     // swell. The hit still counts as evidence whatever it scores, so a track
@@ -1284,7 +1300,7 @@ export class Hardness {
 
 /** What kind of track this is, and where in it we are. */
 export type Character = {
-  /** Onsets a second, decayed over half a minute and scaled. */
+  /** Audible hits a second, decayed over half a minute and scaled. */
   pace: number
   /** Loudness now against loudness over half a minute, in dB. 0.5 is steady. */
   swell: number
@@ -1352,9 +1368,30 @@ export class Song {
   step(frame: Frame, dt: number): Character {
     const { onset, loudness, brightness, bpm, spread } = frame
     this.elapsed += dt
+
+    // Hardness reads the raw RMS for the same reason swell does, and because
+    // a hit's window is judged against its own peak rather than against any
+    // fixed level.
+    const hardness = this.hardness.step(onset, loudness, spread, dt)
+    // Pace counts the hits the hardness windows close, not the frames the
+    // detectors fired on. It counted frames once, and one struck sound trips
+    // several bands at once, the sub band trailing the rest by about 70 ms, so
+    // a kick was one count when those onsets shared a frame and two or three
+    // when they did not. A faster display splits the same kick over more
+    // frames: the same 25 seconds of hardstyle read 0.24 at 60 frames a second
+    // and 0.38 at 144, though each band fired on the same 62 kicks at both.
+    // The detectors were not the cause and the decay was not either: a decayed
+    // count of the same hits is the same count at any rate. A window is a span
+    // of time, so a hit is one hit at any rate.
+    //
+    // Each hit counts for how far it stands above what is under it. A quiet
+    // hat over a pad is a hat nobody hears, and counting it as much as a kick
+    // read a lo-fi track at 80 BPM as twice as busy as hardstyle at 150, since
+    // the detectors hear the sparse quiet hats and not the dense loud ones.
+    //
     // A decayed count rather than a rate measured between hits: it needs no
     // memory of when the last one was and it cannot spike on one close pair.
-    this.paceCount = this.paceCount * Math.exp(-dt / PACE_SECONDS) + (onset ? 1 : 0)
+    this.paceCount = this.paceCount * Math.exp(-dt / PACE_SECONDS) + this.hardness.settled
 
     const short = this.short.step(loudness, dt)
     this.long.step(loudness, dt)
@@ -1387,10 +1424,6 @@ export class Song {
     const target = bpm > 0 ? clamp01((bpm - TEMPO_MIN_BPM) / (TEMPO_MAX_BPM - TEMPO_MIN_BPM)) : null
     const tempo = target === null ? this.ramp.value : this.ramp.step(target, dt)
 
-    // Hardness reads the raw RMS for the same reason swell does, and because
-    // a hit's window is judged against its own peak rather than against any
-    // fixed level.
-    const hardness = this.hardness.step(onset, loudness, spread, dt)
     return {
       pace: clamp01(this.paceCount / PACE_SECONDS / PACE_FULL),
       swell,

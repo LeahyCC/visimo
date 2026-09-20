@@ -16,6 +16,7 @@ import {
   keyOf,
   PACKET_LENGTH,
   pitchClass,
+  Song,
 } from './FeatureExtractor'
 
 const SAMPLE_RATE = 48000
@@ -476,13 +477,13 @@ describe('the song rather than the frame', () => {
     return packet
   }
 
-  // Onsets a second in any band, scaled so 12 is full. A click every 10
+  // Hits a second in any band, scaled so 12 is full. A click every 10
   // frames at 60 fps is 6 a second, which is busy but not flat out.
   it('settles pace near how busy the music actually is', () => {
     const busy = clicks(10, 60)[F.pace] ?? 0
     const sparse = clicks(60, 60)[F.pace] ?? 0
     expect(busy).toBeGreaterThan(0.4)
-    expect(sparse).toBeLessThan(0.15)
+    expect(sparse).toBeLessThan(0.3)
     expect(busy).toBeGreaterThan(sparse * 3)
   })
 
@@ -495,6 +496,64 @@ describe('the song rather than the frame', () => {
     const before = extractor.packet[F.pace] ?? 0
     extractor.update(spectrum(flat(-20)), DT)
     expect((extractor.packet[F.pace] ?? 0) - before).toBeLessThan(0.01)
+  })
+
+  /**
+   * A hit every half second for `seconds`, fed to the song bare, at `fps`. Each
+   * hit trips three detectors at `spread` seconds after it, the way a kick
+   * trips the mids first and the sub band about 70 ms behind, and lifts the
+   * mix by `bump` times what is under it before it decays away over 100 ms.
+   */
+  function paceOf(fps: number, seconds: number, bump: number, spread: readonly number[]) {
+    const song = new Song()
+    const dt = 1 / fps
+    const bed = 0.1
+    // The first hit lands a second in, so the bed they are measured over has
+    // settled by then.
+    const FIRST = 1
+    const EVERY = 0.5
+    let pace = 0
+    for (let frame = 0; frame < Math.round(seconds * fps); frame++) {
+      const from = frame * dt
+      const to = from + dt
+      // Is there a hit's onset, `late` seconds after the hit, inside this frame?
+      const onset = spread.some((late) => {
+        const next = FIRST + late + Math.ceil((from - FIRST - late) / EVERY - 1e-9) * EVERY
+        return next >= FIRST + late - 1e-9 && next < to - 1e-9
+      })
+      const since = from >= FIRST ? (from - FIRST) % EVERY : Infinity
+      const loudness = bed * (1 + bump * Math.exp(-since / 0.1))
+      pace = song.step({ onset, loudness, brightness: NaN, bpm: 0, spread: 0.01 }, dt).pace
+    }
+
+    return pace
+  }
+
+  // The count used to be of frames with an onset in them. One struck sound
+  // trips several bands, the sub band trailing the rest by about 70 ms, so a
+  // kick was one count when those landed in the same frame and two or three
+  // when they did not, and a display that draws faster split the same kick
+  // over more frames and read busier for it.
+  it('counts one struck sound once however its onsets are spread over frames', () => {
+    // Two hits a second for twenty seconds, a decayed count over half a minute
+    // and 4 a second for full.
+    const expected = (2 * (1 - Math.exp(-20 / 30))) / 4
+    for (const fps of [30, 60, 120, 144]) {
+      const alone = paceOf(fps, 20, 2, [0])
+      const spread = paceOf(fps, 20, 2, [0, 0.02, 0.07])
+      expect(Math.abs(alone - expected)).toBeLessThan(0.018)
+      expect(Math.abs(spread - alone)).toBeLessThan(0.018)
+    }
+  })
+
+  // A quiet hat over a pad is a hat nobody hears. The detectors fire on it all
+  // the same, each band being measured against its own history, so what it is
+  // worth has to come from how far it stands above what is under it.
+  it('counts a hit for how far it stands above what is under it', () => {
+    const clear = paceOf(60, 20, 2, [0])
+    const buried = paceOf(60, 20, 0.03, [0])
+    expect(clear).toBeGreaterThan(0.21)
+    expect(buried).toBeLessThan(0.03)
   })
 
   it('holds swell at the middle while the music holds steady', () => {

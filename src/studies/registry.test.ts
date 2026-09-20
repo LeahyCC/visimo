@@ -1,0 +1,350 @@
+/**
+ * Every study, walked, in the spirit of `presets/postMapping.test.ts`. Nothing
+ * here names a study except through the allow list, so a study added later is
+ * held to the same rules without anyone remembering to add it:
+ *
+ * - nothing it enables sits still, unless the allow list says why,
+ * - every flow and every ink says what tension does to it,
+ * - no knob leaves the safe range for its implementation, at silence or at a
+ *   full packet, with tension at either end,
+ * - a full packet leaves the light and the colour at or under rest,
+ * - its id, its excludes and its requires all name something real.
+ *
+ * The casts are walked too, because a cast adds rows of its own and the
+ * preset guard next door cannot see them at a tension the presets never had.
+ */
+import { describe, expect, it } from 'vitest'
+
+import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { POST_KNOBS, POST_LANES } from '../post/params'
+import type { PostKnob } from '../post/params'
+import { AUDIO_FIELDS } from '../presets/knobs'
+import type { KaleidoscopeKnob } from '../presets/knobs'
+import { KALEIDOSCOPE_RANGES } from '../scenes/kaleidoscope.params'
+import { CASTS } from './casts/index'
+import { IMPL_IDS, implKnobs, isImplId, isImplKnob } from './impls'
+import type { ImplId } from './impls'
+import { findStudy, STUDIES } from './registry'
+import { castFrame, resolveCast, resolveStudy } from './resolve'
+import { STUDY_FIELDS, STUDY_KINDS } from './types'
+import type { Study } from './types'
+
+const packetAt = (level: number, swell: number) => {
+  const out = new Float32Array(PACKET_LENGTH)
+  for (const field of AUDIO_FIELDS) if (field !== 'lowEnd') out[F[field]] = level
+  out[F.swell] = swell
+  return out
+}
+
+/** Silence and a full packet, each swept over swell, each at both ends of tension. */
+const CASES = [0, 1].flatMap((level) =>
+  [0, 0.5, 1].flatMap((swell) =>
+    [0, 1].map((tension) => ({
+      label: `level ${level}, swell ${swell}, tension ${tension}`,
+      packet: packetAt(level, swell),
+      tension,
+    })),
+  ),
+)
+
+const FULL = { packet: packetAt(1, 1), tension: 1 }
+
+/**
+ * What every post lane may reach, inclusive. It mirrors the table in the
+ * preset guard, for the same reasons: the feedback gain must stay clear of 1,
+ * a bloom threshold near 0 blooms the whole frame, and the exposure sits in a
+ * band either side of 1.
+ */
+const SAFE_POST: Record<PostKnob, readonly [number, number]> = {
+  'ribbon.intensity': [0, 1.5],
+  'ribbon.width': [0, 12],
+  'ribbon.height': [0, 0.5],
+  'ribbon.shape': [0, 1],
+  'feedback.amount': [0, 1],
+  'feedback.decay': [0, 0.98],
+  'feedback.zoom': [0.98, 1.05],
+  'feedback.rotate': [-0.02, 0.02],
+  'feedback.carry': [0, 2],
+  'feedback.floor': [0, 0.1],
+  'feedback.ceiling': [0.5, 64],
+  'bloom.threshold': [0.4, 2],
+  'bloom.knee': [0, 1],
+  'bloom.intensity': [0, 1],
+  'chromatic.amount': [0, 0.01],
+  'chromatic.beat': [0, 0.02],
+  'tonemap.exposure': [0.6, 1.5],
+  'tonemap.shoulder': [0, 0.98],
+  'grain.amount': [0, 0.08],
+}
+
+const isPostSafe = (knob: string): knob is PostKnob =>
+  Object.prototype.hasOwnProperty.call(SAFE_POST, knob)
+
+const isKaleidoscopeKnob = (knob: string): knob is KaleidoscopeKnob =>
+  Object.prototype.hasOwnProperty.call(KALEIDOSCOPE_RANGES, knob)
+
+/** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
+const SIGNED = new Set(['colourDrift'])
+
+/**
+ * The safe range for one knob of one implementation. The fractal's are the
+ * scene's own, which it clamps to anyway; the post ones are the table above;
+ * the fluid has no table, so the rule is the preset guard's, that nothing but
+ * a signed knob may go negative.
+ */
+function safeRange(impl: ImplId, knob: string): readonly [number, number] | undefined {
+  if (impl === 'fractal' && isKaleidoscopeKnob(knob)) return KALEIDOSCOPE_RANGES[knob]
+  if (isPostSafe(knob)) return SAFE_POST[knob]
+  return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
+}
+
+/** Light and colour: the three that may not climb when the music gets loud. */
+const INTENSITY_KNOBS = ['intensity', 'saturation', 'tonemap.exposure']
+
+/**
+ * Knobs a study deliberately leaves still, and why. A knob that is in neither
+ * this list nor a mapping row fails, so leaving one static is a decision
+ * someone writes down rather than an oversight.
+ */
+const ALLOWED: Record<string, Record<string, string>> = {
+  'lazy-fluid': {
+    emitters: 'how many plumes there are, which is the composition and changes with the section',
+    voice: 'how far an emitter stands for its own band, the scene’s shape rather than a level',
+    events: 'the size of the pool behind the bed; the hits themselves are what fill it',
+    eventLife: 'how long one hit lasts, so that a hit reads as a hit at any level',
+    eventForce: 'what one hit is worth over its life; the hit’s own strength is the drive',
+    eventRadius: 'the size of one hit before its band and its width scale it',
+  },
+  'turbulent-fluid': {
+    force: 'this flow trickles at a steady rate and puts the music into the hits instead',
+    orbitSpeed: 'a slow steady orbit is what keeps the filaments apart in this flow',
+    emitters: 'how many plumes there are, which is the composition and changes with the section',
+    voice: 'how far an emitter stands for its own band, the scene’s shape rather than a level',
+    events: 'the size of the pool behind the bed; the hits themselves are what fill it',
+    eventLife: 'how long one hit lasts, so that a hit reads as a hit at any level',
+    eventForce: 'what one hit is worth over its life; the hit’s own strength is the drive',
+    eventRadius: 'the size of one hit before its band and its width scale it',
+  },
+  'dye-plumes': {
+    hitDye: 'which sound fires it differs by cast, the low end in Plume and the treble in Wash',
+    colourDrift: 'the palette drifts on a clock of its own; the key moves where it drifts from',
+    eventDye: 'what one hit’s puff is worth over its life; the hit’s strength is the drive',
+  },
+  'ribbon': {
+    'ribbon.shape': 'a line or a circle, which is a choice of the cast and not a level',
+  },
+  'fractal-glints': {
+    symmetry: 'how many times the frame is folded, a whole number; moving it flickers the fold',
+    complexity: 'recursions, rounded, and each one costs: a budget rather than a level',
+    zoomAmount: 'the breathing zoom is a clock of its own; the music moves where it starts from',
+    zoomSpeed: 'the same clock’s rate, which a moving value would make stutter',
+    bandReaction: 'how hard each band drives its own recursion, which the scene reads itself',
+    morphSpeed: 'the fold morphs on a clock of its own',
+    bassLift: 'off in both casts; it lifts the whole image, which is what washes a frame out',
+    sparkle: 'a little grit on the ridges, at a fixed level',
+    colourDrift: 'the palette drifts on a clock of its own; the key moves where it drifts from',
+  },
+  'warm-soft': {
+    'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
+    'chromatic.beat':
+      'the beat is already inside the stage: the split is amount + beat × beatPulse',
+    'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
+  },
+  'clean-glass': {
+    'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
+    'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
+    'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
+    'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
+    'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
+  },
+  'hard-clean': {
+    'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
+    'chromatic.beat':
+      'the beat is already inside the stage: the split is amount + beat × beatPulse',
+    'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
+    'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
+  },
+}
+
+const driven = (study: Study, knob: string) =>
+  study.mapping.some((row) => row.to === knob && row.gain !== 0)
+
+const resting = (study: Study, knob: string) => study.knobs[knob] ?? 0
+
+const at = (study: Study, packet: Float32Array, tension: number) =>
+  resolveStudy(study, undefined, packet, tension, 1, {})
+
+describe('every study is well formed', () => {
+  it('has a unique, kebab-case id', () => {
+    const seen = new Set<string>()
+    for (const study of STUDIES) {
+      expect(study.id, `${study.name} has an id that is not kebab-case`).toMatch(
+        /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/,
+      )
+      expect(seen.has(study.id), `${study.id} is in the registry twice`).toBe(false)
+      seen.add(study.id)
+    }
+  })
+
+  for (const study of STUDIES) {
+    it(`${study.name}: says what it is and what draws it`, () => {
+      expect(STUDY_KINDS).toContain(study.kind)
+      expect(isImplId(study.impl), `${study.id} names no implementation`).toBe(true)
+      expect(IMPL_IDS).toContain(study.impl)
+      expect(study.reach, `${study.id} reach`).toBeGreaterThan(0)
+      expect(study.reach, `${study.id} reach`).toBeLessThanOrEqual(1)
+    })
+
+    it(`${study.name}: offers exactly its implementation’s knobs`, () => {
+      expect(Object.keys(study.knobs).sort()).toEqual([...implKnobs(study.impl)].sort())
+      for (const row of study.mapping) {
+        expect(
+          isImplKnob(study.impl, row.to),
+          `${study.id} maps onto ${row.to}, which ${study.impl} does not have`,
+        ).toBe(true)
+        expect(STUDY_FIELDS, `${study.id} reads ${row.from}`).toContain(row.from)
+      }
+    })
+
+    it(`${study.name}: excludes and requires name something real`, () => {
+      for (const other of study.excludes ?? []) {
+        expect(
+          findStudy(other),
+          `${study.id} excludes ${other}, which is not a study`,
+        ).toBeDefined()
+        expect(other, `${study.id} excludes itself`).not.toBe(study.id)
+      }
+
+      for (const impl of study.requires ?? [])
+        expect(isImplId(impl), `${study.id} requires ${impl}, which is no implementation`).toBe(
+          true,
+        )
+    })
+  }
+})
+
+describe('nothing a study draws is static', () => {
+  for (const study of STUDIES) {
+    it(`${study.name}: every knob is driven or is allowed to sit still, with a reason`, () => {
+      const allowed = ALLOWED[study.id] ?? {}
+      for (const knob of implKnobs(study.impl)) {
+        if (driven(study, knob)) continue
+        const reason = allowed[knob]
+        expect(reason, `${study.id} leaves ${knob} static and says nothing about why`).toBeDefined()
+        expect(
+          (reason ?? '').length,
+          `${study.id}: the reason for ${knob} is too short`,
+        ).toBeGreaterThan(20)
+      }
+    })
+
+    it(`${study.name}: every knob it drives actually moves`, () => {
+      for (const knob of implKnobs(study.impl)) {
+        if (!driven(study, knob)) continue
+        const still = at(study, packetAt(0, 0), 0)[knob]
+        const moved = CASES.some(
+          (entry) =>
+            Math.abs((at(study, entry.packet, entry.tension)[knob] ?? 0) - (still ?? 0)) > 1e-12,
+        )
+        expect(moved, `${study.id} maps ${knob} but nothing moves it`).toBe(true)
+      }
+    })
+
+    it(`${study.name}: its allow list names knobs it has and does not drive`, () => {
+      for (const knob of Object.keys(ALLOWED[study.id] ?? {})) {
+        expect(isImplKnob(study.impl, knob), `${study.id} allows ${knob}, which it has not`).toBe(
+          true,
+        )
+        expect(driven(study, knob), `${study.id} allows ${knob} and drives it anyway`).toBe(false)
+      }
+    })
+  }
+
+  // Every flow and ink must say what tension does to it: a build is the one
+  // place in a song where what happens next is nearly certain, and a study
+  // that ignores it cannot wind up with the music.
+  for (const study of STUDIES) {
+    if (study.kind === 'look') continue
+    it(`${study.name}: says what tension does to it`, () => {
+      expect(
+        study.mapping.some((row) => row.from === 'tension' && row.gain !== 0),
+        `${study.id} has no row from tension`,
+      ).toBe(true)
+    })
+  }
+
+  // The allow list is only worth having if it can fail.
+  it('notices a study that leaves a knob static with nothing said about it', () => {
+    const ribbon = findStudy('ribbon')
+    if (!ribbon) throw new Error('Expected the ribbon')
+    expect(driven(ribbon, 'ribbon.shape')).toBe(false)
+    expect(ALLOWED['ribbon']?.['ribbon.shape']).toBeDefined()
+    expect(ALLOWED['ribbon']?.['ribbon.width']).toBeUndefined()
+  })
+})
+
+describe('every study stays inside a safe range', () => {
+  for (const study of STUDIES) {
+    it(`${study.name}: at silence and at a full packet, with and without tension`, () => {
+      for (const entry of CASES) {
+        const out = at(study, entry.packet, entry.tension)
+        for (const [knob, value] of Object.entries(out)) {
+          expect(Number.isFinite(value), `${study.id} ${knob} at ${entry.label}`).toBe(true)
+          const range = safeRange(study.impl, knob)
+          if (!range) continue
+          expect(value, `${study.id} ${knob} at ${entry.label}`).toBeGreaterThanOrEqual(range[0])
+          expect(value, `${study.id} ${knob} at ${entry.label}`).toBeLessThanOrEqual(range[1])
+        }
+      }
+    })
+
+    // A loud, hard passage puts its force into motion and structure. The
+    // picture gets no brighter and no more saturated than it is at rest.
+    it(`${study.name}: a full packet is no brighter and no more saturated than rest`, () => {
+      const out = at(study, FULL.packet, FULL.tension)
+      for (const knob of INTENSITY_KNOBS) {
+        if (!(knob in study.knobs)) continue
+        expect(out[knob], `${study.id} ${knob} at a full packet`).toBeLessThanOrEqual(
+          resting(study, knob) + 1e-9,
+        )
+      }
+    })
+  }
+})
+
+describe('every cast stays inside a safe range', () => {
+  for (const cast of CASTS) {
+    it(`${cast.name}: with its own rows on top, at every packet and tension`, () => {
+      for (const entry of CASES) {
+        const frame = resolveCast(cast, entry.packet, entry.tension, castFrame())
+        for (const [id, knobs] of frame.knobs) {
+          const study = findStudy(id)
+          if (!study) throw new Error(`${cast.id} holds ${id}, which is not a study`)
+          for (const [knob, value] of Object.entries(knobs)) {
+            const range = safeRange(study.impl, knob)
+            if (!range) continue
+            expect(value, `${cast.name} ${id} ${knob} at ${entry.label}`).toBeGreaterThanOrEqual(
+              range[0],
+            )
+
+            expect(value, `${cast.name} ${id} ${knob} at ${entry.label}`).toBeLessThanOrEqual(
+              range[1],
+            )
+          }
+        }
+
+        for (const knob of POST_KNOBS) {
+          const [low, high] = SAFE_POST[knob]
+          const value = POST_LANES[knob].read(frame.post)
+          expect(value, `${cast.name} ${knob} at ${entry.label}`).toBeGreaterThanOrEqual(low)
+          expect(value, `${cast.name} ${knob} at ${entry.label}`).toBeLessThanOrEqual(high)
+        }
+
+        expect(
+          frame.post.feedback.amount * frame.post.feedback.decay,
+          `${cast.name} feedback gain at ${entry.label}`,
+        ).toBeLessThan(0.98)
+      }
+    })
+  }
+})

@@ -14,6 +14,7 @@ import { DEFAULT_FLUID_SIZE, SOFTWARE_FLUID_SIZE } from './catalog'
 import {
   BAND_GROUPS,
   bandsOf,
+  EMITTER_REACH,
   emitterCount,
   eventEnvelope,
   EventPool,
@@ -214,8 +215,11 @@ describe('layouts', () => {
       const mid = halfway[index]
       if (!to || !mid) throw new Error('missing splat')
       if (Math.hypot(to.x - splat.x, to.y - splat.y) > 0.01) moved++
-      expect(mid.x).toBeCloseTo((splat.x + to.x) / 2, 6)
-      expect(mid.y).toBeCloseTo((splat.y + to.y) / 2, 6)
+      // Halfway to within half a percent of the canvas: the glide is a straight
+      // mix of the two figures, and the bend that keeps emitters off the wall
+      // comes after it, so far out the midpoint sits a little inside the chord.
+      expect(mid.x).toBeCloseTo((splat.x + to.x) / 2, 2)
+      expect(mid.y).toBeCloseTo((splat.y + to.y) / 2, 2)
     })
     expect(moved).toBeGreaterThan(0)
   })
@@ -233,6 +237,25 @@ describe('layouts', () => {
       for (const splat of built.splats) {
         expect(Math.abs(splat.x - 0.5), `layout ${index}`).toBeLessThanOrEqual(wide.x)
         expect(Math.abs(splat.y - 0.5), `layout ${index}`).toBeLessThanOrEqual(wide.y)
+      }
+    })
+  })
+
+  it('keeps every emitter off the wall through a whole orbit of the loudest drop', () => {
+    const features = (time: number) => packet({ time, energy: 1, swell: 1 })
+    LAYOUTS.forEach((layout, index) => {
+      for (let time = 0; time < 40; time += 0.37) {
+        const packed = features(time)
+        const tuning = resolveScene(plume.sceneParams, plume.audioMapping, packed, {})
+        const built = fluidFrame(fluidParams(tuning), packed, 1 / 60, square, {
+          from: layout,
+          to: layout,
+          mix: 1,
+        })
+        for (const splat of built.splats) {
+          expect(Math.abs(splat.x - 0.5), `layout ${index}`).toBeLessThan(square.x * EMITTER_REACH)
+          expect(Math.abs(splat.y - 0.5), `layout ${index}`).toBeLessThan(square.y * EMITTER_REACH)
+        }
       }
     })
   })

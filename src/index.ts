@@ -5,7 +5,7 @@
  */
 export { default as VisualizerStage } from './Visualizer'
 export { renderer } from './gpu/Renderer'
-export type { AttachResult } from './gpu/Renderer'
+export type { AttachResult, Live } from './gpu/Renderer'
 export { hasWebGpu } from './gpu/Device'
 export { FeatureClient } from './audio/FeatureClient'
 export { F, PACKET_LENGTH } from './audio/FeatureExtractor'

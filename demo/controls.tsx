@@ -5,17 +5,25 @@
  * `STUDY_FIELDS` and `CURVES`. A knob or a study added to the package shows
  * up in this panel with no change here.
  *
- * It tunes a pinned cast, which is what the five presets are now. The study
- * bench the handoff asks for, where one study is soloed against sliders for
- * character and moment, is a later card; this is the panel that was here,
- * following the shape the cast took.
+ * It tunes a pinned cast, which is what the five presets are now. Under Auto
+ * there is no cast to tune, since the song is choosing one, so the knobs give
+ * way to what the director is doing. The study bench the handoff asks for,
+ * where one study is soloed against sliders for character and moment, is a
+ * later card; this is the panel that was here, following the shape the cast
+ * took.
  */
+import { useEffect, useState } from 'react'
+
+import { renderer } from '../src'
 import { FLUID_SIZES } from '../src/catalog'
 import { CANVAS_KNOBS, castStudyIds, MAX_INKS } from '../src/presets'
 import type {
   CanvasKnob,
   Cast,
+  Character,
+  CharacterAxis,
   ImplId,
+  Moment,
   PinnedCast,
   Study,
   StudyField,
@@ -23,18 +31,22 @@ import type {
 } from '../src/presets'
 import {
   CASTS,
+  CHARACTER_AXES,
   CURVES,
   findCast,
   findStudy,
   implKnobs,
+  MOMENTS,
   parseCast,
   STUDY_FIELDS,
 } from '../src/presets'
 import { KALEIDOSCOPE_RANGES } from '../src/scenes/kaleidoscope.params'
 
 type Props = {
-  cast: PinnedCast
-  onCast: (cast: PinnedCast) => void
+  cast: PinnedCast | 'auto'
+  onCast: (cast: PinnedCast | 'auto') => void
+  /** The last character `onCharacter` handed the page, which a host would save. */
+  saved: Character | null
   fluidSize: number
   onFluidSize: (size: number) => void
   hud: boolean
@@ -193,31 +205,35 @@ const castNeedsGpu = (cast: Cast) => !cast.inks.some((id) => findStudy(id)?.impl
 export function Controls({
   cast,
   onCast,
+  saved,
   fluidSize,
   onFluidSize,
   hud,
   onHud,
   webGpuAvailable = true,
 }: Props) {
+  // Under Auto there is no pinned cast, so there is nothing here to tune.
+  const pinned = cast === 'auto' ? null : cast
   // Every edit below builds a new cast object, and an untouched one is still
   // the very entry `CASTS` holds, so identity is the whole check. It also
   // answers the question worth asking mid-tune: have I drifted from the file?
-  const shipped = findCast(cast.id)
-  const edited = shipped !== undefined && shipped !== cast
-  const studies = castStudyIds(cast)
+  const shipped = pinned ? findCast(pinned.id) : undefined
+  const edited = shipped !== undefined && shipped !== pinned
+  const studies = (pinned ? castStudyIds(pinned) : [])
     .map((id) => findStudy(id))
     .filter((study): study is Study => study !== undefined)
   const holdsFluid = studies.some((study) => study.impl === 'fluid')
 
   const edit = (change: (file: ReturnType<typeof asFile>) => void) => {
-    const file = asFile(cast)
+    if (!pinned) return
+    const file = asFile(pinned)
     change(file)
     onCast(parseCast(file, 'demo'))
   }
 
   /** A study's resting value for one knob: the cast's patch, or the study's own. */
   const restOf = (study: Study, knob: string) =>
-    cast.overrides[study.id]?.knobs?.[knob] ?? study.knobs[knob] ?? 0
+    pinned?.overrides[study.id]?.knobs?.[knob] ?? study.knobs[knob] ?? 0
 
   const setKnob = (study: Study, knob: string, value: number) =>
     edit((file) => {
@@ -240,7 +256,8 @@ export function Controls({
     })
 
   const copy = () => {
-    const json = JSON.stringify(asFile(cast), null, 2)
+    if (!pinned) return
+    const json = JSON.stringify(asFile(pinned), null, 2)
     void navigator.clipboard?.writeText(json).catch(() => console.log(json))
   }
 
@@ -250,12 +267,21 @@ export function Controls({
         <span>preset</span>
         <select
           style={cell}
-          value={cast.id}
+          value={pinned?.id ?? 'auto'}
           onChange={(event) => {
+            if (event.target.value === 'auto') {
+              onCast('auto')
+              return
+            }
+
             const found = findCast(event.target.value)
             if (found) onCast(found)
           }}
         >
+          {/* Auto pins nothing: the director picks from the song. */}
+          <option value="auto" title="No pinned cast: the song chooses one">
+            Auto
+          </option>
           {CASTS.map((entry) => (
             <option
               key={entry.id}
@@ -272,15 +298,19 @@ export function Controls({
           style={small}
           disabled={!edited}
           title={
-            edited
-              ? `Put ${cast.name} back to the numbers in src/studies/casts/`
-              : `${cast.name} is as it ships`
+            pinned
+              ? edited
+                ? `Put ${pinned.name} back to the numbers in src/studies/casts/`
+                : `${pinned.name} is as it ships`
+              : 'The song is choosing, so there is nothing here to reset'
           }
           onClick={() => shipped && onCast(shipped)}
         >
           reset
         </button>
       </label>
+
+      <Direction saved={saved} />
 
       {/* The grid is the fluid's, whichever study in the cast is using it. */}
       {holdsFluid && (
@@ -307,44 +337,134 @@ export function Controls({
         <span />
       </label>
 
-      <h2 style={heading}>CANVAS</h2>
-      {CANVAS_KNOBS.map((knob) => (
-        <Slider
-          key={knob}
-          name={knob}
-          value={cast.canvas.knobs[knob]}
-          onChange={(value) => setCanvasKnob(knob, value)}
-        />
-      ))}
-
-      {studies.map((study) => (
-        <div key={study.id}>
-          <h2 style={heading}>
-            {study.kind.toUpperCase()} · {study.name}
-          </h2>
-          {implKnobs(study.impl).map((knob) => (
+      {pinned && (
+        <>
+          <h2 style={heading}>CANVAS</h2>
+          {CANVAS_KNOBS.map((knob) => (
             <Slider
               key={knob}
               name={knob}
-              ranges={rangesOf(study.impl)}
-              value={restOf(study, knob)}
-              onChange={(value) => setKnob(study, knob, value)}
+              value={pinned.canvas.knobs[knob]}
+              onChange={(value) => setCanvasKnob(knob, value)}
             />
           ))}
-          <Rows study={study} rows={cast.overrides[study.id]?.mapping ?? []} onRows={setRows} />
-        </div>
+
+          {studies.map((study) => (
+            <div key={study.id}>
+              <h2 style={heading}>
+                {study.kind.toUpperCase()} · {study.name}
+              </h2>
+              {implKnobs(study.impl).map((knob) => (
+                <Slider
+                  key={knob}
+                  name={knob}
+                  ranges={rangesOf(study.impl)}
+                  value={restOf(study, knob)}
+                  onChange={(value) => setKnob(study, knob, value)}
+                />
+              ))}
+              <Rows
+                study={study}
+                rows={pinned.overrides[study.id]?.mapping ?? []}
+                onRows={setRows}
+              />
+            </div>
+          ))}
+
+          <h2 style={heading}>OUT</h2>
+          <button type="button" onClick={copy}>
+            copy cast
+          </button>
+          <p style={{ opacity: 0.5, lineHeight: 1.5 }}>
+            Drops straight into <code>src/studies/casts/</code>; give it a new id and name, then add
+            it to the list in <code>src/studies/casts/index.ts</code>. A cast holds one flow, up to{' '}
+            {MAX_INKS} inks and one look, and the studies it names are edited above.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** A number as a bar and a figure, which is every line of the panel below. */
+function Level({ name, value, span = 1 }: { name: string; value: number; span?: number }) {
+  return (
+    <div style={{ ...row, margin: '2px 0' }}>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
+      <span style={{ display: 'block', height: 6, background: '#ffffff14', borderRadius: 3 }}>
+        <span
+          style={{
+            display: 'block',
+            height: '100%',
+            width: `${Math.round(Math.min(1, Math.max(0, value / span)) * 100)}%`,
+            background: '#7fd1ff',
+            borderRadius: 3,
+          }}
+        />
+      </span>
+      <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', opacity: 0.7 }}>
+        {value.toFixed(2)}
+      </span>
+    </div>
+  )
+}
+
+type Reading = {
+  studies: readonly { id: string; presence: number }[]
+  character: Character
+  settled: number
+  moments: Readonly<Record<Moment, number>>
+  preset: string
+}
+
+const read = (): Reading => ({
+  studies: renderer.liveCast.studies.map((entry) => ({ id: entry.id, presence: entry.presence })),
+  character: { ...renderer.character },
+  settled: renderer.settled,
+  moments: { ...renderer.moments },
+  preset: renderer.presetId,
+})
+
+/**
+ * What the director is doing: what is on screen and what each of them is
+ * faded to, where in the song it thinks we are, and where the song sits. It
+ * reads the renderer ten times a second rather than being pushed to, because
+ * the panel is React and the renderer is a frame loop, and a re-render per
+ * frame would cost more than the picture does. It is shown under a pinned
+ * cast too, where the fades sit at 1 and the reading is what a host would be
+ * saving.
+ */
+function Direction({ saved }: { saved: Character | null }) {
+  const [now, setNow] = useState(read)
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(read()), 100)
+    return () => clearInterval(timer)
+  }, [])
+
+  return (
+    <>
+      <h2 style={heading}>CAST · {now.preset}</h2>
+      {now.studies.length === 0 && <p style={{ opacity: 0.5 }}>nothing live yet</p>}
+      {now.studies.map((entry) => (
+        <Level key={entry.id} name={entry.id} value={entry.presence} />
       ))}
 
-      <h2 style={heading}>OUT</h2>
-      <button type="button" onClick={copy}>
-        copy cast
-      </button>
+      <h2 style={heading}>MOMENT</h2>
+      {MOMENTS.map((moment) => (
+        <Level key={moment} name={moment} value={now.moments[moment]} />
+      ))}
+
+      <h2 style={heading}>CHARACTER · settled {now.settled.toFixed(2)}</h2>
+      {CHARACTER_AXES.map((axis: CharacterAxis) => (
+        <Level key={axis} name={axis} value={now.character[axis]} />
+      ))}
       <p style={{ opacity: 0.5, lineHeight: 1.5 }}>
-        Drops straight into <code>src/studies/casts/</code>; give it a new id and name, then add it
-        to the list in <code>src/studies/casts/index.ts</code>. A cast holds one flow, up to{' '}
-        {MAX_INKS} inks and one look, and the studies it names are edited above.
+        {saved
+          ? `onCharacter last said ${CHARACTER_AXES.map((axis) => `${axis} ${saved[axis].toFixed(2)}`).join(', ')}. A host saves that against the track and hands it back as startCharacter next time.`
+          : 'onCharacter fires once the reading has settled, which takes a half minute of sound, and rarely after that.'}
       </p>
-    </div>
+    </>
   )
 }
 

@@ -249,9 +249,11 @@ describe('Director', () => {
     const groove = packet({ section: 1 })
     run(director, groove, 6)
     expect(director.cast?.inks).toContain('groove-ink')
-    expect(presenceOf(director.step(groove, 1 / 60).live, 'build-ink')).toBe(0)
-    expect(director.step(groove, 1 / 60).live.some((entry) => entry.id === 'build-ink')).toBe(false)
-    for (const entry of director.step(groove, 1 / 60).live)
+    expect(presenceOf(director.step(groove, 1 / 60).studies, 'build-ink')).toBe(0)
+    expect(director.step(groove, 1 / 60).studies.some((entry) => entry.id === 'build-ink')).toBe(
+      false,
+    )
+    for (const entry of director.step(groove, 1 / 60).studies)
       expect(entry.presence).toBeGreaterThan(0)
   })
 
@@ -259,10 +261,10 @@ describe('Director', () => {
     const director = new Director({ studies: BENCH })
     const groove = packet({ section: 1 })
     const first = director.step(groove, 1 / 60)
-    const entry = first.live[0]
+    const entry = first.studies[0]
     const second = director.step(groove, 1 / 60)
-    expect(second.live).toBe(first.live)
-    expect(second.live[0]).toBe(entry)
+    expect(second.studies).toBe(first.studies)
+    expect(second.studies[0]).toBe(entry)
   })
 
   // Changes land on the music. Nothing in here counts seconds toward a swap.
@@ -362,12 +364,12 @@ describe('how a change lands', () => {
     const director = new Director({ studies: BENCH, budget: 4 })
     settle(director, packet({ section: 1, rest: 0.9 }), 10)
     expect(
-      presenceOf(director.step(packet({ section: 1, rest: 0.9 }), 1 / 60).live, 'quiet-ink'),
+      presenceOf(director.step(packet({ section: 1, rest: 0.9 }), 1 / 60).studies, 'quiet-ink'),
     ).toBe(1)
     const frame = run(director, packet({ section: 2 }), 0.25)
-    expect(presenceOf(frame.live, 'groove-ink')).toBeGreaterThan(0)
-    expect(presenceOf(frame.live, 'groove-ink')).toBeLessThan(0.3)
-    expect(presenceOf(frame.live, 'quiet-ink')).toBeGreaterThan(0.6)
+    expect(presenceOf(frame.studies, 'groove-ink')).toBeGreaterThan(0)
+    expect(presenceOf(frame.studies, 'groove-ink')).toBeLessThan(0.3)
+    expect(presenceOf(frame.studies, 'quiet-ink')).toBeGreaterThan(0.6)
   })
 
   // The drop is the biggest moment in most tracks, so it is a cut and not a
@@ -380,8 +382,8 @@ describe('how a change lands', () => {
     director.step(drop, 1 / 60)
     expect(director.cast?.flow).toBe('drop-flow')
     const frame = run(director, packet({ section: 1, release: 0.5 }), 0.1)
-    expect(presenceOf(frame.live, 'drop-flow')).toBe(1)
-    expect(presenceOf(frame.live, 'groove-flow')).toBe(0)
+    expect(presenceOf(frame.studies, 'drop-flow')).toBe(1)
+    expect(presenceOf(frame.studies, 'groove-flow')).toBe(0)
   })
 
   it('fires one cut per drop, however long the payoff sits at the top', () => {
@@ -410,7 +412,7 @@ describe('how a change lands', () => {
     director.step(packet({ section: 1, release: 0.5, impact: late }), 1 / 30)
     expect(director.cast?.flow).toBe('drop-flow')
     const frame = run(director, packet({ section: 1, release: 0.5 }), 0.1)
-    expect(presenceOf(frame.live, 'drop-flow')).toBe(1)
+    expect(presenceOf(frame.studies, 'drop-flow')).toBe(1)
   })
 })
 
@@ -465,18 +467,18 @@ describe('a pinned cast', () => {
       packet({ section: 1, tension: 0.3, impact: 1, novelty: 0.9 }),
       1 / 60,
     )
-    const ids = frame.live.map((entry) => entry.id)
+    const ids = frame.studies.map((entry) => entry.id)
     expect(ids).toEqual([pinned.flow, ...pinned.inks, pinned.look].filter(Boolean))
-    for (const entry of frame.live) expect(entry.presence).toBe(1)
+    for (const entry of frame.studies) expect(entry.presence).toBe(1)
     expect(frame.canvas).toBe(pinned.canvas)
     expect(frame.tension).toBeCloseTo(0.3)
   })
 
   it('never changes, whatever the song does', () => {
     const director = new Director({ pinned })
-    const before = director.step(packet({ section: 1 }), 1 / 60).live.map((entry) => entry.id)
+    const before = director.step(packet({ section: 1 }), 1 / 60).studies.map((entry) => entry.id)
     for (const { dt, features } of playSong(60, HARDSTYLE, 120)) director.step(features, dt)
-    expect(director.step(packet({ section: 9 }), 1 / 60).live.map((entry) => entry.id)).toEqual(
+    expect(director.step(packet({ section: 9 }), 1 / 60).studies.map((entry) => entry.id)).toEqual(
       before,
     )
     expect(director.cast).toBeUndefined()
@@ -524,8 +526,8 @@ describe('the whole song', () => {
     let started = false
     for (const { dt, features } of playSong(60, HOUSE)) {
       const frame = director.step(features, dt)
-      if (frame.live.length > 0) started = true
-      if (started) expect(frame.live.length).toBeGreaterThan(0)
+      if (frame.studies.length > 0) started = true
+      if (started) expect(frame.studies.length).toBeGreaterThan(0)
     }
 
     expect(started).toBe(true)
@@ -550,7 +552,9 @@ describe('the whole song', () => {
       const frame = director.step(features, dt)
       if (time >= DROP_AT && after === '') after = name(director.cast)
       if (Math.abs(time - (DROP_AT + 0.1)) < 1 / 120)
-        presence = Math.min(...(director.cast?.inks ?? []).map((id) => presenceOf(frame.live, id)))
+        presence = Math.min(
+          ...(director.cast?.inks ?? []).map((id) => presenceOf(frame.studies, id)),
+        )
     }
 
     expect(after).not.toBe(before)

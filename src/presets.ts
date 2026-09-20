@@ -24,6 +24,7 @@ export {
 export { STUDIES, findStudy, sceneOf, studiesOfKind } from './studies/registry'
 export { parseCast, castStudyIds, CANVAS_KNOBS, isCanvasKnob, MAX_INKS } from './studies/cast'
 export {
+  blendKnobs,
   castFrame,
   liveCast,
   resolveCast,
@@ -32,10 +33,12 @@ export {
   studyFeature,
 } from './studies/resolve'
 export {
+  COUNT_KNOBS,
   IMPL_IDS,
   IMPL_KNOBS,
   IMPL_SCENES,
   implKnobs,
+  isCountKnob,
   isImplId,
   isImplKnob,
   LOOK_KNOBS,
@@ -45,7 +48,7 @@ export {
 } from './studies/impls'
 export { CHARACTER_AXES, COSTS, MOMENTS, STUDY_FIELDS, STUDY_KINDS, isLook } from './studies/types'
 export type { Cast, CastCanvas, CastOverride, CanvasKnob, PinnedCast } from './studies/cast'
-export type { CastFrame, LiveCast, LiveStudy } from './studies/resolve'
+export type { CastFrame, KnobsAt, LiveCast, LiveStudy } from './studies/resolve'
 export type { ImplId, ImplKnob, LookStage } from './studies/impls'
 export type {
   Character,

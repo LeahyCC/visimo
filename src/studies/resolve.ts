@@ -27,7 +27,7 @@ import type { PostParams } from '../post/params'
 import { bend, feature } from '../presets/resolve'
 import { CANVAS_KNOBS, castStudyIds } from './cast'
 import type { Cast, CastCanvas, CastOverride } from './cast'
-import { isLookStrength, LOOK_KNOBS, LOOK_STAGES, RIBBON_KNOBS } from './impls'
+import { COUNT_KNOBS, isLookStrength, LOOK_KNOBS, LOOK_STAGES, RIBBON_KNOBS } from './impls'
 import type { LookStage } from './impls'
 import { findStudy } from './registry'
 import { isLook } from './types'
@@ -83,6 +83,55 @@ export function resolveStudy(
     for (const [key, value] of Object.entries(overrides.knobs)) if (key in out) out[key] = value
   applyRows(study.mapping, features, tension, presence, out)
   if (overrides?.mapping) applyRows(overrides.mapping, features, tension, presence, out)
+  return out
+}
+
+/** One study's resolved knobs and the fade it is at, for `blendKnobs`. */
+export type KnobsAt = {
+  knobs: Readonly<Record<string, number>>
+  presence: number
+}
+
+/**
+ * Two studies of one implementation as a single set of knobs, weighted by
+ * presence. Lazy fluid and turbulent fluid are one solver at two sets of
+ * numbers, so a fade between them is a fade of the numbers: one solver runs,
+ * carrying the field it has already stirred, and the knobs walk from one
+ * study's to the other's. Building a second solver instead would blend two
+ * fields and throw away what the first had going.
+ *
+ * The presences are normalised, for the reason `FlowBlend` normalises its
+ * weights: this is an average of two settings and not a sum of them, and two
+ * studies at a half each should stir as hard as either alone. A knob one of
+ * them does not carry counts as nothing, which cannot arise among studies of
+ * one implementation because they carry the same list.
+ *
+ * `parts` is a buffer the caller keeps and `count` says how much of it is
+ * live, the way `blendLooks` takes its looks, since this runs every frame.
+ */
+export function blendKnobs(
+  parts: readonly KnobsAt[],
+  count: number,
+  out: Record<string, number>,
+): Readonly<Record<string, number>> {
+  for (const key of Object.keys(out)) delete out[key]
+  let total = 0
+  for (let at = 0; at < count; at += 1) total += parts[at]?.presence ?? 0
+  if (total <= 0) return out
+  for (let at = 0; at < count; at += 1) {
+    const part = parts[at]
+    if (!part) continue
+    const share = part.presence / total
+    for (const [key, value] of Object.entries(part.knobs))
+      out[key] = (out[key] ?? 0) + share * value
+  }
+
+  // Half an emitter is not a thing the solver can place.
+  for (const knob of COUNT_KNOBS) {
+    const value = out[knob]
+    if (value !== undefined) out[knob] = Math.round(value)
+  }
+
   return out
 }
 

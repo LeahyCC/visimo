@@ -78,6 +78,20 @@ const Stage = lazy(() => import('visimo').then((m) => ({ default: m.VisualizerSt
 
 Both canvases are `position: absolute; inset: 0`, so **give them a positioned parent**. They carry no stylesheet; `className` and `hudClassName` are there if you want to restyle them.
 
+| Prop             | Required | What it does                                                                                 |
+| ---------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `hud`            | yes      | draws the overlay; the host owns the key that toggles it                                     |
+| `preset`         | yes      | a pinned cast to draw, or `"auto"` to let the song choose. See [The director](#the-director) |
+| `fluidSize`      | yes      | the fluid's grid, from `FLUID_SIZES`. One control, every fluid                               |
+| `startCharacter` | no       | where the character reader opens, as a partial of the five axes                              |
+| `onCharacter`    | no       | the character once it settles and rarely after, to save for next time                        |
+| `onUnsupported`  | yes      | nothing can start or recover on an available backend: show artwork                           |
+| `onBackend`      | no       | `webgpu` or `webgl2`, after attachment                                                       |
+| `className`      | no       | goes on the scene canvas                                                                     |
+| `hudClassName`   | no       | goes on the HUD canvas                                                                       |
+
+Everything optional is new in 0.2 and nothing about it changes what a host that leaves it out already gets.
+
 `onUnsupported` fires when nothing in the chosen cast can start or recover on an available backend. `hasWebGpu()` only checks whether the WebGPU API exists; it neither guarantees an adapter nor detects the WebGL2 fallback. Do not use it to block loading Prism. The optional `onBackend` callback reports `webgpu` or `webgl2` after attachment.
 
 ### The `data-*` attributes are public API
@@ -91,10 +105,10 @@ The scene canvas carries, on attach and then throttled to 500 ms:
 | `data-scene`    | the scene the cast draws as, derived from its inks; see Casts below                           |
 | `data-detail`   | what is drawing, such as `512 fluid`, and the flow under it when nothing else names that grid |
 | `data-post`     | the post stages running, or `off`                                                             |
-| `data-preset`   | the pinned cast's id                                                                          |
+| `data-preset`   | the pinned cast's id, or `auto` while the director is choosing                                |
 | `data-cast`     | the live study ids, in cast order, space separated                                            |
 
-They exist for tests and screenshots and Musimo's e2e suite asserts on the first six. Breaking one breaks a consumer silently, so treat them as the interface they are; the five shipped casts print exactly what their presets did, and `data-cast` is new in 0.2. The fractal's `data-detail` includes its internal render dimensions, allowing a canvas and draw size mismatch to be diagnosed.
+They exist for tests and screenshots and Musimo's e2e suite asserts on the first six. Breaking one breaks a consumer silently, so treat them as the interface they are; the five shipped casts print exactly what their presets did, and `data-cast` is new in 0.2. All of them say what is really being drawn, so under the director they follow the cast it chose, and on the WebGL2 fallback they say what that path drew rather than what was chosen for it. The fractal's `data-detail` includes its internal render dimensions, allowing a canvas and draw size mismatch to be diagnosed.
 
 ## The demo
 
@@ -104,6 +118,8 @@ npm run dev
 ```
 
 The demo opens Prism. Drop a track on the left and tune on the right. Files become object URLs on the same `<audio>` element and use `attachAudio`, as they do in a host app. Play/Pause buttons and labelled seek/volume controls replace the native media widget after repeated in-app browser crashes during testing. A cast with no fractal ink in it is disabled when WebGL2 is active, since nothing else in a cast draws there; Melt stays selectable and shows as Prism with a still trail.
+
+**Auto** is the first entry in the picker and pins nothing: the song chooses the cast, as [The director](#the-director) describes. Under it the knobs give way, since there is no pinned cast to tune, and what is left is the panel that reads the director ten times a second: what is live and the fade each of them is at, the six moment weights, the five character axes and how settled they are. That panel is drawn under a pinned cast too, because the song is read either way, and the line under it says what `onCharacter` last handed the page, which is what a host would save against the track. Auto stays selectable on WebGL2: the fractal is all that path can draw, so it draws Prism's in place of whatever was chosen.
 
 Vite is pinned to `http://127.0.0.1:5174/` with `strictPort: true`; it fails if that port is occupied instead of silently moving. Keep the server process running. A cached page can remain open after the server exits while its feature worker and hot-reload connection fail. During diagnosis, port 5174 had no listener and the stale page was trying a hot-reload connection on 5173. A persistent background Vite process restored the correct endpoint.
 
@@ -230,7 +246,7 @@ Nothing is remembered until the vector has had four seconds to settle, and once 
 
 `src/gpu/Device.ts` shares one device and any pending acquisition across callers. Acquisition makes up to three attempts: first with the high-performance preference, then with the browser default after waits of 300 ms and 600 ms. Request exceptions and uncaptured GPU errors are logged. Device loss clears the singleton so recovery can request another device. Recognised software adapters use reduced budgets.
 
-`src/gpu/Renderer.ts` is the one renderer, and it draws a cast rather than a scene. A stage hands it a canvas on mount and takes it back on unmount, which matters because a host may portal the stage into another document (Musimo's popout does) and the subtree then remounts on every move:
+`src/gpu/Renderer.ts` is the one renderer, and it draws a cast rather than a scene: one a host pinned, or one the director is choosing. It owns that director and steps it once a frame. A stage hands it a canvas on mount and takes it back on unmount, which matters because a host may portal the stage into another document (Musimo's popout does) and the subtree then remounts on every move:
 
 ```
 module singleton, survives remounts        per mount, made again each time
@@ -254,9 +270,16 @@ Each frame, in order:
 
 ```
 read the analyser, stamp time and dt into the packet
+step the director with the packet and the real dt
+  -> what is live, and the fade each of them is at
+     (with a cast pinned it is stepped anyway, and that cast is drawn)
+reconcile what is built, but only if the set of live ids moved
+age what is held spare, and release anything out of its grace
 resolve what is live into a set of knobs per study id and the whole post stack
 update every flow, then every ink        (flows first: a dye ink's numbers
-                                          reach the solver through its flow)
+                                          reach the solver through its flow.
+                                          two studies of one flow are stepped
+                                          once, knobs blended by presence)
 simulate every flow into the encoder
 blend their velocity fields into one     (skipped when one flow is live)
 write the post uniform
@@ -266,9 +289,15 @@ run the post stack onto the canvas
 draw the HUD if it is on
 ```
 
-Each implementation uploads its own resolved numbers. Nothing per frame touches React, and nothing per frame allocates: the live list is split by kind whenever what is live changes, and the studies layer writes into one object the renderer keeps.
+Each implementation uploads its own resolved numbers. Nothing per frame touches React, and nothing per frame allocates: the director hands back one list of the same entries every frame and moves the presences in place, so the split by kind and the reconcile below happen only on a frame where the ids themselves moved, and the studies layer writes into one object the renderer keeps.
 
-What is built is reconciled whenever what is live changes, in `syncImpls`. A study that has left hands its implementation to one that wants the same one rather than having it torn down, so Plume to Wash keeps the field the fluid has already stirred and only the numbers change; anything genuinely built or released empties the canvas, the way changing scene always did. A study whose implementation this renderer has nothing for is skipped and the cast draws with what is left, which is how the WebGL2 path works. Construction stays in the renderer so every implementation shares one device and one post stack, and so nothing in the studies layer has to import a shader.
+What is built is reconciled in `syncImpls`. A study that has left hands its implementation to one that wants the same one rather than having it torn down, so Plume to Wash keeps the field the fluid has already stirred and only the numbers change. Three rules hold it together:
+
+- **Nothing is torn down on the frame its study left.** An implementation nothing is asking for is held for six seconds and released after that. The change most likely to ask for one straight back is a novelty spike fading a cast out and the confirmed section, about six seconds behind the music, settling it back again; holding for that long makes the round trip a fade of the numbers rather than a rebuild.
+- **Only a change of pinned cast empties the canvas**, the way changing scene always did. Under the director it never does: a section change would build the incoming ink, blacking the picture out, and a few seconds later release the outgoing one and black it out again, so every glide would pop twice. The whole point of one canvas is that a change of cast morphs what is already on it.
+- **Two live studies of one implementation run as one.** Flows are keyed by implementation rather than by study id, so a fade from `lazy-fluid` to `turbulent-fluid`, which is one solver at two sets of numbers, steps one solver and walks its knobs from one study's to the other's with `blendKnobs`. The dye is bound to that solver, so it carries across the fade untouched. `impls/FlowBlend.ts` is for two flows of genuinely different implementations, which nothing in the registry is yet.
+
+A study whose implementation this renderer has nothing for is skipped and the cast draws with what is left, which is how the WebGL2 path works: the fractal is the only ink there. A cast the director chose may hold no fractal at all, and a song is not worth stopping for that, so the default pinned preset stands in, or the first shipped cast that path can draw when the default is not one, which is Prism. A cast a host pinned is left alone, so pinning one the fallback cannot draw still reaches `onUnsupported`. Construction stays in the renderer so every implementation shares one device and one post stack, and so nothing in the studies layer has to import a shader.
 
 The flows are stirred before the inks draw, so the picture is carried along the field this frame solved rather than the last one's, and each field is read after its own `simulate` because the half of a ping-pong pair it names alternates. Two flows are live only in the middle of a change the director is running, and `impls/FlowBlend.ts` sums them into one field weighted by presence and normalised, so two at a half each carry the picture as far as either alone. With one live flow the pass is not encoded at all.
 
@@ -557,11 +586,11 @@ A cast can only say one flow and one look, and the middle of a change has two of
 
 `data-scene` is derived from the cast's inks, in `sceneOf`: it is the first of them whose implementation used to be a scene, so the dye reads `fluid` and the fractal reads `kaleidoscope` and the five pinned casts print exactly what their presets did. A cast whose inks were never scenes, a ribbon on its own, prints that ink's implementation instead, so the line still says what is drawing.
 
-The director, which chooses the cast and fades studies in and out as the song goes, is a later card. Until it lands the only live cast is a pinned one at presence 1, and `tension` is zero everywhere.
+The director chooses the cast and fades studies in and out as the song goes; a pinned cast is one of these with every presence at 1. `tension` is packet row 47 either way.
 
 ### The director
 
-The thing that chooses which studies are on screen. `src/director/`, four files of pure domain logic: no GPU, no DOM, and nothing that reads the clock. It is handed the packet and the real `dt` once a frame and hands back whatever is live, each with a presence, which is exactly the list `resolveLive` takes.
+The thing that chooses which studies are on screen. `src/director/`, four files of pure domain logic: no GPU, no DOM, and nothing that reads the clock. It is handed the packet and the real `dt` once a frame and hands back a `LiveCast`: whatever is live, each with a presence, the canvas they draw on, and the tension. That is the same shape a pinned cast is turned into, so the renderer draws either without knowing which it has.
 
 ```text
 every frame:   character (slow)  ─┐
@@ -591,7 +620,7 @@ The rules, each with a test in `director.test.ts`:
 - **Variety without randomness.** Where several studies score within the margin of one another, a section rotates among the top few by its rank, so the second verse gets a cousin of the first rather than a copy. A returning section still recalls its own.
 - **The first thirty seconds.** Until the character has settled, the score reads a study's `reach` in place of its closeness, so a track opens on the studies whose welcome is widest and drifts into its own.
 - **A study at presence 0 is not in the output at all**, so the renderer never touches one that is off.
-- **A pinned cast turns the director off.** Given one it returns that cast at presence 1 and nothing else, and still passes tension through. It still reads the character and the moment, since a host saves the character for the next play of the track and the overlay shows both.
+- **A pinned cast turns the director off.** Given one it returns that cast at presence 1 and nothing else, and still passes tension through. It still reads the character and the moment, since a host saves the character for the next play of the track and the overlay shows both. The stage pins at its own level rather than through this option, because a host builds a fresh cast object for every knob it changes and rebuilding the director around each of those would restart the reading every time a slider moved.
 - **Frame rate independence.** Ninety seconds of packets at 60 and at 144 frames a second produce the same cast changes at the same times, within one frame.
 
 The options, all of them on the constructor:
@@ -609,7 +638,32 @@ The options, all of them on the constructor:
 
 Two things it cannot do. It never learns how long the track is, so **outro** is read off the shape an ending has rather than off the position: a long fall in loudness with no tension under it, in a track that has already run a minute and a half. That catches a fade-out and a track that thins out over its last chorus, and it cannot tell either from a long quiet passage two thirds of the way through a long mix. It never sees one in a track that ends at full energy on the last beat, which is most of dance music. And **the first thirty seconds** are a guess: the character needs 10 to 30 seconds of sound before it means anything, so the opening cast is the widest-welcome one rather than the track's own. A host that knows the track can hand in `start` and skip the drift, though the reading still counts as unsettled until the music has been heard.
 
-**The renderer is not wired to it yet.** It is the piece the renderer will be built against, and the study bench and the demo will drive it before the stage does.
+**Turning it on.** The stage's `preset` prop says what is on screen, and `"auto"` is the director:
+
+```tsx
+<Stage hud={hud} preset="auto" fluidSize={512} onUnsupported={...} />
+```
+
+It is the same prop as a pinned cast, and not a second one beside it, because the two are one question: only one thing can be on screen, and a `director` flag next to a `preset` would let a host ask for both at once and leave the package to decide which wins. Pass a `PinnedCast` and the song chooses nothing; pass `"auto"` and it chooses everything.
+
+**A starting character.** The reading is a guess for the first ten to thirty seconds of a track, so a host that knows what is playing can hand in where it opens:
+
+```tsx
+const [saved, setSaved] = useState<Partial<Character> | undefined>(() => load(track))
+
+<Stage
+  preset="auto"
+  startCharacter={saved}
+  onCharacter={(character) => save(track, character)}
+  ...
+/>
+```
+
+`startCharacter` is a partial of the five axes, so a host that knows one thing about a track says only that; anything it leaves out opens neutral. It moves where the drift starts and not how long it takes, since a reading is still unsettled until the music has been heard, and it is taken until the first frame is drawn and ignored after that, which is what lets a host pass a fresh object on every render.
+
+`onCharacter` is the other end of it: the character once the reading has settled, and once every thirty seconds after that, which is the slowest of the reader's own smoothers and so the soonest a number is worth writing down. It hands over a copy, since the reader writes one object in place every frame. It fires under a pinned cast as much as under the director, because the song is read either way: pin Plume for a whole track and the next play can still open where that track actually sits.
+
+The renderer steps the director on every frame whatever is drawing, and what it chose is drawn only when nothing is pinned. That is also why turning Auto on mid-track lands on a cast already chosen for the song rather than on an opening guess.
 
 ### HUD
 
@@ -653,7 +707,16 @@ Two things it cannot do. It never learns how long the track is, so **outro** is 
 | `PostStack.render`             | no longer writes the uniform or draws the ribbon; call `prepare`, `clear` and `drawRibbon` around it |
 | `SCENE_IDS` and `SCENE_LABELS` | unchanged, and still what `data-scene` prints                                                        |
 
-**What was added:** `data-cast` on the canvas, listing the live study ids in cast order; `STUDIES`, `findStudy`, `sceneOf` and the whole studies vocabulary in `visimo/presets`; and `liveCast`, which is the shape the director will hand the renderer.
+**What was added:** `data-cast` on the canvas, listing the live study ids in cast order; `STUDIES`, `findStudy`, `sceneOf` and the whole studies vocabulary in `visimo/presets`; `liveCast` and `blendKnobs` beside it; and four optional things on the stage, none of which changes what a host that leaves them out already gets.
+
+| Added              | What it is                                                                       |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `preset="auto"`    | the song chooses the cast. `preset` still takes a `PinnedCast` and still pins it |
+| `startCharacter`   | where the character reader opens, as a partial of the five axes                  |
+| `onCharacter`      | the character once settled and rarely after, to save for the next play           |
+| `Live` in `visimo` | the type of `preset`: `PinnedCast \| 'auto'`                                     |
+
+`renderer.setPreset` takes the same `Live`, and `renderer.presetId` reads `auto` while the director is choosing, which is what `data-preset` prints.
 
 **The five look as they did.** Plume, Wash, Drift, Prism and Melt resolve to the numbers their presets did at every packet, which `casts/preset-frames.json` and the two test files that read it hold them to. `data-scene`, `data-detail`, `data-post` and `data-preset` print exactly what they printed. The one exception is Melt's flow, which now answers the music; see the end of the Presets section.
 

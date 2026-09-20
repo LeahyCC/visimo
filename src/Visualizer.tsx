@@ -1,17 +1,37 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { renderer } from './gpu/Renderer'
-import type { PinnedCast } from './studies/cast'
+import type { Live } from './gpu/Renderer'
+import type { Character } from './studies/types'
 
 type Props = {
   hud: boolean
   /**
-   * The pinned cast to draw: its studies, their numbers and the canvas they
-   * draw on. It is still called `preset` because that is what these five are
-   * to a host; there is no scene to choose beside it any more.
+   * What to draw. A pinned cast is its studies, their numbers and the canvas
+   * they draw on, and pinning one turns the choosing off; it is still called
+   * `preset` because that is what these five are to a host. `"auto"` hands
+   * the picture to the director and lets the song choose, which is the same
+   * prop because the two are the same question: only one thing can be on
+   * screen, and a second prop would let a host ask for both at once.
    */
-  preset: PinnedCast
+  preset: Live
   fluidSize: number
+  /**
+   * Where the character reader opens, for a host that knows the track: a
+   * genre tag, or the axes it saved from the last play of this one. Partial,
+   * so a host that knows one thing about a track says only that. It moves
+   * where the drift starts and not how long it takes, since the reading is a
+   * guess until the music has been heard, and it is taken until the first
+   * frame is drawn and ignored after that.
+   */
+  startCharacter?: Partial<Character>
+  /**
+   * The character, once the reading has settled and rarely after that, so a
+   * host can save it and hand it back as `startCharacter` next time. It fires
+   * under a pinned cast as much as under the director, because the song is
+   * read either way.
+   */
+  onCharacter?: (character: Character) => void
   /** The device could not be had, or was lost for good: show artwork instead. */
   onUnsupported: () => void
   onBackend?: (backend: 'webgpu' | 'webgl2') => void
@@ -35,6 +55,8 @@ export default function VisualizerStage({
   hud,
   preset,
   fluidSize,
+  startCharacter,
+  onCharacter,
   onUnsupported,
   onBackend,
   className,
@@ -82,8 +104,15 @@ export default function VisualizerStage({
   }, [generation])
 
   useEffect(() => renderer.setHud(hud), [hud])
+  // The starting character before the cast, so the first frame the director
+  // steps is already the one a host that knows the track asked for.
+  useEffect(() => renderer.setStartCharacter(startCharacter), [startCharacter])
   useEffect(() => renderer.setPreset(preset), [preset])
   useEffect(() => renderer.setFluidSize(fluidSize), [fluidSize])
+  useEffect(() => {
+    renderer.setOnCharacter(onCharacter ?? null)
+    return () => renderer.setOnCharacter(null)
+  }, [onCharacter])
 
   return (
     <>

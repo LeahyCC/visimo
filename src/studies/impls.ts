@@ -122,6 +122,18 @@ export const LOOK_STRENGTH_KNOBS = [
 export const isLookStrength = (knob: string): boolean =>
   (LOOK_STRENGTH_KNOBS as readonly string[]).includes(knob)
 
+/**
+ * Knobs that count something rather than measure it. Two studies of one
+ * implementation are stepped as one, with their knobs blended by presence,
+ * and half an emitter is not a thing the solver can draw. These two are the
+ * counts among the solver's knobs, which are the only ones anything blends
+ * today; a new one belongs here as soon as it exists.
+ */
+export const COUNT_KNOBS = ['emitters', 'events'] as const satisfies readonly FluidKnob[]
+
+export const isCountKnob = (knob: string): boolean =>
+  (COUNT_KNOBS as readonly string[]).includes(knob)
+
 export type ImplKnob = FluidKnob | KaleidoscopeKnob | PostKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */

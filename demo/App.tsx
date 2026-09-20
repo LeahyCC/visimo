@@ -1,14 +1,19 @@
 /**
  * The tuning bench. The stage fills the left, the panel on the right drives
- * the preset it draws with, and a dropped file plays through the same
- * `attachAudio` path a host app uses, so what is tuned here is the real thing.
+ * what it draws with, and a dropped file plays through the same `attachAudio`
+ * path a host app uses, so what is tuned here is the real thing.
+ *
+ * The picker's first entry is Auto, which pins nothing and lets the director
+ * choose from the song; the five below it pin a cast. The panel shows what
+ * the director is doing either way, since it reads the song under a pinned
+ * cast too, and `onCharacter` is what a host would save for the next play.
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { attachAudio, resumeAudio } from '../src/audio'
 import { DEFAULT_FLUID_SIZE } from '../src/catalog'
 import { castOrDefault } from '../src/presets'
-import type { PinnedCast } from '../src/presets'
+import type { Character, PinnedCast } from '../src/presets'
 import VisualizerStage from '../src/Visualizer'
 import { Controls } from './controls'
 
@@ -43,7 +48,10 @@ const elapsed = (seconds: number) =>
     .padStart(2, '0')}`
 
 export default function App() {
-  const [cast, setCast] = useState<PinnedCast>(() => castOrDefault('prism'))
+  const [cast, setCast] = useState<PinnedCast | 'auto'>(() => castOrDefault('prism'))
+  // What a host would write down against this track and hand back as
+  // `startCharacter` the next time it played.
+  const [saved, setSaved] = useState<Character | null>(null)
   const [backend, setBackend] = useState<'webgpu' | 'webgl2'>('webgpu')
   const [fluidSize, setFluidSize] = useState(DEFAULT_FLUID_SIZE)
   const [hud, setHud] = useState(false)
@@ -106,7 +114,7 @@ export default function App() {
               Retry graphics
             </button>
             {/* Prism is the one cast the WebGL2 path can draw. */}
-            {cast.id !== 'prism' && (
+            {cast !== 'auto' && cast.id !== 'prism' && (
               <button
                 type="button"
                 onClick={() => {
@@ -123,6 +131,7 @@ export default function App() {
             hud={hud}
             preset={cast}
             fluidSize={fluidSize}
+            onCharacter={setSaved}
             onUnsupported={() => setUnsupported(true)}
             onBackend={setBackend}
           />
@@ -229,6 +238,7 @@ export default function App() {
         <Controls
           cast={cast}
           onCast={setCast}
+          saved={saved}
           fluidSize={fluidSize}
           onFluidSize={setFluidSize}
           hud={hud}

@@ -29,17 +29,18 @@
  * arrives as a cut, because it is the biggest moment in most tracks and a
  * two-second crossfade throws it away.
  *
- * The output is a `LiveStudy[]`, which `studies/resolve.ts` takes straight:
- * unlike a cast it may hold two flows or two looks at once, which is what the
- * middle of a change looks like. A study at presence 0 is not in it at all,
- * so the renderer never touches one that is not on screen. The list and its
- * entries are the same objects every frame.
+ * The output is the `LiveCast` of `studies/resolve.ts`, which is what the
+ * renderer draws and what a pinned cast is turned into: unlike a cast it may
+ * hold two flows or two looks at once, which is what the middle of a change
+ * looks like. A study at presence 0 is not in it at all, so the renderer
+ * never touches one that is not on screen. The cast, its list and its entries
+ * are the same objects every frame.
  */
 import { F } from '../audio/FeatureExtractor'
 import { defaultCanvas, MAX_INKS } from '../studies/cast'
-import type { Cast, CastCanvas, CastOverride } from '../studies/cast'
+import type { Cast, CastOverride } from '../studies/cast'
 import { STUDIES } from '../studies/registry'
-import type { LiveStudy } from '../studies/resolve'
+import type { LiveCast, LiveStudy } from '../studies/resolve'
 import { CHARACTER_AXES } from '../studies/types'
 import type { Character, Cost, Study } from '../studies/types'
 import { CharacterReader } from './character'
@@ -280,14 +281,6 @@ export type DirectorOptions = {
   pinned?: Cast
 }
 
-/** What the renderer is handed every frame. The same object every frame. */
-export type DirectorFrame = {
-  live: readonly LiveStudy[]
-  canvas: CastCanvas
-  /** Packet row 47, passed on so every live study is handed the same one. */
-  tension: number
-}
-
 export class Director {
   private readonly studies: readonly Study[]
   private readonly budget: number
@@ -306,7 +299,7 @@ export class Director {
   private readonly presence = new Map<string, number>()
   private readonly entries = new Map<string, LiveStudy>()
   private readonly live: LiveStudy[] = []
-  private readonly frame: DirectorFrame
+  private readonly frame: LiveCast
 
   /** The cast a section had, so a section that comes back comes back to it. */
   private readonly memory = new Map<number, PickedCast>()
@@ -340,7 +333,7 @@ export class Director {
     this.reader = new CharacterReader({ start: options.start })
     this.ramp = this.glideSeconds
     this.frame = {
-      live: this.live,
+      studies: this.live,
       canvas: this.pinned?.canvas ?? defaultCanvas(),
       tension: 0,
     }
@@ -366,7 +359,7 @@ export class Director {
     return this.current
   }
 
-  step(features: Float32Array, dt: number): DirectorFrame {
+  step(features: Float32Array, dt: number): LiveCast {
     this.frame.tension = features[F.tension] ?? 0
     // Read even when a cast is pinned and nothing will be chosen by them: a
     // host saves the character for the next play of the track, and the

@@ -18,16 +18,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { playSong, SONG_SECONDS } from '../director/song.fixture'
+import { HARDSTYLE, playSong, SONG_SECONDS } from '../director/song.fixture'
 import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
-import { defaultCanvas } from '../studies/cast'
+import { defaultCanvas, parseCast } from '../studies/cast'
 import { castOrDefault } from '../studies/casts/index'
 import frames from '../studies/casts/preset-frames.json'
 import type { ImplId } from '../studies/impls'
 import { STUDIES } from '../studies/registry'
 import type { LiveCast } from '../studies/resolve'
+import type { Character } from '../studies/types'
 import type { Gpu } from './Device'
 
 type PresetFrame = {
@@ -212,6 +213,46 @@ vi.mock('../impls/RibbonInk', () => ({
   },
 }))
 
+vi.mock('../impls/StreaksInk', () => ({
+  StreaksInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.streaks = (impls.built.streaks ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('streaks', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('streaks')
+    }
+    dispose() {
+      impls.disposed.streaks = (impls.disposed.streaks ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/ShardsInk', () => ({
+  ShardsInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.shards = (impls.built.shards ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('shards', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('shards')
+    }
+    dispose() {
+      impls.disposed.shards = (impls.disposed.shards ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/FlowBlend', () => ({
   FlowBlend: class {
     init() {}
@@ -387,6 +428,20 @@ const packetAt = (level: number, swell: number) => {
   out[F.swell] = swell
   return out
 }
+
+// The riser streaks are cast with the fractal, which is the ink the WebGL2
+// path can draw, so one cast serves both halves of this.
+const RISING = parseCast(
+  {
+    id: 'rising',
+    name: 'Rising',
+    inks: ['fractal-glints', 'riser-streaks'],
+    look: 'clean-glass',
+    canvas: { enabled: false },
+    overrides: {},
+  },
+  'Renderer.test.ts',
+)
 
 describe('renderer attachment lifetime', () => {
   it('sizes fresh implementations when the attached canvas already has its dimensions', async () => {
@@ -605,6 +660,25 @@ describe('the WebGL2 fallback', () => {
     expect(graphics.render).toHaveBeenCalledTimes(1)
   })
 
+  // The streaks are compute-free but the WebGL2 path has one program and only
+  // ever ran the fractal, so they are skipped like the fluid and the ribbon.
+  it('skips the riser streaks without throwing, whatever the tension', async () => {
+    const packet = packetAt(0.3, 0.5)
+    packet[F.tension] = 1
+    audio.attached = true
+    audio.packet = packet
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(RISING)
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(16)).not.toThrow()
+    expect(impls.built.streaks ?? 0).toBe(0)
+    expect(impls.drawn).toEqual([])
+    expect(graphics.render).toHaveBeenCalledTimes(1)
+    expect(failure).not.toHaveBeenCalled()
+  })
+
   it('reports failure when a cast it cannot draw arrives while it is running', async () => {
     const { element } = sizedCanvas(320, 240)
     device.acquireGpu.mockResolvedValue(null)
@@ -613,6 +687,47 @@ describe('the WebGL2 fallback', () => {
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     renderer.setPreset(castOrDefault('plume'))
     expect(failure).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('the riser streaks', () => {
+  /** Attach the cast above, feed a packet with this tension, draw one frame. */
+  const drawWound = async (tension: number) => {
+    const packet = packetAt(0, 0)
+    packet[F.tension] = tension
+    audio.attached = true
+    audio.packet = packet
+    const { element, draw } = sizedCanvas(1280, 720)
+    renderer.setPreset(RISING)
+    await renderer.attach(element, canvas(), vi.fn())
+    draw(1000)
+    return element
+  }
+
+  it('are built, drawn in cast order and printed with the cast', async () => {
+    const element = await drawWound(0)
+    expect(impls.built.streaks).toBe(1)
+    expect(impls.drawn).toEqual(['fractal', 'streaks'])
+    expect(element.dataset.cast).toBe('fractal-glints riser-streaks clean-glass')
+    // The fractal is the scene, as it is for Prism, and the streaks add nothing to the line.
+    expect(element.dataset.scene).toBe('kaleidoscope')
+    expect(element.dataset.detail).toBe('fractal detail')
+  })
+
+  it('are handed nothing to draw until tension winds them up', async () => {
+    await drawWound(0)
+    expect(impls.seen.streaks?.knobs.count).toBe(0)
+    expect(impls.seen.streaks?.knobs.intensity).toBe(0)
+    expect(impls.seen.streaks?.presence).toBe(1)
+  })
+
+  it('are handed the packet’s tension, and more of them, longer, as it climbs', async () => {
+    await drawWound(1)
+    const wound = impls.seen.streaks?.knobs
+    expect(wound?.count).toBeCloseTo(48, 9)
+    expect(wound?.intensity).toBeCloseTo(0.7, 9)
+    expect(wound?.length ?? 0).toBeGreaterThan(0.3)
+    expect(wound?.speed ?? 0).toBeGreaterThan(1)
   })
 })
 
@@ -730,7 +845,10 @@ describe('the director drives the cast', () => {
    * time, and what was live on each of those frames. The module is reset so
    * the two plays a determinism test needs start from the same nothing.
    */
-  async function playThrough(preset: 'auto' | ReturnType<typeof castOrDefault>) {
+  async function playThrough(
+    preset: 'auto' | ReturnType<typeof castOrDefault>,
+    character?: Character,
+  ) {
     vi.resetModules()
     impls.reset()
     stack.reset = 0
@@ -742,7 +860,7 @@ describe('the director drives the cast', () => {
     const trace: string[] = []
     let now = 0
     let frames = 0
-    for (const frame of playSong(FPS)) {
+    for (const frame of playSong(FPS, character)) {
       audio.packet = frame.features
       now += 1000 / FPS
       draw(now)
@@ -768,7 +886,10 @@ describe('the director drives the cast', () => {
   // stretch in which a fluid study is live, stepped once on each of those
   // frames whichever of the two studies is fading into the other.
   it('never empties the canvas and never builds a second solver', async () => {
-    const song = await playThrough('auto')
+    // The hardstyle song, because it is the one that fades lazy fluid into
+    // turbulent fluid: two studies of one solver live at once, which is the
+    // case a second solver would be built for.
+    const song = await playThrough('auto', HARDSTYLE)
     expect(stack.reset).toBe(0)
     const stirring = liveFrames(song.trace, 'fluid')
     const frames = stirring.filter(Boolean).length
@@ -1010,7 +1131,8 @@ describe('the study bench', () => {
     // Every reader saw the row: the studies through the packet, the director
     // through its moment weights.
     expect(renderer.features[F.tension]).toBeCloseTo(0.7, 5)
-    expect(renderer.moments.build).toBeCloseTo(0.7, 5)
+    // 0.7 is past what the row reads when a build is wholly there.
+    expect(renderer.moments.build).toBeCloseTo(1, 5)
     const width = impls.seen.ribbon?.knobs['ribbon.width'] ?? 0
     renderer.setBench({
       live: renderer.liveCast,
@@ -1086,6 +1208,63 @@ describe('the study bench', () => {
     // Nothing is built there, whichever implementations there are: counted
     // rather than listed, so a new one does not break this by existing.
     expect(Object.values(impls.built).reduce((sum, count) => sum + count, 0)).toBe(0)
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('builds the shards ink for its study, hands it its numbers and draws it in cast order', async () => {
+    const { draw } = await start()
+    renderer.setBench({
+      live: live('ribbon', 'shards', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.tension] = 0
+      },
+    })
+    draw(1000)
+    expect(impls.built.shards).toBe(1)
+    expect(impls.drawn).toEqual(['ribbon', 'shards'])
+    expect(impls.seen.shards?.presence).toBe(1)
+    const calm = impls.seen.shards?.knobs.intensity ?? 0
+    expect(Object.keys(impls.seen.shards?.knobs ?? {}).sort()).toEqual(
+      ['burst', 'hitRate', 'intensity', 'life', 'size', 'speed', 'spin'].sort(),
+    )
+
+    // The study's own tension row reaches the ink through the resolver.
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.tension] = 1
+      },
+    })
+    draw(2000)
+    expect(impls.seen.shards?.knobs.intensity).toBeLessThan(calm)
+  })
+
+  it('does not build the shards ink for a study that is faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('ribbon', 'shards', 'clean-glass')
+    const shards = cast.studies[1]
+    if (!shards) throw new Error('the shards are in the cast')
+    shards.presence = 0
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.built.shards).toBeUndefined()
+    expect(impls.updates.shards).toBeUndefined()
+    shards.presence = 0.5
+    draw(2000)
+    expect(impls.built.shards).toBe(1)
+    expect(impls.seen.shards?.presence).toBe(0.5)
+  })
+
+  it('skips the shards on the WebGL2 path, which has no compute and draws the fractal alone', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('ribbon', 'shards', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(1000)).not.toThrow()
+    expect(impls.built.shards).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

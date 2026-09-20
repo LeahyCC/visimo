@@ -338,7 +338,7 @@ const RIBBON_RADIUS = 0.28
  * palette on is the far side of them, and a line drawn there reads against the
  * dye instead of vanishing into it. It moves with the key like everything else.
  */
-const RIBBON_TINT = 0.5
+export const RIBBON_TINT = 0.5
 
 /** Vertices in the strip: two a point, and one point more than there are to close a circle. */
 export const RIBBON_VERTICES = 2 * (RIBBON_POINTS + 1)
@@ -356,9 +356,23 @@ export const ribbonRuns = (params: PostParams) =>
  * brightest at 0.94, so left as they are the line would be about a third as
  * bright in one key as in another and `intensity` would mean a different
  * thing in each. Scaled, it is the peak brightness whatever the key.
+ *
+ * `offset` moves along the palette from the ribbon's own place in it, so the
+ * streaks can scatter their hues around the ribbon's without a palette of
+ * their own. At 0 it is the ribbon's colour exactly.
  */
-export function ribbonColour(features: Float32Array): [number, number, number] {
-  const [red, green, blue] = paletteAt((features[F.keyHue] ?? 0) + RIBBON_TINT)
+export function ribbonColour(features: Float32Array, offset = 0): [number, number, number] {
+  return peakPaletteAt((features[F.keyHue] ?? 0) + RIBBON_TINT + offset)
+}
+
+/**
+ * The fluid's palette at one coordinate, scaled so its brightest channel is 1.
+ * Split out of `ribbonColour` so an ink that spreads its colour around the
+ * key, the shards, draws from the same palette at the same peak brightness
+ * and does not keep a second one.
+ */
+export function peakPaletteAt(coordinate: number): [number, number, number] {
+  const [red, green, blue] = paletteAt(coordinate)
   const peak = Math.max(red, green, blue)
   // Written so that a NaN from a bad key falls through to white, not to NaN.
   return peak > 1e-4 ? [red / peak, green / peak, blue / peak] : [1, 1, 1]

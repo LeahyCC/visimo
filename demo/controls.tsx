@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react'
 import { renderer } from '../src'
 import { FLUID_SIZES } from '../src/catalog'
 import { ANALYTIC_RANGES } from '../src/impls/analytic.params'
+import { STREAK_RANGES } from '../src/impls/streaks.params'
 import { CANVAS_KNOBS, castStudyIds, MAX_INKS } from '../src/presets'
 import type {
   CanvasKnob,
@@ -93,6 +94,14 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'ribbon.height': [0, 0.5],
   // 0 is the line and 1 the circle; the lane rounds anything between.
   'ribbon.shape': [0, 1],
+  // The shards. `size` is in frame heights and `speed` in frame heights a
+  // second; `intensity` above has the one range for every implementation.
+  'burst': [0, 160],
+  'hitRate': [0, 2],
+  'speed': [0, 4],
+  'size': [0, 0.12],
+  'spin': [0, 12],
+  'life': [0.2, 3],
   'feedback.amount': [0, 1],
   'feedback.decay': [0, 1],
   'feedback.zoom': [0.9, 1.1],
@@ -115,18 +124,20 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
 
 /**
  * A study's own table. The fractal's knobs share four names with the dye's
- * and do not share their ranges, so the table is picked by implementation
- * rather than merged. The analytic flow's are signed, which `spanOf` cannot
- * guess from a resting value of zero.
+ * and do not share their ranges, and the streaks' `intensity` stops at 1 where
+ * the dye's runs to 4, so the table is picked by implementation rather than
+ * merged. The analytic flow's are signed, which `spanOf` cannot guess from a
+ * resting value of zero.
  */
 const rangesOf = (impl: ImplId): Partial<Record<string, readonly [number, number]>> => {
   if (impl === 'fractal') return KALEIDOSCOPE_RANGES
   if (impl === 'analytic') return ANALYTIC_RANGES
+  if (impl === 'streaks') return STREAK_RANGES
   return RANGES
 }
 
 /** Knobs the slider must step in whole numbers, whatever the range implies. */
-const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity', 'ribbon.shape'])
+const WHOLE = new Set(['emitters', 'events', 'symmetry', 'complexity', 'ribbon.shape', 'burst'])
 
 /** Four times the resting value, or 0 to 1 when it rests at zero. */
 function spanOf(name: string, value: number): readonly [number, number] {

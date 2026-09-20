@@ -190,7 +190,26 @@ export type KaleidoscopeKnob = (typeof KALEIDOSCOPE_KNOBS)[number]
 export const ANALYTIC_KNOBS = ['radial', 'falloff', 'swirl', 'twist'] as const
 export type AnalyticKnob = (typeof ANALYTIC_KNOBS)[number]
 
-export type SceneKnob = FluidKnob | KaleidoscopeKnob | AnalyticKnob
+/**
+ * The shards' numbers. `burst` is how many an impact throws, a count rather
+ * than a magnitude, and `hitRate` is the most hits a second that may throw a
+ * few more while the payoff is still sounding. `speed` is in frame heights a
+ * second at the moment of birth, `size` in frame heights, `spin` in radians a
+ * second and `life` in seconds; every one of them is per second and never per
+ * frame. `intensity` is the light one shard carries at the top of its life.
+ */
+export const SHARD_KNOBS = [
+  'burst',
+  'hitRate',
+  'speed',
+  'size',
+  'spin',
+  'life',
+  'intensity',
+] as const
+export type ShardKnob = (typeof SHARD_KNOBS)[number]
+
+export type SceneKnob = FluidKnob | KaleidoscopeKnob | AnalyticKnob | ShardKnob
 
 /**
  * The resolved numbers an implementation reads each frame. The renderer fills

@@ -7,12 +7,12 @@
  * other way round and stay JSON.
  *
  * Every number below is ported from the five preset files, so nothing here is
- * invented, but for the studies that came after them, which say where theirs
- * come from in their own comments. Where three presets drive one knob at three gains, the study
- * carries the smallest of them, which is what that study does wherever it is
- * cast, and each cast adds the rest. That way a cast's overrides only ever
- * push a study further in the direction it already goes, and no override has
- * to cancel a row out.
+ * invented, except for the studies that have no preset behind them, which say
+ * so in their own comment. Where three presets drive one knob at three gains,
+ * the study carries the smallest of them, which is what that study does
+ * wherever it is cast, and each cast adds the rest. That way a cast's
+ * overrides only ever push a study further in the direction it already goes,
+ * and no override has to cancel a row out.
  *
  * `home` and `moments` come from the catalogue tables in
  * docs/studies-handoff.md, by its own convention: a capital letter is a
@@ -308,6 +308,105 @@ const FRACTAL_GLINTS: InkStudy = {
 }
 
 /**
+ * The tension, drawn: thin lines on rays from the centre, travelling in, that
+ * lengthen and multiply as a build winds up and are gone when it is over. At
+ * tension 0 its count and intensity rest at 0, so it draws nothing at all, no
+ * pass and no upload; every knob that makes it visible is climbed by tension
+ * and nothing else, which is why the registry guard lets its intensity rise
+ * with a build while holding it at rest for a loud song with no build in it.
+ *
+ * It is sparse on purpose. At full tension and a full packet there are 48
+ * streaks, each at most 0.48 of the short side long and 1.5 px wide at 1080
+ * high, so they cover at most 3.2% of a square frame and 1.8% of a 16:9 one
+ * (`streakCoverage` says the same, and a test holds it under a tenth). The
+ * width thins as the count climbs, which is the lever that keeps it there.
+ * The colour is the ribbon's palette at the key, scattered by `hueSpread`, so
+ * it sits with the ribbon rather than beside it. One fast row, the onset flux
+ * on the length, makes the streaks flick within a build; the rest is slow.
+ */
+const RISER_STREAKS: InkStudy = {
+  id: 'riser-streaks',
+  kind: 'ink',
+  name: 'Riser streaks',
+  impl: 'streaks',
+  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.5 },
+  reach: 1,
+  moments: { intro: 0, groove: 0, build: 1, drop: 0, rest: 0, outro: 0 },
+  knobs: {
+    count: 0,
+    length: 0.08,
+    speed: 0.25,
+    width: 2.2,
+    intensity: 0,
+    hueSpread: 0.25,
+  },
+  mapping: [
+    { from: 'tension', to: 'count', gain: 48, curve: 'linear' },
+    { from: 'tension', to: 'length', gain: 0.3, curve: 'linear' },
+    { from: 'tension', to: 'speed', gain: 1, curve: 'linear' },
+    { from: 'tension', to: 'width', gain: -0.7, curve: 'linear' },
+    { from: 'tension', to: 'intensity', gain: 0.7, curve: 'linear' },
+    { from: 'flux', to: 'length', gain: 0.1, curve: 'linear' },
+  ],
+  cost: 'cheap',
+}
+
+/**
+ * The ink for the drop: flat sharp triangles thrown outward from the middle,
+ * a burst on the frame the payoff lands and a few more on strong low-end and
+ * mid hits while it is still sounding. It exists to make the release
+ * unmistakable, so it is held back for it: nothing is born on any other
+ * moment, the pool is empty through a build and a groove, and an empty pool
+ * draws and uploads nothing.
+ *
+ * It lives in the hard, fast corner of the space and its reach is narrow, so a
+ * lo-fi track never sees it and a hardstyle one does. It is the one study here
+ * with no preset behind it, so its numbers are its own: the burst is sized so
+ * it covers a few percent of the frame and no more, and each shard is hard and
+ * flat, so the trails have something sharp to smear.
+ *
+ * Tension does nothing to a shard's shape, because the study is idle while
+ * tension is high: nothing is thrown until the payoff, and tension is what has
+ * to have wound up for a payoff to happen. What it does is the one thing it
+ * can, which is hold intensity down by up to a quarter. The tension envelope
+ * lets go over a couple of seconds after a drop, so the burst is thrown while
+ * some of it is still draining and the shards brighten as it goes; and a shard
+ * born by a hit while a build is still winding, the tail of one drop running
+ * into the next build, is dimmer than one born in the clear.
+ */
+const SHARDS: InkStudy = {
+  id: 'shards',
+  kind: 'ink',
+  name: 'Shards',
+  impl: 'shards',
+  home: { drive: 0.85, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.9 },
+  reach: 0.3,
+  moments: { intro: 0, groove: 0, build: 0, drop: 1, rest: 0, outro: 0 },
+  knobs: {
+    burst: 48,
+    hitRate: 1.2,
+    speed: 1.2,
+    size: 0.035,
+    spin: 1.5,
+    life: 1,
+    intensity: 0.9,
+  },
+  mapping: [
+    { from: 'energy', to: 'burst', gain: 32, curve: 'linear' },
+    { from: 'pace', to: 'hitRate', gain: 0.75, curve: 'linear' },
+    { from: 'hardness', to: 'speed', gain: 0.8, curve: 'linear' },
+    { from: 'weight', to: 'size', gain: 0.02, curve: 'linear' },
+    { from: 'pace', to: 'spin', gain: 3, curve: 'linear' },
+    { from: 'weight', to: 'life', gain: 0.6, curve: 'linear' },
+    { from: 'energy', to: 'intensity', gain: -0.08, curve: 'square' },
+    { from: 'swell', to: 'intensity', gain: -0.05, curve: 'square' },
+    { from: 'hardness', to: 'intensity', gain: -0.05, curve: 'square' },
+    { from: 'tension', to: 'intensity', gain: -0.2, curve: 'linear' },
+  ],
+  cost: 'cheap',
+}
+
+/**
  * Low contrast, grain and a gentle bloom: what Plume, Wash and Drift are
  * shown through. A hard track splits more and is clean, a soft one splits
  * less and is grainy, which is the one row `hardness` owns here. Tension
@@ -551,6 +650,8 @@ export const STUDIES: readonly Study[] = [
   DYE_PLUMES,
   RIBBON,
   FRACTAL_GLINTS,
+  RISER_STREAKS,
+  SHARDS,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

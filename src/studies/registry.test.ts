@@ -17,14 +17,16 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { ANALYTIC_RANGES } from '../impls/analytic.params'
+import { SHARD_RANGES } from '../impls/shards.params'
+import { STREAK_RANGES } from '../impls/streaks.params'
 import { POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostKnob } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
-import type { AnalyticKnob, KaleidoscopeKnob } from '../presets/knobs'
+import type { AnalyticKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs'
 import { KALEIDOSCOPE_RANGES } from '../scenes/kaleidoscope.params'
 import { CASTS } from './casts/index'
 import { IMPL_IDS, implKnobs, isImplId, isImplKnob } from './impls'
-import type { ImplId } from './impls'
+import type { ImplId, StreaksKnob } from './impls'
 import { findStudy, STUDIES } from './registry'
 import { castFrame, resolveCast, resolveStudy } from './resolve'
 import { STUDY_FIELDS, STUDY_KINDS } from './types'
@@ -92,15 +94,19 @@ const isKaleidoscopeKnob = (knob: string): knob is KaleidoscopeKnob =>
 
 const isAnalyticKnob = (knob: string): knob is AnalyticKnob =>
   Object.prototype.hasOwnProperty.call(ANALYTIC_RANGES, knob)
+const isStreaksKnob = (knob: string): knob is StreaksKnob =>
+  Object.prototype.hasOwnProperty.call(STREAK_RANGES, knob)
+const isShardKnob = (knob: string): knob is ShardKnob =>
+  Object.prototype.hasOwnProperty.call(SHARD_RANGES, knob)
 
 /** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
 const SIGNED = new Set(['colourDrift'])
 
 /**
- * The safe range for one knob of one implementation. The fractal's and the
- * analytic flow's are their own files' tables; the post ones are the table
- * above; the fluid has no table, so the rule is the preset guard's, that
- * nothing but a signed knob may go negative.
+ * The safe range for one knob of one implementation. The fractal's, the
+ * analytic flow's and the shards' are their own files' tables; the post ones
+ * are the table above; the fluid has no table, so the rule is the preset
+ * guard's, that nothing but a signed knob may go negative.
  *
  * The analytic flow needs a table of its own rather than the fluid's rule,
  * because a pull and a push are one term at two signs: its `radial` is
@@ -111,6 +117,8 @@ const SIGNED = new Set(['colourDrift'])
 function safeRange(impl: ImplId, knob: string): readonly [number, number] | undefined {
   if (impl === 'fractal' && isKaleidoscopeKnob(knob)) return KALEIDOSCOPE_RANGES[knob]
   if (impl === 'analytic' && isAnalyticKnob(knob)) return ANALYTIC_RANGES[knob]
+  if (impl === 'streaks' && isStreaksKnob(knob)) return STREAK_RANGES[knob]
+  if (impl === 'shards' && isShardKnob(knob)) return SHARD_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
 }
@@ -131,6 +139,34 @@ const LIFTS: Record<string, Record<string, { cap: number; reason: string }>> = {
     'tonemap.exposure': {
       cap: 0.2,
       reason: 'the flash on the drop, capped so that one is not violent; see looks.test.ts',
+    },
+  },
+  // Squeeze's `impact` rows are there to throw open what tension closed, each
+  // the mirror of a tension row. With nothing winding up there is nothing to
+  // undo, so the colour resolves past 1, and the cap is that mirror's size.
+  'squeeze': {
+    'grade.saturation': {
+      cap: 0.55,
+      reason:
+        'undoes what tension drained; the uniform writer clamps saturation at 1, so none of it shows',
+    },
+  },
+}
+
+/**
+ * A knob whose light is born of tension, and the most it may reach at full
+ * tension. Everything else is held to its resting value at tension 1 as well,
+ * which is what a study that only ever dims under load wants. A study that
+ * rests at nothing and lets a build bring it in cannot pass that, and the
+ * answer is not to loosen the rule for everyone but to say here how much light
+ * it may add and why that is safe. Loud music with no build in it is held to
+ * rest regardless: this only opens the tension end.
+ */
+const BUILT_LIGHT: Record<string, Record<string, { max: number; why: string }>> = {
+  'riser-streaks': {
+    intensity: {
+      max: 0.7,
+      why: 'rests at 0 so nothing draws without a build; at most 48 lines under 2 px wide, so under 4% of the frame is lit, and it thins its width as the count climbs',
     },
   },
 }
@@ -176,6 +212,9 @@ const ALLOWED: Record<string, Record<string, string>> = {
   },
   'ribbon': {
     'ribbon.shape': 'a line or a circle, which is a choice of the cast and not a level',
+  },
+  'riser-streaks': {
+    hueSpread: 'how far the hues scatter round the ribbon’s, a setting of the look and not a level',
   },
   'fractal-glints': {
     symmetry: 'how many times the frame is folded, a whole number; moving it flickers the fold',
@@ -339,6 +378,22 @@ describe('nothing a study draws is static', () => {
     })
   }
 
+  // The same for the list of ceilings a build may lift: it names knobs the
+  // study has, and each says why the light it adds is safe.
+  it('lets only a knob the study has, and drives, rise above rest with a build', () => {
+    for (const [id, knobs] of Object.entries(BUILT_LIGHT)) {
+      const study = findStudy(id)
+      if (!study) throw new Error(`${id} has a ceiling and is not a study`)
+      for (const [knob, built] of Object.entries(knobs)) {
+        expect(INTENSITY_KNOBS, `${id} ${knob} is not a light knob`).toContain(knob)
+        expect(driven(study, knob), `${id} has a ceiling for ${knob} and nothing drives it`).toBe(
+          true,
+        )
+        expect(built.why.length, `${id}: the reason for ${knob} is too short`).toBeGreaterThan(20)
+      }
+    }
+  })
+
   // The lifts are only worth having if they can fail either.
   it('lets a study lift the light only by a knob it has, drives from impact and says why', () => {
     for (const [id, knobs] of Object.entries(LIFTS)) {
@@ -380,14 +435,16 @@ describe('every study stays inside a safe range', () => {
     })
 
     // A loud, hard passage puts its force into motion and structure. The
-    // picture gets no brighter and no more saturated than it is at rest.
+    // picture gets no brighter and no more saturated than it is at rest, and
+    // that holds with nothing winding up, which is what a loud song with no
+    // build in it is.
     it(`${study.name}: a full packet is no brighter and no more saturated than rest`, () => {
-      const out = at(study, FULL.packet, FULL.tension)
+      const out = at(study, FULL.packet, 0)
       // The same packet without the one event in it, for a study whose lift
       // is allowed to come from that event alone.
       const noImpact = packetAt(1, 1)
       noImpact[F.impact] = 0
-      const withoutImpact = at(study, noImpact, FULL.tension)
+      const withoutImpact = at(study, noImpact, 0)
       for (const knob of INTENSITY_KNOBS) {
         if (!(knob in study.knobs)) continue
         const lift = LIFTS[study.id]?.[knob]
@@ -406,6 +463,23 @@ describe('every study stays inside a safe range', () => {
         expect(out[knob], `${study.id} ${knob} at a full packet`).toBeLessThanOrEqual(
           resting(study, knob) + 1e-9,
         )
+      }
+    })
+
+    // With tension at full the same holds, unless the study says in
+    // `BUILT_LIGHT` how much light a build may bring in and why that is safe.
+    it(`${study.name}: at full tension it is no brighter than rest, or than it says it may be`, () => {
+      const out = at(study, FULL.packet, FULL.tension)
+      for (const knob of INTENSITY_KNOBS) {
+        if (!(knob in study.knobs)) continue
+        const built = BUILT_LIGHT[study.id]?.[knob]
+        // A full packet has `impact` in it, so a study allowed a lift from
+        // that event is allowed it here as well, and no more than its cap.
+        const lift = LIFTS[study.id]?.[knob]?.cap ?? 0
+        expect(
+          out[knob],
+          `${study.id} ${knob} at a full packet and full tension`,
+        ).toBeLessThanOrEqual((built?.max ?? resting(study, knob)) + lift + 1e-9)
       }
     })
   }

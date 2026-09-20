@@ -524,6 +524,12 @@ const SHARDS: InkStudy = {
  * set on the adapter in the bench at a quiet level: at 0.08 the brightest
  * pixel read 47 of 255 and the dust was nearly invisible, and at 0.25 it read
  * 175 to 199 with the same specks and no wash-out with or without a flow.
+ * That was judged by the brightest pixel. Judged as a picture, as the only
+ * ink of a quiet cast over curl drift and through the film look, 0.25 left
+ * the frame reading as empty, so it rests at 0.5 with a speck of 10 and not
+ * 8, which shows as pale specks with short trails on black. The rows that
+ * dim it as the music fills were doubled with it, so a loud hard packet
+ * still takes it to about half.
  *
  * Its home is the soft, slow corner, the opposite of the shards, and its
  * reach is narrow for the same reason theirs is: a lo-fi track is at home
@@ -539,10 +545,10 @@ const DUST: InkStudy = {
   moments: { intro: 1, groove: 0, build: 0, drop: 0, rest: 1, outro: 1 },
   knobs: {
     count: 0,
-    size: 8,
+    size: 10,
     drift: 0.012,
     twinkle: 0.45,
-    intensity: 0.25,
+    intensity: 0.5,
     hueSpread: 0.12,
     gather: 0,
   },
@@ -551,9 +557,9 @@ const DUST: InkStudy = {
     { from: 'energy', to: 'count', gain: -120, curve: 'square' },
     { from: 'swell', to: 'drift', gain: 0.03, curve: 'linear' },
     { from: 'treble', to: 'twinkle', gain: 0.5, curve: 'linear' },
-    { from: 'energy', to: 'intensity', gain: -0.06, curve: 'square' },
-    { from: 'swell', to: 'intensity', gain: -0.03, curve: 'square' },
-    { from: 'hardness', to: 'intensity', gain: -0.03, curve: 'square' },
+    { from: 'energy', to: 'intensity', gain: -0.12, curve: 'square' },
+    { from: 'swell', to: 'intensity', gain: -0.06, curve: 'square' },
+    { from: 'hardness', to: 'intensity', gain: -0.06, curve: 'square' },
     { from: 'tension', to: 'gather', gain: 0.5, curve: 'linear' },
   ],
   cost: 'cheap',

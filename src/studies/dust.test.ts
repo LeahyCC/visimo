@@ -253,11 +253,11 @@ describe('how much of the frame it covers', () => {
     const reach = worst()
     expect(reach.count).toBeGreaterThan(60)
     expect(reach.count).toBeLessThan(80)
-    // 70 specks 8 pixels across on a canvas 1080 high.
-    expect(dustCoverage(reach, 1080, 1080)).toBeCloseTo(0.0038, 4)
-    expect(dustCoverage(reach, 1920, 1080)).toBeCloseTo(0.0022, 4)
+    // 70 specks 10 pixels across on a canvas 1080 high.
+    expect(dustCoverage(reach, 1080, 1080)).toBeCloseTo(0.006, 3)
+    expect(dustCoverage(reach, 1920, 1080)).toBeCloseTo(0.0034, 3)
     for (const [width, height] of SIZES)
-      expect(dustCoverage(reach, width, height), `${width} by ${height}`).toBeLessThan(0.005)
+      expect(dustCoverage(reach, width, height), `${width} by ${height}`).toBeLessThan(0.0075)
   })
 
   it('is under a twentieth of the frame with every knob at the top of its range, on every canvas shape', () => {

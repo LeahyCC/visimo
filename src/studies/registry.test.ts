@@ -22,6 +22,7 @@ import { DUST_RANGES } from '../impls/dust.params'
 import { HALO_RANGES } from '../impls/halo.params'
 import { RING_RANGES } from '../impls/rings.params'
 import { SHARD_RANGES } from '../impls/shards.params'
+import { SPARK_RANGES } from '../impls/sparks.params'
 import { SPECTRUM_RANGES } from '../impls/spectrum.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
 import { MAX_WEAVE, POST_KNOBS, POST_LANES } from '../post/params'
@@ -37,6 +38,7 @@ import type {
   HaloKnob,
   ImplId,
   RingsKnob,
+  SparksKnob,
   SpectrumKnob,
   StreaksKnob,
 } from './impls'
@@ -124,6 +126,8 @@ const isRingsKnob = (knob: string): knob is RingsKnob =>
   Object.prototype.hasOwnProperty.call(RING_RANGES, knob)
 const isSpectrumKnob = (knob: string): knob is SpectrumKnob =>
   Object.prototype.hasOwnProperty.call(SPECTRUM_RANGES, knob)
+const isSparksKnob = (knob: string): knob is SparksKnob =>
+  Object.prototype.hasOwnProperty.call(SPARK_RANGES, knob)
 
 /** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
 const SIGNED = new Set(['colourDrift'])
@@ -150,6 +154,7 @@ function safeRange(impl: ImplId, knob: string): readonly [number, number] | unde
   if (impl === 'halo' && isHaloKnob(knob)) return HALO_RANGES[knob]
   if (impl === 'rings' && isRingsKnob(knob)) return RING_RANGES[knob]
   if (impl === 'spectrum' && isSpectrumKnob(knob)) return SPECTRUM_RANGES[knob]
+  if (impl === 'sparks' && isSparksKnob(knob)) return SPARK_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
 }
@@ -311,6 +316,9 @@ const ALLOWED: Record<string, Record<string, string>> = {
     bars: 'how many bars stand on the ring, the resolution of the drawing and not a level; a live count would pop bars in and out of it',
     hueSpread:
       'how far the palette runs from the ring’s sub pole to its treble one, a setting of the look and not a level',
+  },
+  'sparks': {
+    hueSpread: 'how far the hues scatter round the ribbon’s, a setting of the look and not a level',
   },
   'fractal-glints': {
     symmetry: 'how many times the frame is folded, a whole number; moving it flickers the fold',

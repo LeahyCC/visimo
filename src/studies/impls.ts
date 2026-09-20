@@ -31,6 +31,7 @@ export const IMPL_IDS = [
   'halo',
   'rings',
   'spectrum',
+  'sparks',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -180,6 +181,23 @@ export const SPECTRUM_KNOBS = [
 export type SpectrumKnob = (typeof SPECTRUM_KNOBS)[number]
 
 /**
+ * The sparks' numbers. Their ranges and units are in `impls/sparks.params.ts`.
+ * `rate` is sparks a second at most and is what the bucket refills at, `count`
+ * is how many one hit throws, `speed` is short sides a second at birth and
+ * `life` is seconds.
+ */
+export const SPARKS_KNOBS = [
+  'rate',
+  'count',
+  'speed',
+  'life',
+  'size',
+  'intensity',
+  'hueSpread',
+] as const
+export type SparksKnob = (typeof SPARKS_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -259,6 +277,7 @@ export type ImplKnob =
   | HaloKnob
   | RingsKnob
   | SpectrumKnob
+  | SparksKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -274,6 +293,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   halo: HALO_KNOBS,
   rings: RINGS_KNOBS,
   spectrum: SPECTRUM_KNOBS,
+  sparks: SPARKS_KNOBS,
   look: LOOK_KNOBS,
 }
 

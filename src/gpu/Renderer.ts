@@ -42,6 +42,7 @@ import { HaloInk } from '../impls/HaloInk'
 import { RibbonInk } from '../impls/RibbonInk'
 import { RingsInk } from '../impls/RingsInk'
 import { ShardsInk } from '../impls/ShardsInk'
+import { SparksInk } from '../impls/SparksInk'
 import { SpectrumInk } from '../impls/SpectrumInk'
 import { StreaksInk } from '../impls/StreaksInk'
 import { mergePostPatch, patchPostParams, postSummary } from '../post/params'
@@ -626,6 +627,7 @@ class Renderer {
     if (impl === 'halo') return new HaloInk()
     if (impl === 'rings') return new RingsInk()
     if (impl === 'spectrum') return new SpectrumInk()
+    if (impl === 'sparks') return new SparksInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

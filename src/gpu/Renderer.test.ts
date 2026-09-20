@@ -30,6 +30,7 @@ import {
   DUST_KNOBS,
   HALO_KNOBS,
   RINGS_KNOBS,
+  SPARKS_KNOBS,
   SPECTRUM_KNOBS,
 } from '../studies/impls'
 import type { ImplId } from '../studies/impls'
@@ -336,6 +337,26 @@ vi.mock('../impls/SpectrumInk', () => ({
     }
     dispose() {
       impls.disposed.spectrum = (impls.disposed.spectrum ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/SparksInk', () => ({
+  SparksInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.sparks = (impls.built.sparks ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('sparks', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('sparks')
+    }
+    dispose() {
+      impls.disposed.sparks = (impls.disposed.sparks ?? 0) + 1
     }
   },
 }))
@@ -1763,6 +1784,66 @@ describe('the study bench', () => {
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     expect(() => draw(1000)).not.toThrow()
     expect(impls.built.spectrum).toBeUndefined()
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('builds the sparks ink for its study, hands it its numbers and draws it in cast order', async () => {
+    const { draw } = await start()
+    renderer.setBench({
+      live: live('ribbon', 'sparks', 'clean-glass'),
+      frame: (packet) => {
+        packet[F.energy] = 0.5
+        packet[F.tension] = 0
+      },
+    })
+    draw(1000)
+    expect(impls.built.sparks).toBe(1)
+    expect(impls.drawn).toEqual(['ribbon', 'sparks'])
+    expect(impls.seen.sparks?.presence).toBe(1)
+    expect(Object.keys(impls.seen.sparks?.knobs ?? {}).sort()).toEqual([...SPARKS_KNOBS].sort())
+    expect(impls.seen.sparks?.knobs.count).toBeGreaterThan(0)
+    expect(impls.seen.sparks?.knobs.intensity ?? 0).toBeGreaterThan(0.1)
+    const calm = impls.seen.sparks?.knobs.rate ?? 0
+
+    // The study's tension row reaches the ink through the resolver: a build
+    // makes the sparks come faster.
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.energy] = 0.5
+        packet[F.tension] = 1
+      },
+    })
+    draw(2000)
+    expect(impls.seen.sparks?.knobs.rate ?? 0).toBeGreaterThan(calm + 10)
+  })
+
+  it('does not build the sparks ink for a study that is faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('ribbon', 'sparks', 'clean-glass')
+    const sparks = cast.studies[1]
+    if (!sparks) throw new Error('the sparks are in the cast')
+    sparks.presence = 0
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.built.sparks).toBeUndefined()
+    expect(impls.updates.sparks).toBeUndefined()
+    sparks.presence = 0.5
+    draw(2000)
+    expect(impls.built.sparks).toBe(1)
+    expect(impls.seen.sparks?.presence).toBe(0.5)
+  })
+
+  it('skips the sparks on the WebGL2 path, which has no compute and draws the fractal alone', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('ribbon', 'sparks', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(1000)).not.toThrow()
+    expect(impls.built.sparks).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

@@ -21,6 +21,7 @@ import { CAUSTICS_RANGES } from '../src/impls/caustics.params'
 import { DUST_RANGES } from '../src/impls/dust.params'
 import { HALO_RANGES } from '../src/impls/halo.params'
 import { RING_RANGES } from '../src/impls/rings.params'
+import { SPARK_RANGES } from '../src/impls/sparks.params'
 import { SPECTRUM_RANGES } from '../src/impls/spectrum.params'
 import { STREAK_RANGES } from '../src/impls/streaks.params'
 import { CANVAS_KNOBS, castStudyIds, MAX_INKS } from '../src/presets'
@@ -145,6 +146,7 @@ const rangesOf = (impl: ImplId): Partial<Record<string, readonly [number, number
   if (impl === 'halo') return HALO_RANGES
   if (impl === 'rings') return RING_RANGES
   if (impl === 'spectrum') return SPECTRUM_RANGES
+  if (impl === 'sparks') return SPARK_RANGES
   return RANGES
 }
 

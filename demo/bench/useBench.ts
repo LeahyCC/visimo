@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { F } from '../../src/audio/FeatureExtractor'
 import { renderer } from '../../src/gpu/Renderer'
 import type { Bench } from '../../src/gpu/Renderer'
-import { defaultCanvas } from '../../src/studies/cast'
+import { carriedCanvas } from '../../src/studies/cast'
 import type { LiveCast } from '../../src/studies/resolve'
 import { FrameMeter } from './meter'
 import { overridePacket, overridesFor, stepImpact } from './packet'
@@ -41,7 +41,7 @@ export function useBench(state: BenchState, active: boolean): BenchSession {
   const live = useMemo<LiveCast>(
     () => ({
       studies: slotIds(state).map((id) => ({ id, presence: state.presence[id] ?? 1 })),
-      canvas: defaultCanvas(),
+      canvas: carriedCanvas(),
       tension: 0,
     }),
     // The slots are the whole of what rebuilds it; a presence is written in

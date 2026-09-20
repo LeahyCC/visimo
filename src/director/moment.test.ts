@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { MOMENTS } from '../studies/types'
-import { MomentReader, OUTRO_TRACK_SECONDS } from './moment'
+import { BUILD_FULL, DROP_FULL, MomentReader, OUTRO_TRACK_SECONDS } from './moment'
 import type { MomentWeights } from './moment'
 
 const packet = (values: Partial<Record<keyof typeof F, number>>) => {
@@ -44,14 +44,41 @@ describe('MomentReader', () => {
     expect(play(reader, packet({ section: 2, recall: 0.9 }), 2, 60).groove).toBeCloseTo(1)
   })
 
-  it('reads a build from tension and a drop from release', () => {
+  // Each row is read against the level that means it is wholly happening,
+  // since neither reaches 1 on music: `impact` fires at a release of 0.35.
+  it('reads a build from tension and a drop from release, against what each reads when full', () => {
     const reader = new MomentReader()
-    const build = reader.step(packet({ tension: 0.7, section: 3, recall: 0.9 }), 1 / 60)
-    expect(build.build).toBeCloseTo(0.7)
-    expect(build.groove).toBeCloseTo(0.3)
-    const drop = reader.step(packet({ release: 0.5, section: 4, recall: 0.9 }), 1 / 60)
+    const half = reader.step(packet({ tension: BUILD_FULL / 2, section: 3, recall: 0.9 }), 1 / 60)
+    expect(half.build).toBeCloseTo(0.5)
+    expect(half.groove).toBeCloseTo(0.5)
+    const drop = reader.step(packet({ release: DROP_FULL / 2, section: 4, recall: 0.9 }), 1 / 60)
     expect(drop.drop).toBeCloseTo(0.5)
     expect(drop.build).toBe(0)
+  })
+
+  // What a drop-only study needs in order to be cast at all. Read raw, a real
+  // drop was 0.41 drop and 0.59 groove, and a study for groove and drop both
+  // outscored it every time.
+  it('reads a drop that fired as a whole drop, and a real build as a whole build', () => {
+    const reader = new MomentReader()
+    const drop = reader.step(packet({ release: 0.41, section: 4, recall: 0.9 }), 1 / 60)
+    expect(drop.drop).toBeCloseTo(1)
+    expect(drop.groove).toBeCloseTo(0)
+    const build = reader.step(packet({ tension: 0.7, section: 3, recall: 0.9 }), 1 / 60)
+    expect(build.build).toBeCloseTo(1)
+  })
+
+  // Seen on a real track: tension was still 0.41 on the frame of the impact,
+  // the moment read as build 0.47 and drop 0.53, and the build's flow kept
+  // its seat through both drops.
+  it('ends the build when the drop fires, however slow tension is to let go', () => {
+    const reader = new MomentReader()
+    const landed = reader.step(
+      packet({ tension: 0.41, release: 0.37, section: 4, recall: 0.9 }),
+      1 / 60,
+    )
+    expect(landed.drop).toBeGreaterThan(0.9)
+    expect(landed.build).toBeLessThan(0.1)
   })
 
   // An intro is a quiet passage with nothing behind it. The weight comes out

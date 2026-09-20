@@ -19,7 +19,7 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { ANALYTIC_RANGES } from '../impls/analytic.params'
 import { SHARD_RANGES } from '../impls/shards.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
-import { POST_KNOBS, POST_LANES } from '../post/params'
+import { MAX_WEAVE, POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostKnob } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import type { AnalyticKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs'
@@ -81,6 +81,9 @@ const SAFE_POST: Record<PostKnob, readonly [number, number]> = {
   // row that runs away.
   'grade.vignette': [-1, 1],
   'grade.saturation': [0, 2],
+  // Below 0 for the same reason as the vignette: a tension row that stills the
+  // weave may carry it past nothing, and the uniform holds it to 0 to MAX_WEAVE.
+  'grade.weave': [-2, MAX_WEAVE],
   'tonemap.exposure': [0.6, 1.5],
   'tonemap.shoulder': [0, 0.98],
   'grain.amount': [0, 0.08],
@@ -251,6 +254,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'warm-soft': {
     'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
     'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.weave': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.beat':
       'the beat is already inside the stage: the split is amount + beat × beatPulse',
@@ -259,6 +263,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'clean-glass': {
     'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
     'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.weave': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
     'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
@@ -268,6 +273,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'hard-clean': {
     'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
     'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.weave': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.beat':
       'the beat is already inside the stage: the split is amount + beat × beatPulse',
@@ -275,6 +281,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
   },
   'squeeze': {
+    'grade.weave': 'the weave is film’s and this look says nothing of it, so it rests at none',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
     'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
@@ -284,11 +291,18 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'impact-flash': {
     'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
     'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.weave': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
     'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
     'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
     'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
+  },
+  'film': {
+    'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
+    'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
+    'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
+    'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
   },
 }
 

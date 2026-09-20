@@ -120,12 +120,12 @@ export type GrainParams = {
 }
 
 /**
- * The frame's edges and its colour, in the composite before the tonemap, so
- * the tonemap still bends the highlights that survive it. Both numbers are
- * neutral at rest, so switching the stage on with nothing said changes nothing.
- * `writePostUniform` holds each to its own range, because a row may carry a
- * lane past its end (an impact undoing what tension did does exactly that) and
- * the shader should only ever see a number it can use.
+ * The frame's edges, its colour and its steadiness, in the composite before the
+ * tonemap, so the tonemap still bends the highlights that survive it. All three
+ * numbers are neutral at rest, so switching the stage on with nothing said
+ * changes nothing. `writePostUniform` holds each to its own range, because a
+ * row may carry a lane past its end (an impact undoing what tension did does
+ * exactly that) and the shader should only ever see a number it can use.
  */
 export type GradeParams = {
   enabled: boolean
@@ -143,6 +143,15 @@ export type GradeParams = {
    * shift the tonemap is built to avoid.
    */
   saturation: number
+  /**
+   * Gate weave: how far the whole frame drifts, at most, in pixels on a 1080
+   * pixel canvas and scaled with the canvas, 0 for none. It is the way a strip
+   * wanders in the gate of a projector, a pixel or two, slowly and never
+   * repeating, and it is meant to be felt and not seen: a weave that reads as
+   * motion is too much. See `gateWeave` for the path and `weaveUv` for how the
+   * frame's edge is kept clean.
+   */
+  weave: number
 }
 
 export type PostParams = {
@@ -206,8 +215,9 @@ export const DEFAULT_POST_PARAMS: PostParams = {
   },
   chromatic: { enabled: true, amount: 0.0008, beat: 0.003 },
   // Off, so no shipped cast prints `grade` in `data-post`, and neutral even
-  // when a look switches it on: no vignette and every colour as it was.
-  grade: { enabled: false, vignette: 0, saturation: 1 },
+  // when a look switches it on: no vignette, every colour as it was, and a
+  // frame that stays where it is.
+  grade: { enabled: false, vignette: 0, saturation: 1, weave: 0 },
   tonemap: { enabled: true, exposure: 1, shoulder: 0.6 },
   grain: { enabled: true, amount: 0.02 },
 }
@@ -307,8 +317,8 @@ export function freshWeight(params: PostParams, features: Float32Array): number 
   return feedbackStep(params.feedback, features[F.dt] ?? 0).fresh
 }
 
-/** Floats in the shared uniform, twelve vec4s; PostParams in post.common.wgsl must match. */
-export const POST_UNIFORM_FLOATS = 48
+/** Floats in the shared uniform, thirteen vec4s; PostParams in post.common.wgsl must match. */
+export const POST_UNIFORM_FLOATS = 52
 
 /**
  * Points along the ribbon. A few hundred is a smooth line at 4K, and the
@@ -444,6 +454,98 @@ export function vignetteLight(distance: number, vignette: number): number {
  */
 const gradeValue = (value: number, neutral: number) =>
   Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : neutral
+
+/**
+ * The most weave the uniform will carry, in pixels at 1080 high. Past a few
+ * pixels the drift stops being a wander in a gate and starts to be a camera
+ * shake, and the frame's edge is cropped by twice this, so a row that runs
+ * away is held here rather than trusted.
+ */
+export const MAX_WEAVE = 4
+
+/** The canvas height a `grade.weave` is written against, the ribbon's as well. */
+const WEAVE_REFERENCE_HEIGHT = 1080
+
+/**
+ * One axis of the weave: a few sines that never line up, so the path does not
+ * repeat over any span anyone will watch. Rates are in hertz and the weights
+ * sum to 1 (in sixteenths, so the sum is exact), which is what makes the path stay
+ * inside -1 to 1. The slowest is the wander and the fastest is the flutter on
+ * top of it, kept small; the whole path moves at most about 2 pixels a second
+ * per pixel of weave.
+ */
+type WeaveTerm = { hertz: number; phase: number; weight: number }
+
+const WEAVE_X: readonly WeaveTerm[] = [
+  { hertz: 0.113, phase: 0.7, weight: 0.5 },
+  { hertz: 0.271, phase: 2.9, weight: 0.3125 },
+  { hertz: 0.613, phase: 4.4, weight: 0.1875 },
+]
+
+// Different rates from the horizontal, and none of them a simple ratio of one
+// there, so the frame wanders in a loop that does not close instead of along a
+// diagonal or round a circle.
+const WEAVE_Y: readonly WeaveTerm[] = [
+  { hertz: 0.157, phase: 5.1, weight: 0.5 },
+  { hertz: 0.349, phase: 1.3, weight: 0.3125 },
+  { hertz: 0.719, phase: 3.6, weight: 0.1875 },
+]
+
+const weaveAxis = (terms: readonly WeaveTerm[], seconds: number) => {
+  let sum = 0
+  for (const term of terms)
+    sum += term.weight * Math.sin(Math.PI * 2 * term.hertz * seconds + term.phase)
+  return sum
+}
+
+/**
+ * Where the strip sits in the gate, as a unit offset on each axis, -1 to 1.
+ * It is a function of the clock and of nothing else, so it reads the same at
+ * any frame rate and the same song weaves the same way twice; nothing here
+ * counts frames or draws a random number. The clock is the packet's `time`
+ * unwrapped, since the grain's is wrapped every thousand seconds and a weave
+ * that jumped there would be seen.
+ */
+export function gateWeave(seconds: number): [number, number] {
+  const clock = Number.isFinite(seconds) ? seconds : 0
+  return [weaveAxis(WEAVE_X, clock), weaveAxis(WEAVE_Y, clock)]
+}
+
+/**
+ * What the composite needs to move the frame: the offset it samples at and how
+ * much of the frame it gives up to keep the edge clean, both in canvas uv.
+ *
+ * A frame shifted by a pixel shows one pixel of whatever lies past its edge. A
+ * clamped sampler would repeat the last row there, a streak that comes and goes
+ * along the border, which is the seam this exists to prevent. So the frame is
+ * sampled from a span narrowed by the weave's own reach on both sides
+ * (`shrink`), which is under a fifth of a percent of the frame for each pixel
+ * of weave, and the offset then moves that span about inside the picture and
+ * never off it. It costs a fixed crop the size of the weave and nothing else,
+ * and at a weave of 0 it is the identity exactly, so nothing else moves.
+ */
+export type WeaveUv = {
+  offset: readonly [number, number]
+  shrink: readonly [number, number]
+}
+
+const NO_WEAVE: WeaveUv = { offset: [0, 0], shrink: [0, 0] }
+
+export function weaveUv(weave: number, seconds: number, width: number, height: number): WeaveUv {
+  const reach = Number.isFinite(weave) ? Math.min(Math.max(weave, 0), MAX_WEAVE) : 0
+  // Plain zeros and not a product with them, which is a negative zero half the
+  // time.
+  if (reach === 0) return NO_WEAVE
+  // Pixels at this canvas. A canvas with no area has nowhere to move the frame.
+  const pixels = (reach * height) / WEAVE_REFERENCE_HEIGHT
+  const across = Math.max(1, width)
+  const down = Math.max(1, height)
+  const [x, y] = gateWeave(seconds)
+  return {
+    offset: [(pixels * x) / across, (pixels * y) / down],
+    shrink: [(2 * pixels) / across, (2 * pixels) / down],
+  }
+}
 
 const clone = (params: PostParams): PostParams => ({
   enabled: params.enabled,
@@ -635,6 +737,12 @@ export const POST_LANES = {
       p.grade.saturation = value
     },
   },
+  'grade.weave': {
+    read: (p: PostParams) => p.grade.weave,
+    write: (p: PostParams, value: number) => {
+      p.grade.weave = value
+    },
+  },
   'tonemap.exposure': {
     read: (p: PostParams) => p.tonemap.exposure,
     write: (p: PostParams, value: number) => {
@@ -806,5 +914,14 @@ export function writePostUniform(
   out[45] = graded ? gradeValue(params.grade.saturation, 1) : 1
   out[46] = VIGNETTE_SOFTNESS
   out[47] = 0
+
+  // The weave, in a vec4 of its own, the grade's having no float left. The
+  // offset and the crop are worked out here in canvas uv, so the composites
+  // only add and scale, and off is zeros, which changes no sample at all.
+  const weave = weaveUv(graded ? params.grade.weave : 0, features[F.time] ?? 0, width, height)
+  out[48] = weave.offset[0]
+  out[49] = weave.offset[1]
+  out[50] = weave.shrink[0]
+  out[51] = weave.shrink[1]
   return out
 }

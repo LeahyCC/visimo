@@ -117,6 +117,8 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'grade.vignette': [0, 1],
   // The stage stops at untouched, so there is nothing above 1 to reach.
   'grade.saturation': [0, 1],
+  // Pixels at 1080 high; the uniform holds it to MAX_WEAVE.
+  'grade.weave': [0, 4],
   'tonemap.exposure': [0, 4],
   'tonemap.shoulder': [0, 2],
   'grain.amount': [0, 0.5],

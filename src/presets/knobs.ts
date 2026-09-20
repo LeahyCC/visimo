@@ -196,10 +196,25 @@ export type KaleidoscopeKnob = (typeof KALEIDOSCOPE_KNOBS)[number]
  * picture winds into a spiral. Both are signed, and positive is clockwise on
  * screen.
  *
+ * `curl` is the speed of a drifting, folding pattern that neither gathers nor
+ * thins the picture, in field widths a second at the fastest a point can go,
+ * and 0 is off. `curlScale` is how many cells the pattern has across the
+ * canvas's longer side, and `curlRate` is how fast the pattern itself
+ * evolves, in turns a second of its slowest part. The last two shape the
+ * term and are not a strength, so presence leaves them alone.
+ *
  * A term added later is a coefficient here and a few lines of
  * `impls/analytic.params.ts`; that file's header is the recipe.
  */
-export const ANALYTIC_KNOBS = ['radial', 'falloff', 'swirl', 'twist'] as const
+export const ANALYTIC_KNOBS = [
+  'radial',
+  'falloff',
+  'swirl',
+  'twist',
+  'curl',
+  'curlScale',
+  'curlRate',
+] as const
 export type AnalyticKnob = (typeof ANALYTIC_KNOBS)[number]
 
 /**

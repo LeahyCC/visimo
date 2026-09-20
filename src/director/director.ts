@@ -244,35 +244,51 @@ export function pickCast(options: PickOptions): PickedCast | undefined {
   if (looks.length === 0) return undefined
   const look = choose(looks, rotation, margin, variety)
   const flows = rank('flow')
-  const flow = flows.length > 0 ? choose(flows, rotation, margin, variety) : undefined
-
-  const held: Study[] = flow ? [flow, look] : [look]
-  let spent = held.reduce((sum, study) => sum + COST_OF[study.cost], 0)
-  const inks: string[] = []
   const pool = rank('ink')
   const floor = (pool[0]?.value ?? 0) * INK_SHARE
-  while (inks.length < MAX_INKS) {
-    const room = inks.length === 0 ? Infinity : budget - spent
-    const fits = pool.filter(
-      (entry) =>
-        !inks.includes(entry.study.id) &&
-        entry.value >= floor &&
-        COST_OF[entry.study.cost] <= room &&
-        agrees(entry.study, held) &&
-        supplied(entry.study, held),
-    )
-    if (fits.length === 0) break
-    // The rotation walks on per slot, so two sections that want the same
-    // three inks are handed them in different combinations rather than the
-    // same one twice over.
-    const taken = choose(fits, rotation === 0 ? 0 : rotation + inks.length, margin, variety)
-    inks.push(taken.id)
-    held.push(taken)
-    spent += COST_OF[taken.cost]
+
+  const castOn = (flow: Study | undefined): PickedCast | undefined => {
+    const held: Study[] = flow ? [flow, look] : [look]
+    let spent = held.reduce((sum, study) => sum + COST_OF[study.cost], 0)
+    const inks: string[] = []
+    while (inks.length < MAX_INKS) {
+      const room = inks.length === 0 ? Infinity : budget - spent
+      const fits = pool.filter(
+        (entry) =>
+          !inks.includes(entry.study.id) &&
+          entry.value >= floor &&
+          COST_OF[entry.study.cost] <= room &&
+          agrees(entry.study, held) &&
+          supplied(entry.study, held),
+      )
+      if (fits.length === 0) break
+      // The rotation walks on per slot, so two sections that want the same
+      // three inks are handed them in different combinations rather than the
+      // same one twice over.
+      const taken = choose(fits, rotation === 0 ? 0 : rotation + inks.length, margin, variety)
+      inks.push(taken.id)
+      held.push(taken)
+      spent += COST_OF[taken.cost]
+    }
+
+    if (inks.length === 0) return undefined
+    return flow ? { flow: flow.id, inks, look: look.id } : { inks, look: look.id }
   }
 
-  if (inks.length === 0) return undefined
-  return flow ? { flow: flow.id, inks, look: look.id } : { inks, look: look.id }
+  if (flows.length === 0) return castOn(undefined)
+  // The flow is chosen before the inks, and an ink can need what only some
+  // flows bring: the dye draws nothing without a fluid. A flow that leaves
+  // every ink the moment likes with nothing to sit on would leave the cast
+  // empty, which the director reads as "keep what is on screen" and at the
+  // start of a track is a black canvas, so the next flow in rank order is
+  // tried instead.
+  const chosen = choose(flows, rotation, margin, variety)
+  for (const study of [chosen, ...flows.map((entry) => entry.study).filter((s) => s !== chosen)]) {
+    const cast = castOn(study)
+    if (cast) return cast
+  }
+
+  return undefined
 }
 
 /**

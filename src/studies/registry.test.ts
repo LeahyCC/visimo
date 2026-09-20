@@ -20,7 +20,7 @@ import { ANALYTIC_RANGES } from '../impls/analytic.params'
 import { DUST_RANGES } from '../impls/dust.params'
 import { SHARD_RANGES } from '../impls/shards.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
-import { POST_KNOBS, POST_LANES } from '../post/params'
+import { MAX_WEAVE, POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostKnob } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import type { AnalyticKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs'
@@ -82,6 +82,9 @@ const SAFE_POST: Record<PostKnob, readonly [number, number]> = {
   // row that runs away.
   'grade.vignette': [-1, 1],
   'grade.saturation': [0, 2],
+  // Below 0 for the same reason as the vignette: a tension row that stills the
+  // weave may carry it past nothing, and the uniform holds it to 0 to MAX_WEAVE.
+  'grade.weave': [-2, MAX_WEAVE],
   'tonemap.exposure': [0.6, 1.5],
   'tonemap.shoulder': [0, 0.98],
   'grain.amount': [0, 0.08],
@@ -176,6 +179,18 @@ const BUILT_LIGHT: Record<string, Record<string, { max: number; why: string }>> 
 }
 
 /**
+ * What a flow that has no curl in it says of the three curl knobs. Its speed
+ * is 0 and the other two are the shape curl drift rests at, which is why they
+ * sit still and not because nobody thought of them.
+ */
+const UNUSED_CURL = {
+  curl: 'the curl term is off in this flow, and its speed at 0 is what off means',
+  curlScale:
+    'a shape of the curl term, held where curl drift rests so a change to it blends only speed',
+  curlRate: 'the same: a shape of the curl term, held where curl drift rests',
+}
+
+/**
  * Knobs a study deliberately leaves still, and why. A knob that is in neither
  * this list nor a mapping row fails, so leaving one static is a decision
  * someone writes down rather than an oversight.
@@ -204,9 +219,17 @@ const ALLOWED: Record<string, Record<string, string>> = {
       'a plain zoom about the middle: the shape of the pull is what makes it read as gathering',
     swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
     twist: 'the same, and a twist that varies with radius is the polar twist study',
+    ...UNUSED_CURL,
   },
   'radial-burst': {
     swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
+    twist: 'the same, and a twist that varies with radius is the polar twist study',
+    ...UNUSED_CURL,
+  },
+  'curl-drift': {
+    radial: 'this flow is the curl term alone; a pull to the middle is the implode study',
+    falloff: 'the shape of the radial term, which this flow does not use',
+    swirl: 'this flow is the curl term alone; a turn about the centre is the vortex study',
     twist: 'the same, and a twist that varies with radius is the polar twist study',
   },
   'dye-plumes': {
@@ -239,6 +262,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'warm-soft': {
     'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
     'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.weave': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.beat':
       'the beat is already inside the stage: the split is amount + beat × beatPulse',
@@ -247,6 +271,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'clean-glass': {
     'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
     'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.weave': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
     'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
@@ -256,6 +281,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'hard-clean': {
     'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
     'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.weave': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.beat':
       'the beat is already inside the stage: the split is amount + beat × beatPulse',
@@ -263,6 +289,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
   },
   'squeeze': {
+    'grade.weave': 'the weave is film’s and this look says nothing of it, so it rests at none',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
     'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
@@ -272,11 +299,18 @@ const ALLOWED: Record<string, Record<string, string>> = {
   'impact-flash': {
     'grade.vignette': 'the grade is off in this look, so its number is the stack’s neutral one',
     'grade.saturation': 'the grade is off in this look, so its number is the stack’s neutral one',
+    'grade.weave': 'the grade is off in this look, so its number is the stack’s neutral one',
     'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
     'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
     'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
     'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
     'grain.amount': 'the grain is off in this look, so its number is the stack’s default',
+  },
+  'film': {
+    'bloom.knee': 'the softness of the threshold; the threshold itself is what moves',
+    'chromatic.amount': 'the split is off in this look, so its numbers are the stack’s defaults',
+    'chromatic.beat': 'the split is off in this look, so its numbers are the stack’s defaults',
+    'tonemap.shoulder': 'where the roll-off starts, which is a shape and not a level',
   },
 }
 

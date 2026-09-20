@@ -5,11 +5,13 @@
  * you can write down, and `analytic.params.ts` beside this file is the maths
  * and the recipe for adding another.
  *
- * It holds one texture and one uniform and keeps nothing between frames: the
- * field is a pure function of this frame's knobs, so there is no state to
- * carry, no warm-up and nothing to reset. That is also why it reads the same
- * at any frame rate. The fluid is the opposite on every count, and the two
- * sit under the same `FlowImpl` and blend through `FlowBlend`.
+ * It holds one texture and one uniform and keeps one number between frames:
+ * the field is a pure function of this frame's knobs and the curl term's
+ * clock, so there is no field to carry, no warm-up and nothing to reset but
+ * that clock. The clock is the sum of `curlRate` times the real step, which
+ * is why the pattern reads the same at any frame rate. The fluid is the
+ * opposite on every count, and the two sit under the same `FlowImpl` and blend
+ * through `FlowBlend`.
  *
  * With every coefficient at zero, which is what implode at a tension of zero
  * is, no pass is encoded and no field is offered: the post stack then binds
@@ -23,6 +25,7 @@ import type { FlowImpl } from '../scenes/Impl'
 import type { Flow, SceneContext } from '../scenes/Scene'
 import source from '../shaders/analytic.field.wgsl?raw'
 import {
+  advanceCurlClock,
   ANALYTIC_SIZE,
   ANALYTIC_UNIFORM_FLOATS,
   analyticField,
@@ -48,6 +51,8 @@ export class AnalyticFlow implements FlowImpl {
   private visible: Extent = { x: 0.5, y: 0.5 }
   private knobs: Tuning = {}
   private presence = 1
+  /** The curl pattern's place in its evolution, in turns; see `advanceCurlClock`. */
+  private clock = 0
   /** Whether the last `simulate` wrote a field worth reading back along. */
   private wrote = false
 
@@ -111,19 +116,22 @@ export class AnalyticFlow implements FlowImpl {
   }
 
   /**
-   * The packet and the step are not read. Every magnitude arrives in `knobs`
-   * with its mapping already applied, and the field is a rate rather than
-   * something integrated, so there is nothing for a step to advance.
+   * The packet is not read. Every magnitude arrives in `knobs` with its
+   * mapping already applied, and the field is a rate rather than something
+   * integrated. The step is read for the one thing that is, the curl clock,
+   * which runs whether or not the curl is on, so that a study which brings it
+   * in with a build finds the pattern where the seconds have left it.
    */
-  update(_features: Float32Array, _dt: number, knobs: Tuning, presence: number) {
+  update(_features: Float32Array, dt: number, knobs: Tuning, presence: number) {
     this.knobs = knobs
     this.presence = presence
+    this.clock = advanceCurlClock(this.clock, knobs, dt)
   }
 
   simulate(encoder: GPUCommandEncoder) {
     const gear = this.gear
     if (!gear) return
-    const field = analyticField(this.knobs, this.presence, this.visible)
+    const field = analyticField(this.knobs, this.presence, this.visible, this.clock)
     this.wrote = fieldMoves(field)
     if (!this.wrote) return
     gear.device.queue.writeBuffer(gear.uniform, 0, writeAnalyticUniform(field, this.data))
@@ -149,5 +157,6 @@ export class AnalyticFlow implements FlowImpl {
     this.gear?.uniform.destroy()
     this.gear = null
     this.wrote = false
+    this.clock = 0
   }
 }

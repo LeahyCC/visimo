@@ -306,8 +306,9 @@ describe('carrying the history along a flow', () => {
     const after = write(carrying(), features, 1920, 1080, coverOf(1920, 1080))
     expect(Array.from(after.slice(0, 28))).toEqual(Array.from(before.slice(0, 28)))
     // The ribbon's two vec4s went on past the flow block and the floor, and
-    // the grade's went on past those: twelve vec4s, 192 bytes.
-    expect(POST_UNIFORM_FLOATS).toBe(48)
+    // the grade's went on past those and the gate weave's past that: thirteen
+    // vec4s, 208 bytes.
+    expect(POST_UNIFORM_FLOATS).toBe(52)
   })
 
   it('makes the carry vanish with no flow, no carry or the stage off', () => {

@@ -158,6 +158,7 @@ export const LOOK_STRENGTH_KNOBS = [
   'chromatic.beat',
   'grade.vignette',
   'grade.saturation',
+  'grade.weave',
   'grain.amount',
 ] as const satisfies readonly PostKnob[]
 
@@ -179,6 +180,7 @@ export const LOOK_NEUTRAL: Readonly<Record<LookStrengthKnob, number>> = {
   'chromatic.beat': 0,
   'grade.vignette': 0,
   'grade.saturation': 1,
+  'grade.weave': 0,
   'grain.amount': 0,
 }
 

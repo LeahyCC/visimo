@@ -15,18 +15,19 @@ void main() {
   uv = p;
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`
-// The uniform's twelve vec4s. The eighth is the flow block and nothing on this
-// path solves a velocity field, so it is uploaded and never read; the ninth is
-// the floor, which the feedback pass below does use. The tenth and eleventh
-// are the ribbon's, which this path does not draw, so nothing reads them. The
-// last is the grade, which only the composite reads. `data` uploads as many of
-// them as the program it belongs to declares live, which is the highest one it
-// reads, so the feedback pass sends nine and the composite all twelve.
+// The uniform's thirteen vec4s. The eighth is the flow block and nothing on
+// this path solves a velocity field, so it is uploaded and never read; the
+// ninth is the floor, which the feedback pass below does use. The tenth and
+// eleventh are the ribbon's, which this path does not draw, so nothing reads
+// them. The twelfth is the grade and the last is the gate weave, which only the
+// composite reads. `data` uploads as many of them as the program it belongs to
+// declares live, which is the highest one it reads, so the feedback pass sends
+// nine and the composite all thirteen.
 const COMMON = `#version 300 es
 precision highp float;
 in vec2 uv;
 out vec4 result;
-uniform vec4 post[12];
+uniform vec4 post[13];
 uniform sampler2D source;
 `
 const BRIGHT = `
@@ -83,12 +84,17 @@ uniform sampler2D bloom2;
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 void main() {
   vec2 split = (uv - 0.5) * post[4].x;
-  vec3 colour = vec3(texture(source, clamp(uv - split, 0.0, 1.0)).r,
-                     texture(source, uv).g,
-                     texture(source, clamp(uv + split, 0.0, 1.0)).b);
-  vec3 glow = texture(bloom0, uv).rgb * post[3].x
-            + texture(bloom1, uv).rgb * post[3].y
-            + texture(bloom2, uv).rgb * post[3].z;
+  // The gate weave, as post.composite.wgsl has it: the frame is read from a
+  // span narrowed about the middle and moved, so it never leaves the texture,
+  // while the vignette and the split's centre stay with the screen. Both
+  // terms are 0 with the weave off, so framed is uv exactly.
+  vec2 framed = uv - (uv - 0.5) * post[12].zw + post[12].xy;
+  vec3 colour = vec3(texture(source, clamp(framed - split, 0.0, 1.0)).r,
+                     texture(source, framed).g,
+                     texture(source, clamp(framed + split, 0.0, 1.0)).b);
+  vec3 glow = texture(bloom0, framed).rgb * post[3].x
+            + texture(bloom1, framed).rgb * post[3].y
+            + texture(bloom2, framed).rgb * post[3].z;
   colour += glow * post[2].z;
   // The grade, as post.composite.wgsl has it: the vignette, then the colour
   // scaled about its luminance, both exact copies at the neutral numbers.
@@ -130,8 +136,8 @@ type Pass = {
  * no compute here to solve a fluid with, so the feedback pass carries nothing
  * along a flow; `feedback.carry` reads as zero whatever a preset asks for.
  * `feedback.floor` and `feedback.ceiling` need no flow, so both apply here
- * exactly as they do on the WebGPU path, and so does the grade, which is two
- * lines of the composite. The ribbon is skipped: it wants the
+ * exactly as they do on the WebGPU path, and so does the grade, a few lines of
+ * the composite, the gate weave among them. The ribbon is skipped: it wants the
  * analyser's waveform and a strip drawn into the scene's target, and this path
  * has neither. A preset that turns it on still draws, without the line, and
  * nothing here reads or throws on its numbers.

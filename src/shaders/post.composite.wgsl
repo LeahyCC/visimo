@@ -1,6 +1,7 @@
 // The last pass: chromatic aberration on the way in, the three blurred bloom
-// levels added, then the grade, the tonemap and the grain. This is the only
-// pass that writes the swap chain, so it is the only one that has to end
+// levels added, then the grade, the tonemap and the grain. The gate weave moves
+// where the picture is read from, so it comes before all of them. This is the
+// only pass that writes the swap chain, so it is the only one that has to end
 // inside 0 to 1.
 
 @group(0) @binding(0) var<uniform> post: PostParams;
@@ -24,17 +25,26 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
   let split = centred * post.chroma.x;
   let low = vec2<f32>(0.0);
   let high = vec2<f32>(1.0);
+
+  // Gate weave. The picture, the split and the glow are all read from `framed`,
+  // which is the frame's own uv narrowed about the middle by the weave's reach
+  // and then moved by the weave, so the frame drifts as one and the read never
+  // leaves the texture: there is no clamped edge to streak. The vignette, the
+  // split's centre and the grain stay on `in.uv`, because they belong to the
+  // lens and the screen and not to the film. Both terms are 0 with the weave
+  // off, so `framed` is `in.uv` exactly.
+  let framed = in.uv - centred * post.weave.zw + post.weave.xy;
   var colour = vec3<f32>(
-    textureSample(source, samp, clamp(in.uv - split, low, high)).r,
-    textureSample(source, samp, in.uv).g,
-    textureSample(source, samp, clamp(in.uv + split, low, high)).b,
+    textureSample(source, samp, clamp(framed - split, low, high)).r,
+    textureSample(source, samp, framed).g,
+    textureSample(source, samp, clamp(framed + split, low, high)).b,
   );
 
   // The levels are sampled whatever their weights, so the branch stays out of
   // the shader; a disabled bloom writes zero weights.
-  var glow = textureSample(bloom0, samp, in.uv).rgb * post.weights.x;
-  glow += textureSample(bloom1, samp, in.uv).rgb * post.weights.y;
-  glow += textureSample(bloom2, samp, in.uv).rgb * post.weights.z;
+  var glow = textureSample(bloom0, samp, framed).rgb * post.weights.x;
+  glow += textureSample(bloom1, samp, framed).rgb * post.weights.y;
+  glow += textureSample(bloom2, samp, framed).rgb * post.weights.z;
   colour += glow * post.bloom.z;
 
   // The grade sits after the bloom, so the glow closes in with the frame, and

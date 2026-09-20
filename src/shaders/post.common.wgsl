@@ -16,6 +16,7 @@ struct PostParams {
   ribbon: vec4<f32>,    // intensity, width and amplitude in pixels, circle (0 or 1)
   ribbonTint: vec4<f32>, // colour rgb, circle radius in pixels
   grade: vec4<f32>,     // vignette (0 none), saturation (1 untouched), vignette edge width, 0
+  weave: vec4<f32>,     // gate weave: sample offset xy, span narrowed by zw, all in uv (0 none)
 }
 
 struct Blit {

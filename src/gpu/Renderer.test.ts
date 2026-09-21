@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { rowsForAxis } from '../director/character'
 import { LOFI, METAL, playSong, SONG_SECONDS } from '../director/song.fixture'
+import type { PaletteChoice } from '../palettes/palette'
 import {
   defaultPostParams,
   mergePostParams,
@@ -280,26 +281,6 @@ vi.mock('../impls/ShardsInk', () => ({
   },
 }))
 
-vi.mock('../impls/DustInk', () => ({
-  DustInk: class {
-    readonly detail = ''
-    constructor() {
-      impls.built.dust = (impls.built.dust ?? 0) + 1
-    }
-    init() {}
-    resize() {}
-    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
-      record('dust', knobs, presence)
-    }
-    render() {
-      impls.drawn.push('dust')
-    }
-    dispose() {
-      impls.disposed.dust = (impls.disposed.dust ?? 0) + 1
-    }
-  },
-}))
-
 vi.mock('../impls/CausticsInk', () => ({
   CausticsInk: class {
     readonly detail = ''
@@ -360,22 +341,26 @@ vi.mock('../impls/SpectrumInk', () => ({
   },
 }))
 
-vi.mock('../impls/SparksInk', () => ({
-  SparksInk: class {
+// The dust and the sparks are two profiles over one implementation, so one
+// stand-in covers both and keys itself off the profile it was handed.
+vi.mock('../impls/ParticleField', () => ({
+  ParticleField: class {
     readonly detail = ''
-    constructor() {
-      impls.built.sparks = (impls.built.sparks ?? 0) + 1
+    private readonly name: string
+    constructor(profile: { label: string }) {
+      this.name = profile.label
+      impls.built[this.name] = (impls.built[this.name] ?? 0) + 1
     }
     init() {}
     resize() {}
     update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
-      record('sparks', knobs, presence)
+      record(this.name, knobs, presence)
     }
     render() {
-      impls.drawn.push('sparks')
+      impls.drawn.push(this.name)
     }
     dispose() {
-      impls.disposed.sparks = (impls.disposed.sparks ?? 0) + 1
+      impls.disposed[this.name] = (impls.disposed[this.name] ?? 0) + 1
     }
   },
 }))
@@ -416,6 +401,26 @@ vi.mock('../impls/LasersInk', () => ({
     }
     dispose() {
       impls.disposed.lasers = (impls.disposed.lasers ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/PetalsInk', () => ({
+  PetalsInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.petals = (impls.built.petals ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('petals', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('petals')
+    }
+    dispose() {
+      impls.disposed.petals = (impls.disposed.petals ?? 0) + 1
     }
   },
 }))
@@ -960,11 +965,14 @@ describe('a pinned cast reaches its implementations unchanged', () => {
       expect(post.enabled).toBe(expected.enabled)
       for (const stage of POST_STAGES)
         expect(post[stage].enabled, `${golden.preset} ${stage}`).toBe(expected[stage].enabled)
+      // The two knobs the wide bloom added are the looks' to move and are
+      // pinned in studies/cast.test.ts; the captures never had them.
       for (const knob of POST_KNOBS)
-        expect(POST_LANES[knob].read(post), `${golden.preset} ${knob}`).toBeCloseTo(
-          POST_LANES[knob].read(expected),
-          10,
-        )
+        if (knob !== 'bloom.radius' && knob !== 'bloom.tint')
+          expect(POST_LANES[knob].read(post), `${golden.preset} ${knob}`).toBeCloseTo(
+            POST_LANES[knob].read(expected),
+            10,
+          )
     })
   }
 
@@ -1053,11 +1061,15 @@ describe('the director drives the cast', () => {
   async function playThrough(
     preset: 'auto' | ReturnType<typeof castOrDefault>,
     character?: Character,
+    each?: (palette: PaletteChoice, live: number) => void,
   ) {
     vi.resetModules()
     impls.reset()
     stack.reset = 0
     const fresh = (await import('./Renderer')).renderer
+    // The palette is module state, so the copy the renderer just built is the
+    // one to read, and it is only in the registry now the renderer is imported.
+    const { heldPalette } = await import('../palettes/active')
     const { element, draw } = sizedCanvas(1280, 720)
     audio.attached = true
     fresh.setPreset(preset)
@@ -1069,6 +1081,7 @@ describe('the director drives the cast', () => {
       audio.packet = frame.features
       now += 1000 / FPS
       draw(now)
+      each?.(heldPalette(), fresh.liveCast.studies.length)
       frames += 1
       trace.push(
         fresh.liveCast.studies
@@ -1218,6 +1231,29 @@ describe('the director drives the cast', () => {
     expect(new Set(song.trace).size).toBe(1)
     expect(song.renderer.settled).toBe(1)
     song.renderer.dispose()
+  })
+
+  // The colour follows the look, and a pinned cast is exempt: it is a fixed
+  // picture, drawn before looks named a palette.
+  it('colours a chosen cast by its looks, and holds a pinned one to classic', async () => {
+    const chosen = new Set<string>()
+    const auto = await playThrough('auto', undefined, (palette, live) => {
+      // The first frame, before the director has chosen anything, is classic.
+      if (live === 0) return
+      chosen.add(palette.from)
+      chosen.add(palette.to)
+    })
+    auto.renderer.dispose()
+    // The song changes look as it goes, so the colour changes with it.
+    expect(chosen.size).toBeGreaterThan(1)
+    expect(chosen.has('classic')).toBe(false)
+
+    const fixed = new Set<string>()
+    const pinned = await playThrough(castOrDefault('plume'), undefined, (palette) => {
+      fixed.add(`${palette.from} ${palette.to} ${palette.mix}`)
+    })
+    pinned.renderer.dispose()
+    expect([...fixed]).toEqual(['classic classic 0'])
   })
 
   // Everything the director holds is about one song. Carried into the next,
@@ -1923,12 +1959,14 @@ describe('the study bench', () => {
     expect(impls.drawn).toEqual(['ribbon', 'sparks'])
     expect(impls.seen.sparks?.presence).toBe(1)
     expect(Object.keys(impls.seen.sparks?.knobs ?? {}).sort()).toEqual([...SPARKS_KNOBS].sort())
-    expect(impls.seen.sparks?.knobs.count).toBeGreaterThan(0)
-    expect(impls.seen.sparks?.knobs.intensity ?? 0).toBeGreaterThan(0.1)
-    const calm = impls.seen.sparks?.knobs.rate ?? 0
+    // The count is the pool, which is tens of thousands of slots on the GPU,
+    // and the light of one particle among them is a small number.
+    expect(impls.seen.sparks?.knobs.count ?? 0).toBeGreaterThan(10000)
+    expect(impls.seen.sparks?.knobs.intensity ?? 0).toBeGreaterThan(0)
+    const calm = impls.seen.sparks?.knobs.burst ?? 0
 
     // The study's tension row reaches the ink through the resolver: a build
-    // makes the sparks come faster.
+    // makes a hit throw more.
     renderer.setBench({
       live: renderer.liveCast,
       frame: (packet) => {
@@ -1937,7 +1975,7 @@ describe('the study bench', () => {
       },
     })
     draw(2000)
-    expect(impls.seen.sparks?.knobs.rate ?? 0).toBeGreaterThan(calm + 10)
+    expect(impls.seen.sparks?.knobs.burst ?? 0).toBeGreaterThan(calm + 100)
   })
 
   it('does not build the sparks ink for a study that is faded to nothing', async () => {

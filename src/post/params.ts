@@ -9,7 +9,7 @@
  */
 import { F } from '../audio/FeatureExtractor'
 import { resampleWaveform } from '../audio/waveform'
-import { paletteAt } from '../scenes/fluid.params'
+import { paletteAt } from '../palettes/active'
 
 /**
  * The sound drawn as a line, added to the scene's own picture before the
@@ -155,8 +155,28 @@ export type BloomParams = {
   knee: number
   /** How much of the blurred levels is added back. */
   intensity: number
-  /** Weight per blur level, widest last. */
+  /**
+   * The tight glow's share between its three levels, widest last. The wide
+   * levels past them are not listed here: how much they get is `radius`.
+   */
   weights: [number, number, number]
+  /**
+   * How much of the glow goes to the wide levels, 0 to 1. At 0 it is the
+   * tight three-level glow and nothing else; at 1 most of it is a soft halo
+   * that fills the dark between things. It moves light from the tight levels
+   * to the wide ones and adds none, so a frame that is bright all over glows
+   * the same at every radius, and only a mark that stands out changes: a
+   * brighter edge inside a wider, fainter halo. See `bloomWeights`.
+   */
+  radius: number
+  /**
+   * How far the glow leans toward the song's key colour, 0 to 1, keeping its
+   * own brightest channel. At 0 the glow is the colour of what made it; at 1
+   * it is the key's colour at that brightness, so the halo carries the song's
+   * hue into the dark. A frame with no key still has one, the palette's, as
+   * the ribbon does.
+   */
+  tint: number
 }
 
 /** Red and blue read at slightly different radii; the beat pushes them apart. */
@@ -243,7 +263,13 @@ export type PostPatch = {
   grain?: Partial<GrainParams>
 }
 
-/** post.composite.wgsl has one texture binding per level, so they match. */
+/**
+ * The tight levels: half, quarter and eighth of the canvas, the glow the stage
+ * had before it had a radius. The WebGL2 path builds exactly these, and on the
+ * WebGPU path they are what a radius of 0 keeps and what `bloom.weights` names.
+ * The chain there runs on past them, to a count that follows the canvas; see
+ * `bloomLevelCount`.
+ */
 export const BLOOM_LEVELS = 3
 
 /**
@@ -285,6 +311,12 @@ export const DEFAULT_POST_PARAMS: PostParams = {
     knee: 0.2,
     intensity: 0.35,
     weights: [0.5, 0.32, 0.18],
+    // A little under a fifth of the light goes wide (0.3 of the most that
+    // may), which is a halo a thin mark can be told to have and is invisible
+    // on a frame that is already full. The tint is off: a cast that wants the
+    // song's colour in its halo asks for it.
+    radius: 0.3,
+    tint: 0,
   },
   chromatic: { enabled: true, amount: 0.0008, beat: 0.003 },
   // Off, so no shipped cast prints `grade` in `data-post`, and neutral even
@@ -498,8 +530,8 @@ export function freshWeight(params: PostParams, features: Float32Array): number 
   return feedbackStep(params.feedback, features[F.dt] ?? 0).fresh
 }
 
-/** Floats in the shared uniform, fifteen vec4s; PostParams in post.common.wgsl must match. */
-export const POST_UNIFORM_FLOATS = 60
+/** Floats in the shared uniform, sixteen vec4s; PostParams in post.common.wgsl must match. */
+export const POST_UNIFORM_FLOATS = 64
 
 /**
  * Points along the ribbon. A few hundred is a smooth line at 4K, and the
@@ -542,11 +574,12 @@ export const ribbonRuns = (params: PostParams) =>
   stageEnabled(params, 'ribbon') && params.ribbon.intensity > 0 && params.ribbon.width > 0
 
 /**
- * The colour of the line: the fluid's own palette at the song's key, scaled so
- * its brightest channel is 1. The palette's dimmest stop peaks at 0.34 and its
- * brightest at 0.94, so left as they are the line would be about a third as
- * bright in one key as in another and `intensity` would mean a different
- * thing in each. Scaled, it is the peak brightness whatever the key.
+ * The colour of the line: the palette showing, at the song's key, scaled so its
+ * brightest channel is 1. Classic's dimmest stop peaks at 0.34 and its
+ * brightest at 0.94, and the designed palettes differ from one another too, so
+ * left as they are the line would be about a third as bright in one key or one
+ * palette as in another and `intensity` would mean a different thing in each.
+ * Scaled, it is the peak brightness whatever the key.
  *
  * `offset` moves along the palette from the ribbon's own place in it, so the
  * streaks can scatter their hues around the ribbon's without a palette of
@@ -557,7 +590,7 @@ export function ribbonColour(features: Float32Array, offset = 0): [number, numbe
 }
 
 /**
- * The fluid's palette at one coordinate, scaled so its brightest channel is 1.
+ * The palette showing at one coordinate, scaled so its brightest channel is 1.
  * Split out of `ribbonColour` so an ink that spreads its colour around the
  * key, the shards, draws from the same palette at the same peak brightness
  * and does not keep a second one.
@@ -924,6 +957,18 @@ export const POST_LANES = {
       p.bloom.intensity = value
     },
   },
+  'bloom.radius': {
+    read: (p: PostParams) => p.bloom.radius,
+    write: (p: PostParams, value: number) => {
+      p.bloom.radius = value
+    },
+  },
+  'bloom.tint': {
+    read: (p: PostParams) => p.bloom.tint,
+    write: (p: PostParams, value: number) => {
+      p.bloom.tint = value
+    },
+  },
   'chromatic.amount': {
     read: (p: PostParams) => p.chromatic.amount,
     write: (p: PostParams, value: number) => {
@@ -999,7 +1044,11 @@ export function postSummary(params: PostParams): string {
   return on.length ? on.map((stage) => (stage === 'chromatic' ? 'chroma' : stage)).join(' ') : 'off'
 }
 
-/** Half, quarter, eighth of the canvas, never smaller than one pixel. */
+/**
+ * Half, quarter, eighth of the canvas and on down, never smaller than one
+ * pixel. Level 0 is what the bright pass writes; each level after it is the
+ * downsample of the one before.
+ */
 export const bloomLevelSize = (width: number, height: number, level: number) => ({
   width: Math.max(1, Math.floor(width / 2 ** (level + 1))),
   height: Math.max(1, Math.floor(height / 2 ** (level + 1))),
@@ -1043,16 +1092,6 @@ export const holdRuns = (params: PostParams) =>
   stageEnabled(params, 'feedback') && params.feedback.hold > 0
 
 /**
- * The texture a level's horizontal blur reads. Every level but the first
- * reads the level above and halves it on the way in; the first reads what the
- * bright pass already wrote at its own size. The taps are spaced by this
- * texture's texels, so reading the canvas size here would blur level 0 half
- * as wide sideways as it does vertically.
- */
-export const bloomSourceSize = (width: number, height: number, level: number) =>
-  bloomLevelSize(width, height, Math.max(0, level - 1))
-
-/**
  * Fill the shared uniform. Everything a stage's toggle decides is resolved
  * here rather than branched on in WGSL: a disabled stage writes zeroes that
  * make its term vanish, so the shaders stay straight-line.
@@ -1087,6 +1126,10 @@ export function writePostUniform(
   out[9] = Math.max(bloom.knee, 0.0001)
   out[10] = glow ? bloom.intensity : 0
   out[11] = 0
+  // The three tight weights are the WebGL2 path's, which sums three levels in
+  // its composite. On the WebGPU path what a level is worth is worked out per
+  // frame by `bloomWeights` and applied by the passes, so nothing there reads
+  // them; the radius has no float of its own for the same reason.
   for (let level = 0; level < BLOOM_LEVELS; level++)
     out[12 + level] = glow ? (bloom.weights[level] ?? 0) : 0
   out[15] = glow ? 1 : 0
@@ -1190,5 +1233,16 @@ export function writePostUniform(
   out[57] = trails ? step.cool : 0
   out[58] = trails ? step.sharpen : 0
   out[59] = 0
+
+  // The glow's tint, last: how far it leans and toward what. The colour is
+  // the ribbon's, the palette at the song's key with its brightest channel at
+  // 1, which is what the shader keeps the glow's own peak against. Held to
+  // 0 to 1 the way the grade's numbers are, a NaN falling to none; off is 0,
+  // and the colour is then written anyway so nothing in the block is stale.
+  const [tintRed, tintGreen, tintBlue] = ribbonColour(features)
+  out[60] = glow ? gradeValue(bloom.tint, 0) : 0
+  out[61] = tintRed
+  out[62] = tintGreen
+  out[63] = tintBlue
   return out
 }

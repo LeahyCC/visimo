@@ -10,14 +10,14 @@
  */
 import { useEffect, useState } from 'react'
 
-import { F } from '../../src/audio/FeatureExtractor'
+import { F, PITCH_NAMES } from '../../src/audio/FeatureExtractor'
 import { renderer } from '../../src/gpu/Renderer'
 import { MAX_INKS, resolveStudy, STUDIES, studiesOfKind } from '../../src/presets'
 import type { CharacterAxis, Study } from '../../src/presets'
 import { CHARACTER_AXES, MOMENTS } from '../../src/presets'
 import { heading, Level, ModeSwitch, panel, row, small } from '../controls'
 import type { Mode } from '../controls'
-import { BENCH_ROWS } from './packet'
+import { BENCH_ROWS, isNoteRow, NOTE_ROWS } from './packet'
 import type { BenchRow } from './packet'
 import { readingOf } from './reading'
 import type { Reading } from './reading'
@@ -123,6 +123,7 @@ function Select({
 /** One 0 to 1 slider with its value, and its own checkbox when it can be held. */
 function Dial({
   name,
+  label,
   value,
   onChange,
   held,
@@ -130,6 +131,8 @@ function Dial({
   locked,
 }: {
   name: string
+  /** What is printed beside the slider, where the name is a row's and not a word. */
+  label?: string
   value: number
   onChange: (value: number) => void
   /** Undefined means there is no checkbox: the slider is always what is used. */
@@ -154,7 +157,7 @@ function Dial({
         />
       )}
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', opacity: off ? 0.5 : 1 }}>
-        {name}
+        {label ?? name}
       </span>
       <input
         type="range"
@@ -210,10 +213,11 @@ export function BenchPanel({ state, onState, session, mode, onMode, webGpuAvaila
       }),
     )
 
-  const slider = (key: BenchRow, fallback: number) => (
+  const slider = (key: BenchRow, fallback: number, label?: string) => (
     <Dial
       key={key}
       name={key}
+      {...(label === undefined ? {} : { label })}
       value={state.held[key] ?? fallback}
       held={state.synthetic || key in state.held}
       locked={state.synthetic}
@@ -384,9 +388,9 @@ export function BenchPanel({ state, onState, session, mode, onMode, webGpuAvaila
       {CHARACTER_AXES.map((axis: CharacterAxis) => slider(axis, 0.5))}
 
       <h2 style={heading}>MOMENT</h2>
-      {BENCH_ROWS.filter((key) => !(CHARACTER_AXES as readonly string[]).includes(key)).map((key) =>
-        slider(key, 0),
-      )}
+      {BENCH_ROWS.filter(
+        (key) => !(CHARACTER_AXES as readonly string[]).includes(key) && !isNoteRow(key),
+      ).map((key) => slider(key, 0))}
       <button
         type="button"
         style={{ ...small, width: 'auto', marginTop: 6 }}
@@ -394,6 +398,14 @@ export function BenchPanel({ state, onState, session, mode, onMode, webGpuAvaila
       >
         impact
       </button>
+
+      <h2 style={heading}>NOTES</h2>
+      <p style={{ opacity: 0.5, lineHeight: 1.5, margin: '4px 0 8px' }}>
+        {state.synthetic
+          ? 'The synthetic packet plays C, G, A minor and F, a chord a bar. Tick a note to hold it instead.'
+          : 'The twelve note rows the music writes. Tick one to hold it at the slider.'}
+      </p>
+      {NOTE_ROWS.map((key, note) => slider(key, 0, PITCH_NAMES[note]))}
 
       <h2 style={heading}>PACKET</h2>
       {(['energy', 'tension', 'release', 'rest', 'impact'] as const).map((key) => (

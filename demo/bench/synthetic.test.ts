@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { BAND_HIT, F, PACKET_LENGTH } from '../../src/audio/FeatureExtractor'
+import { BAND_HIT, CHROMA_ROW, F, PACKET_LENGTH } from '../../src/audio/FeatureExtractor'
 import { SyntheticBeat } from './synthetic'
 
 const KICK = BAND_HIT + 1
@@ -156,5 +156,21 @@ describe('SyntheticBeat.waveform', () => {
     const onHit = peak(beat.waveform(1))
     for (let frame = 0; frame < 8; frame += 1) beat.write(packet, 1 / 60, { bpm: 120, level: 1 })
     expect(peak(beat.waveform(1))).toBeLessThan(onHit)
+  })
+
+  it.each([30, 60, 144])('plays a chord a bar into the note rows at %i frames a second', (fps) => {
+    // 120 BPM is two seconds a bar: C major in the first, G major in the second.
+    const frames = play(3.9, fps)
+    const notes = (seconds: number) =>
+      Array.from(
+        { length: 12 },
+        (_, note) => frames[Math.round(seconds * fps)]?.[CHROMA_ROW + note] ?? 0,
+      )
+    const first = notes(1.9)
+    for (const note of [0, 4, 7]) expect(first[note]).toBeGreaterThan(0.95)
+    for (const note of [1, 2, 3, 5, 6, 8, 9, 10, 11]) expect(first[note]).toBeLessThan(0.05)
+    const second = notes(3.8)
+    for (const note of [7, 11, 2]) expect(second[note]).toBeGreaterThan(0.95)
+    expect(second[4]).toBeLessThan(0.05)
   })
 })

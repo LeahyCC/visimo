@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { closeness } from '../director/score'
-import { HARDSTYLE, LOFI } from '../director/song.fixture'
+import { LOFI } from '../director/song.fixture'
 import {
   buildBolt,
   LIGHTNING_DEFAULTS,
@@ -41,7 +41,7 @@ describe('the lightning study', () => {
     expect(study.impl).toBe('lightning')
     expect(study.moments).toEqual({ intro: 0, groove: 0.3, build: 0, drop: 1, rest: 0, outro: 0 })
     expect(study.cost).toBe('cheap')
-    expect(study.reach).toBe(0.35)
+    expect(study.reach).toBe(0.28)
   })
 
   it('rests at the numbers the implementation falls back on', () => {
@@ -56,8 +56,11 @@ describe('the lightning study', () => {
   // The home is the hard, heavy, high drive corner, the metal, dubstep and
   // drum and bass readings of tracks.fixture. Against the synthetic
   // characters: hardstyle is close, lo-fi is not.
-  it('is at home with a hard, fast track and far from a lo-fi one', () => {
-    expect(closeness(study, HARDSTYLE)).toBeGreaterThan(0.6)
+  // Its home moved to the metal end so the shards keep the steady hard tracks,
+  // so the reference is a measured metal track and not the hardstyle fixture.
+  it('is at home with a ragged metal track and far from a lo-fi one', () => {
+    const metal = { drive: 0.64, weight: 0.31, tonality: 0.11, steadiness: 0.59, hardness: 0.71 }
+    expect(closeness(study, metal)).toBeGreaterThan(0.6)
     expect(closeness(study, LOFI)).toBeLessThan(0.3)
   })
 })
@@ -140,15 +143,30 @@ describe('silence and a quiet passage through the whole path', () => {
     expect(pool.alive).toBe(0)
   })
 
-  it('fires nothing on a loud passage with no drop in it: no impact, no release', () => {
+  // It used to need an impact or a release, and on real tracks neither comes
+  // often, so the study drew nothing for whole songs. A loud passage fires it
+  // now, and what holds it back is a quiet one and the bucket.
+  it('fires nothing on a hard-hitting passage that is not loud: no impact, no release', () => {
     const busy = silent()
-    busy[F.energy] = 1
+    busy[F.energy] = 0.4
     busy[F.subHit] = 1
     busy[F.bassHit] = 1
     const params = lightningParams(at(busy))
     const pool = new LightningPool()
     for (let step = 0; step < 60 * 10; step += 1) pool.step(busy, 1 / 60, params)
     expect(pool.fired).toBe(0)
+  })
+
+  it('fires on a loud passage, and never faster than the flash rule allows', () => {
+    const loud = silent()
+    loud[F.energy] = 1
+    loud[F.subHit] = 1
+    loud[F.bassHit] = 1
+    const params = lightningParams(at(loud))
+    const pool = new LightningPool()
+    for (let step = 0; step < 60 * 10; step += 1) pool.step(loud, 1 / 60, params)
+    expect(pool.fired).toBeGreaterThan(0)
+    expect(pool.fired / 10).toBeLessThanOrEqual(3)
   })
 })
 

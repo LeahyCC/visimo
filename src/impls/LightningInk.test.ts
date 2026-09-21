@@ -282,7 +282,7 @@ describe('the lightning ink', () => {
     const uniform = gpu.calls.writes.find((write) => write.buffer === gpu.calls.buffers[0])?.data
     expect(uniform?.[0]).toBeCloseTo(1080 / 1920, 6)
     expect(uniform?.[1]).toBe(1920)
-    expect(uniform?.[2]).toBeCloseTo(2.2, 6)
+    expect(uniform?.[2]).toBeCloseTo(1.6, 6)
     expect(uniform?.[3]).toBeCloseTo(1, 6)
   })
 
@@ -363,7 +363,7 @@ describe('the shader against the buffers it reads', () => {
     expect(shader).toMatch(/var<private> corners = array<vec2<f32>, 6>/)
     expect(shader).toMatch(/mix\(p1, p2, corner\.x\) \+ perp \* side \* reach_px \/ view\.height/)
     // The quad reaches as far as the light does, and no further.
-    expect(shader).toMatch(/let reach_px = view\.width \* 0\.5 \+ view\.edge/)
+    expect(shader).toContain('let reach_px = (view.width * 0.5 + view.edge) * HALO_REACH')
   })
 
   it('makes the falloff the one the params file mirrors: body and hot core over a smoothstep', () => {
@@ -373,8 +373,8 @@ describe('the shader against the buffers it reads', () => {
     expect(shader).toMatch(/1\.0 - smoothstep\(ramp_start, ramp_end, abs\(in\.across\)\)/)
     expect(shader).toMatch(/let core_half = half_width \* 0\.45/)
     // The body carries the colour, the core adds white on top.
-    expect(shader).toMatch(
-      /let glow = in\.colour \* body \+ vec3<f32>\(1\.0\) \* \(view\.core \* core\)/,
+    expect(shader).toContain(
+      'let glow = in.colour * (body + halo) + vec3<f32>(1.0) * (view.core * core)',
     )
     expect(shader).toMatch(/vec4<f32>\(glow \* in\.light, 1\.0\)/)
   })

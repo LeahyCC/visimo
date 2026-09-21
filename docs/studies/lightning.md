@@ -147,3 +147,7 @@ resting intensity before anything else; if the afterglow reads as a wash,
 shorten the life before touching the intensity. Whether 80 ms is the right
 life for the feel of a strike, and whether the edge-origin share should rise
 above about half, are both for the screen, not the tests.
+
+## After the first look on screen
+
+The numbers reasoned from the canvas's arithmetic drew nothing at all on a real track, and then a thin brown scratch. Three things changed. A strong hit now fires while `release` is high or the passage is simply loud, because real tracks rarely read a release. The bolt is longer (0.7 of the frame), lives longer (0.18 s), rests at an intensity of 1.8, and has a glow in the air around the channel, sixteen line widths wide and a tenth as bright, which is what makes it read as light and not as a line. And the hue stays in the band from cyan through blue to violet, moved inside it by the key: following the key all the way round drew a red bolt in a red key. Its home also moved to the metal end of the measured tracks, since from its first home it took every hard drop and the shards were never cast.

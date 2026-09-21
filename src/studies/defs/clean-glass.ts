@@ -18,6 +18,8 @@ export const CLEAN_GLASS: LookStudy = {
     'bloom.threshold': 0.8,
     'bloom.knee': 0.2,
     'bloom.intensity': 0.15,
+    'bloom.radius': 0.3,
+    'bloom.tint': 0,
     'chromatic.amount': 0.0008,
     'chromatic.beat': 0.003,
     'grade.vignette': 0,
@@ -34,7 +36,13 @@ export const CLEAN_GLASS: LookStudy = {
     { from: 'swell', to: 'tonemap.exposure', gain: -0.05, curve: 'square' },
     { from: 'hardness', to: 'tonemap.exposure', gain: -0.05, curve: 'square' },
     { from: 'tension', to: 'bloom.threshold', gain: 0.06, curve: 'linear' },
+    { from: 'swell', to: 'bloom.radius', gain: 0.15, curve: 'linear' },
+    { from: 'tension', to: 'bloom.radius', gain: -0.1, curve: 'linear' },
+    { from: 'keyClarity', to: 'bloom.tint', gain: 0.2, curve: 'linear' },
   ],
   cost: 'cheap',
   stages: ['bloom', 'tonemap'],
+  // Its home is the tonal end of the space (0.8), where the harmony is clear
+  // and the picture wants a cool, clear pair of hues rather than a warm one.
+  palette: 'aurora',
 }

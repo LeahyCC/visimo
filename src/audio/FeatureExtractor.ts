@@ -56,6 +56,10 @@
  *                                    hits is, over twenty seconds
  *   52     barPhase        0..1      where in the bar we are, 0 on the downbeat and rising
  *                                    across four beats to the next
+ *   53-64  chroma0..chroma11
+ *                          0..1      how strongly each pitch class is sounding now, C to B;
+ *                                    the strongest note of a clear chord reads near 1 and
+ *                                    silence reads 0
  *
  * Each band detects its own onsets, against its own flux and its own adaptive
  * threshold, which is what lets one emitter answer the kick and another the
@@ -128,13 +132,22 @@
  * `tempoConfidence` is what gates both, and a bar read off a wrong tempo is
  * wrong for the same reason and by the same amount.
  *
+ * Rows 53 to 64 are the notes rather than the key. `keyHue` says where the
+ * song sits and this says what is sounding this instant: the same chroma the
+ * harmony reads, one row per pitch class from C to B, so a study can light a
+ * chord and not only colour a key. Each is scaled by the strongest note of
+ * its own frame, which is what makes it loudness independent, and gated twice:
+ * by how much there is to hear at all, so silence is twelve zeros, and by how
+ * far the notes stand out of the rest, so a drum kit's flat chroma is not read
+ * as a chord. Quick up and slower down, per second.
+ *
  * Nothing on the GPU binds this. Every consumer reads the Float32Array on the
  * CPU, so the layout is free of any vec4 alignment. Rows are only ever added
  * at the end: the indices are public API.
  */
 import { TEMPO_MAX_BPM, TEMPO_MIN_BPM, TempoTracker } from './TempoTracker'
 
-export const PACKET_LENGTH = 53
+export const PACKET_LENGTH = 65
 
 /** The five bands, in order. Band `i` is packet slot `i`. */
 export const BAND_NAMES = ['sub', 'bass', 'lowMid', 'highMid', 'treble'] as const
@@ -202,7 +215,22 @@ export const F = {
   impact: 50,
   grit: 51,
   barPhase: 52,
+  chroma0: 53,
+  chroma1: 54,
+  chroma2: 55,
+  chroma3: 56,
+  chroma4: 57,
+  chroma5: 58,
+  chroma6: 59,
+  chroma7: 60,
+  chroma8: 61,
+  chroma9: 62,
+  chroma10: 63,
+  chroma11: 64,
 } as const
+
+/** The first of the twelve note rows; pitch class `k`, 0 for C, is `CHROMA_ROW + k`. */
+export const CHROMA_ROW = F.chroma0
 
 export type BandSpec = {
   name: string
@@ -516,6 +544,36 @@ const KEY_RAMP_MS = 3000
 // for ever. One peak weighs about one to five; a tonal passage sums to
 // dozens, so this only tells when there is next to nothing left.
 const CHROMA_FLAT_WEIGHT = 0.5
+// The note rows. What is sounding now is the chroma averaged over this long,
+// symmetric so that the frame rate cannot tilt it: the frame's own chroma is
+// whichever peaks the picker happened to find, and a follower with a quick
+// attack fed that directly would ride the top of the jitter, higher the more
+// frames it saw.
+const NOTES_NOW_MS = 80
+// A chord blooms in a twentieth of a second and eases back over close to half
+// a second, so a chord change reads as one flower going and another coming
+// and not as twelve flickers.
+const NOTES_ATTACK_MS = 50
+const NOTES_RELEASE_MS = 450
+// How much there is to hear, in the units of the weights above: the
+// strongest pitch class of the averaged frame. Under the first is one weak
+// peak or less, which is noise; over the second is a clear note. Between them
+// the rows fade in, so a quiet passage does not switch on at a step.
+const NOTES_QUIET = 0.8
+const NOTES_AUDIBLE = 3
+// How far the strongest note stands over the median one. A chord leaves most
+// of the twelve empty and reads about 0.8; drums and noise fill them all and
+// read a fifth or less. Under the first nothing is a note, over the second
+// everything that stands out is.
+const NOTES_FLAT = 0.4
+const NOTES_CLEAR = 0.75
+// A note below this share of the strongest is the partials of the others
+// leaking into its class, and is not lit; the share above it is stretched to
+// fill 0 to 1.
+const NOTES_SHARE_FLOOR = 0.25
+// A row this small is nothing, and is set to it, so that silence is exactly 0
+// and a long tail of the release does not run on for ever.
+const NOTES_ZERO = 1e-3
 // Krumhansl and Kessler's key profiles for C major and C minor, how much a
 // listener expects each pitch class; the other keys rotate them.
 const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
@@ -1041,6 +1099,15 @@ export class Harmony {
     () => new Envelope(CHROMA_LONG_MS, CHROMA_LONG_MS),
   )
   private readonly longChroma = new Float32Array(12)
+  /** The chroma averaged over `NOTES_NOW_MS`, which the note rows are read off. */
+  private readonly now = Array.from({ length: 12 }, () => new Envelope(NOTES_NOW_MS, NOTES_NOW_MS))
+  private readonly rows = Array.from(
+    { length: 12 },
+    () => new Envelope(NOTES_ATTACK_MS, NOTES_RELEASE_MS),
+  )
+  private readonly sorted = new Float32Array(12)
+  /** How strongly each pitch class is sounding now, 0 to 1; see `NOTES_*`. */
+  readonly notes = new Float32Array(12)
   private readonly hueX = new Envelope(KEY_RAMP_MS, KEY_RAMP_MS)
   private readonly hueY = new Envelope(KEY_RAMP_MS, KEY_RAMP_MS)
   private readonly clarity = new Envelope(KEY_RAMP_MS, KEY_RAMP_MS)
@@ -1053,6 +1120,40 @@ export class Harmony {
     this.frame[at] = (this.frame[at] ?? 0) + weight
   }
 
+  /**
+   * The note rows: each pitch class against the strongest of the twelve, so
+   * a quiet chord and a loud one read alike, behind two gates. Both gates
+   * are on the frame's whole shape and neither on a single row, so a chord
+   * fades as one and not note by note. The gates and the share floor are
+   * multiplied into the target and the attack and release are put on the
+   * result, which is what makes the rows the same at any frame rate.
+   */
+  private stepNotes(dt: number) {
+    const { sorted, notes } = this
+    let strongest = 0
+    for (let k = 0; k < 12; k++) {
+      const value = this.now[k]?.value ?? 0
+      sorted[k] = value
+      if (value > strongest) strongest = value
+    }
+
+    sorted.sort()
+    const median = ((sorted[5] ?? 0) + (sorted[6] ?? 0)) / 2
+    const heard = clamp01((strongest - NOTES_QUIET) / (NOTES_AUDIBLE - NOTES_QUIET))
+    const contrast = strongest > 0 ? 1 - median / strongest : 0
+    const tonal = clamp01((contrast - NOTES_FLAT) / (NOTES_CLEAR - NOTES_FLAT))
+    const gate = heard * tonal
+    for (let k = 0; k < 12; k++) {
+      const share = strongest > 0 ? (this.now[k]?.value ?? 0) / strongest : 0
+      const lit = clamp01((share - NOTES_SHARE_FLOOR) / (1 - NOTES_SHARE_FLOOR))
+      const row = this.rows[k]
+      if (!row) continue
+      const value = row.step(gate * lit, dt)
+      if (value < NOTES_ZERO) row.value = 0
+      notes[k] = row.value
+    }
+  }
+
   step(dt: number): HarmonyReading {
     let shortSum = 0
     let midSum = 0
@@ -1063,7 +1164,10 @@ export class Harmony {
       shortSum += this.short[k]?.step(value, dt) ?? 0
       midSum += this.mid[k]?.step(value, dt) ?? 0
       longSum += this.long[k]?.step(value, dt) ?? 0
+      this.now[k]?.step(value, dt)
     }
+
+    this.stepNotes(dt)
 
     // The change is a cosine distance, so it is about which notes are
     // sounding and not how loudly.
@@ -2535,6 +2639,7 @@ export class FeatureExtractor {
     packet[F.keyHue] = harmony.keyHue
     packet[F.keyClarity] = harmony.keyClarity
     packet[F.harmonicChange] = harmony.harmonicChange
+    packet.set(this.harmony.notes, CHROMA_ROW)
 
     const structure = this.structure.step(packet, this.harmony.chroma, dt)
     packet[F.recall] = structure.recall

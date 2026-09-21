@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { paletteAt } from '../palettes/active'
 import { AUDIO_FIELDS } from '../presets/knobs'
-import { paletteAt, visibleExtent } from '../scenes/fluid.params'
+import { visibleExtent } from '../scenes/fluid.params'
 import { carriedCanvas } from '../studies/cast'
 import { CASTS } from '../studies/casts/index'
 import { castFrame, resolveCast, resolveLive } from '../studies/resolve'
 import {
   BLOOM_LEVELS,
   bloomLevelSize,
-  bloomSourceSize,
   canvasGain,
   canvasKeep,
   defaultPostParams,
@@ -107,12 +107,14 @@ describe('post parameters', () => {
     expect(bloomLevelSize(3, 1, 2)).toEqual({ width: 1, height: 1 })
   })
 
-  it('spaces a horizontal blur by the texels of the texture it reads', () => {
-    // The first level reads what the bright pass wrote at its own size, not
-    // the canvas; the rest read the level above and halve it on the way in.
-    expect(bloomSourceSize(1920, 1080, 0)).toEqual(bloomLevelSize(1920, 1080, 0))
-    for (let level = 1; level < BLOOM_LEVELS; level++) {
-      expect(bloomSourceSize(1920, 1080, level)).toEqual(bloomLevelSize(1920, 1080, level - 1))
+  it('halves each level from the last, all the way down the chain', () => {
+    // Level 0 is what the bright pass writes; each after it is the one before
+    // through the downsample, so every one is the floor of half the last.
+    for (let level = 1; level < 8; level++) {
+      const above = bloomLevelSize(3840, 2160, level - 1)
+      const here = bloomLevelSize(3840, 2160, level)
+      expect(here.width).toBe(Math.max(1, Math.floor(above.width / 2)))
+      expect(here.height).toBe(Math.max(1, Math.floor(above.height / 2)))
     }
   })
 })
@@ -316,9 +318,9 @@ describe('carrying the history along a flow', () => {
     expect(Array.from(after.slice(0, 28))).toEqual(Array.from(before.slice(0, 28)))
     // The ribbon's two vec4s went on past the flow block and the floor, and
     // the grade's went on past those, the gate weave's past that, and the
-    // canvas hold and what ages inside the loop past all of them: fifteen
-    // vec4s, 240 bytes.
-    expect(POST_UNIFORM_FLOATS).toBe(60)
+    // canvas hold and what ages inside the loop past all of them, and the
+    // glow's tint past those: sixteen vec4s, 256 bytes.
+    expect(POST_UNIFORM_FLOATS).toBe(64)
   })
 
   it('makes the carry vanish with no flow, no carry or the stage off', () => {
@@ -1061,5 +1063,66 @@ describe('the ladder that measures the canvas', () => {
     expect(holdRuns(holding)).toBe(true)
     expect(holdRuns(mergePostParams(holding, { feedback: { enabled: false } }))).toBe(false)
     expect(holdRuns(mergePostParams(holding, { enabled: false }))).toBe(false)
+  })
+})
+
+describe('the wide bloom numbers', () => {
+  const lit = (bloom: Partial<PostParams['bloom']> = {}) =>
+    mergePostParams(defaultPostParams(), { bloom: { enabled: true, ...bloom } })
+
+  it('rests at a modest radius and no tint, and reads and writes both as lanes', () => {
+    const params = defaultPostParams()
+    expect(params.bloom.radius).toBe(0.3)
+    expect(params.bloom.tint).toBe(0)
+    POST_LANES['bloom.radius'].write(params, 0.8)
+    POST_LANES['bloom.tint'].write(params, 0.5)
+    expect(POST_LANES['bloom.radius'].read(params)).toBe(0.8)
+    expect(POST_LANES['bloom.tint'].read(params)).toBe(0.5)
+    // A patch reaches them the way it reaches the rest of the stage.
+    const patched = mergePostParams(params, { bloom: { radius: 0.1 } })
+    expect(patched.bloom.radius).toBe(0.1)
+    expect(patched.bloom.tint).toBe(0.5)
+  })
+
+  it('carries the tint in a vec4 of its own, past every float the stack already had', () => {
+    const out = write(lit({ tint: 0.4 }), packet({ keyHue: 0.25 }))
+    expect(out[60]).toBeCloseTo(0.4)
+    const [red, green, blue] = ribbonColour(packet({ keyHue: 0.25 }))
+    expect([out[61], out[62], out[63]]).toEqual([
+      Math.fround(red),
+      Math.fround(green),
+      Math.fround(blue),
+    ])
+    // The colour keeps the brightest channel at 1, which is what the shader
+    // holds the glow's own peak against.
+    expect(Math.max(out[61] ?? 0, out[62] ?? 0, out[63] ?? 0)).toBeCloseTo(1)
+  })
+
+  it('writes no tint at rest, with the stage off or with the stack off', () => {
+    expect(write(lit())[60]).toBe(0)
+    expect(write(lit({ tint: 1, enabled: false }))[60]).toBe(0)
+    expect(write(mergePostParams(lit({ tint: 1 }), { enabled: false }))[60]).toBe(0)
+  })
+
+  it('holds the tint to 0 to 1, and to none when it is not a number', () => {
+    // A row may carry a lane past its end, so the uniform is where it stops.
+    expect(write(lit({ tint: 3 }))[60]).toBe(1)
+    expect(write(lit({ tint: -2 }))[60]).toBe(0)
+    expect(write(lit({ tint: Number.NaN }))[60]).toBe(0)
+    expect(write(lit({ tint: Number.POSITIVE_INFINITY }))[60]).toBe(0)
+  })
+
+  it('leaves the tight weights where the WebGL2 path reads them', () => {
+    // The radius has no float: on WebGPU it is applied per frame by the level
+    // weights, and on WebGL2 there is one composite and it ignores it.
+    const out = write(lit({ radius: 1 }))
+    expect(Array.from(out.slice(12, 16))).toEqual([0.5, 0.32, 0.18, 1].map(Math.fround))
+    expect(Array.from(write(lit({ radius: 0 })).slice(0, 60))).toEqual(Array.from(out.slice(0, 60)))
+  })
+
+  it('stays finite and untinted on silence at the defaults', () => {
+    const out = write(defaultPostParams(), packet())
+    expect(out[60]).toBe(0)
+    for (const value of out) expect(Number.isFinite(value)).toBe(true)
   })
 })

@@ -36,6 +36,7 @@
 import { BEAT_PUMP } from './defs/beat-pump'
 import { BEAT_RINGS } from './defs/beat-rings'
 import { CAUSTICS } from './defs/caustics'
+import { CHORD_PETALS } from './defs/chord-petals'
 import { CLEAN_GLASS } from './defs/clean-glass'
 import { CURL_DRIFT } from './defs/curl-drift'
 import { DUST } from './defs/dust'
@@ -83,6 +84,7 @@ export const STUDIES: readonly Study[] = [
   SPECTRUM_RING,
   SPARKS,
   LASERS,
+  CHORD_PETALS,
   LIGHTNING,
   WARM_SOFT,
   CLEAN_GLASS,

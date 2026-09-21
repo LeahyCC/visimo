@@ -32,6 +32,8 @@ export const SQUEEZE: LookStudy = {
     'bloom.threshold': 0.8,
     'bloom.knee': 0.2,
     'bloom.intensity': 0.15,
+    'bloom.radius': 0.3,
+    'bloom.tint': 0,
     'chromatic.amount': 0.0008,
     'chromatic.beat': 0.003,
     'grade.vignette': 0,
@@ -51,10 +53,16 @@ export const SQUEEZE: LookStudy = {
     { from: 'tension', to: 'bloom.intensity', gain: -0.08, curve: 'linear' },
     { from: 'impact', to: 'bloom.intensity', gain: 0.08, curve: 'linear' },
     { from: 'beatPulse', to: 'bloom.intensity', gain: 0.06, curve: 'linear' },
+    { from: 'tension', to: 'bloom.radius', gain: -0.15, curve: 'linear' },
+    { from: 'impact', to: 'bloom.radius', gain: 0.15, curve: 'linear' },
+    { from: 'keyClarity', to: 'bloom.tint', gain: 0.1, curve: 'linear' },
     { from: 'energy', to: 'tonemap.exposure', gain: -0.04, curve: 'square' },
     { from: 'swell', to: 'tonemap.exposure', gain: -0.05, curve: 'square' },
     { from: 'hardness', to: 'tonemap.exposure', gain: -0.05, curve: 'square' },
   ],
   cost: 'cheap',
   stages: ['bloom', 'tonemap', 'grade'],
+  // The build holds its breath, and cold is what that looks like. Impact flash
+  // is ember, so the drop's turn to heat is also a turn of colour.
+  palette: 'abyss',
 }

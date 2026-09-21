@@ -30,6 +30,12 @@ struct View {
   core: f32,
 }
 
+// How many line widths the glow in the air reaches to, and how bright it is
+// beside the line. A real strike lights the air round the channel, and a bare
+// line with a one pixel edge read as a scratch on the screen and not as light.
+const HALO_REACH = 16.0;
+const HALO_LIGHT = 0.1;
+
 @group(0) @binding(0) var<uniform> view: View;
 // Two vec4s a segment: the two ends in xy, then the colour, then the light.
 @group(0) @binding(1) var<storage, read> segments: array<vec4<f32>>;
@@ -69,7 +75,7 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Quad 
   // ends are in frame heights and the widths are in pixels, so the offset is
   // scaled by the canvas height; the across distance crosses to the fragment
   // still in pixels, which is the unit the light profile works in.
-  let reach_px = view.width * 0.5 + view.edge;
+  let reach_px = (view.width * 0.5 + view.edge) * HALO_REACH;
   let place = mix(p1, p2, corner.x) + perp * side * reach_px / view.height;
   var out: Quad;
   out.position = vec4<f32>(place.x * 2.0 / view.aspect, place.y * 2.0, 0.0, 1.0);
@@ -97,6 +103,11 @@ fn fs(in: Quad) -> @location(0) vec4<f32> {
   // The body carries the bolt's colour, the core adds white on top, and the
   // light the strike's own age worked out. Additive, and the blend leaves
   // alpha alone, so this is light and nothing else.
-  let glow = in.colour * body + vec3<f32>(1.0) * (view.core * core);
+  // The glow in the air: a cubic falloff out to the quad's own edge, where it
+  // is exactly zero, in the bolt's colour and never white.
+  let halo_px = (half_width + view.edge) * HALO_REACH;
+  let away = 1.0 - clamp(abs(in.across) / halo_px, 0.0, 1.0);
+  let halo = HALO_LIGHT * away * away * away;
+  let glow = in.colour * (body + halo) + vec3<f32>(1.0) * (view.core * core);
   return vec4<f32>(glow * in.light, 1.0);
 }

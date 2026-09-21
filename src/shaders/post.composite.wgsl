@@ -1,15 +1,15 @@
-// The last pass: chromatic aberration on the way in, the three blurred bloom
-// levels added, then the grade, the tonemap and the grain. The gate weave moves
-// where the picture is read from, so it comes before all of them. This is the
-// only pass that writes the swap chain, so it is the only one that has to end
-// inside 0 to 1.
+// The last pass: chromatic aberration on the way in, the bloom chain's result
+// added, then the grade, the tonemap, the grain and the dither. The gate weave
+// moves where the picture is read from, so it comes before all of them. This is
+// the only pass that writes the swap chain, so it is the only one that has to
+// end inside 0 to 1.
 
 @group(0) @binding(0) var<uniform> post: PostParams;
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var source: texture_2d<f32>;
-@group(0) @binding(3) var bloom0: texture_2d<f32>;
-@group(0) @binding(4) var bloom1: texture_2d<f32>;
-@group(0) @binding(5) var bloom2: texture_2d<f32>;
+// Level 0 of the bloom chain after the upsample has added every wider level
+// into it, each already scaled by what it is worth, so this is one read.
+@group(0) @binding(3) var bloom: texture_2d<f32>;
 
 // Enough hash for grain: a different value per pixel, and a different one
 // again each frame from the clock.
@@ -40,11 +40,14 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
     textureSample(source, samp, clamp(framed + split, low, high)).b,
   );
 
-  // The levels are sampled whatever their weights, so the branch stays out of
-  // the shader; a disabled bloom writes zero weights.
-  var glow = textureSample(bloom0, samp, framed).rgb * post.weights.x;
-  glow += textureSample(bloom1, samp, framed).rgb * post.weights.y;
-  glow += textureSample(bloom2, samp, framed).rgb * post.weights.z;
+  // The glow is sampled whatever the bloom's state, so the branch stays out of
+  // the shader; a disabled bloom writes zero for the intensity and the tint.
+  // The tint leans the glow toward the key's colour and keeps the glow's own
+  // brightest channel, so it changes what colour the halo is and never how
+  // much light it carries: a full frame does not get brighter for having it.
+  var glow = textureSample(bloom, samp, framed).rgb;
+  let lit = max(glow.r, max(glow.g, glow.b));
+  glow = mix(glow, post.glow.yzw * lit, post.glow.x);
   colour += glow * post.bloom.z;
 
   // The grade sits after the bloom, so the glow closes in with the frame, and
@@ -86,5 +89,16 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
   colour = mix(colour, mapped, post.tone.z);
 
   colour += (hash(in.position.xy + vec2<f32>(post.grain.y * 137.0)) - 0.5) * post.grain.x;
+
+  // The dither, always on and not the grain: interleaved gradient noise held to
+  // half a code value either way, so a black pixel stays black (anything under
+  // half a step rounds back to 0 and the floor below clips the rest) while the
+  // steps in a slow ramp, which is all a wide glow is, stop lining up into
+  // contours. `ditherOffset` in post/dither.ts is this shape, stated so it can
+  // be tested. The clock shifts the pattern by a golden-ratio step each
+  // sixtieth of a second so a still picture is dithered differently every frame.
+  let gradient = fract(52.9829189 * fract(dot(in.position.xy, vec2<f32>(0.06711056, 0.00583715))));
+  let noise = fract(gradient + 0.6180339887 * post.grain.y * 60.0);
+  colour += vec3<f32>((noise - 0.5) / 255.0);
   return vec4<f32>(max(colour, vec3<f32>(0.0)), 1.0);
 }

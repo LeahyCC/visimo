@@ -22,6 +22,7 @@ import {
   buildBolt,
   CORE_LIFT,
   displace,
+  electricHue,
   LIGHTNING_DEFAULTS,
   LIGHTNING_POOL,
   LIGHTNING_RANGES,
@@ -168,7 +169,7 @@ describe('the bolt a strike builds', () => {
     }
   })
 
-  it('fills each segment with the colour of the key hue plus its own offset', () => {
+  it('fills each segment with the electric hue for the key plus its own offset', () => {
     const params = lightningParams(LIGHTNING_DEFAULTS)
     const pool = new LightningPool()
     pool.step(packetOf({ impact: 1, keyHue: 0.6 }), 1 / 60, params)
@@ -176,10 +177,10 @@ describe('the bolt a strike builds', () => {
     const count = pool.fill(out, params)
     expect(count).toBeGreaterThan(0)
 
-    // The first segment is a main channel one: the key hue, no offset.
-    expect(out[4]).toBeCloseTo(boltColour(0.6)[0], 6)
-    expect(out[5]).toBeCloseTo(boltColour(0.6)[1], 6)
-    expect(out[6]).toBeCloseTo(boltColour(0.6)[2], 6)
+    // The first segment is a main channel one: the key's place in the electric band, no offset.
+    expect(out[4]).toBeCloseTo(boltColour(electricHue(0.6))[0], 6)
+    expect(out[5]).toBeCloseTo(boltColour(electricHue(0.6))[1], 6)
+    expect(out[6]).toBeCloseTo(boltColour(electricHue(0.6))[2], 6)
   })
 
   it('forks deeper on a harder hit: a full hit carries more segments than a weak one', () => {
@@ -260,16 +261,19 @@ describe('the pool and what may fire', () => {
     expect(pool.fired).toBe(1)
   })
 
-  it('fires on a strong low or mid hit only while release is still high', () => {
-    const hits = (release: number) => {
+  it('fires on a strong low or mid hit while release is high or the passage is loud', () => {
+    const hits = (release: number, energy = 0) => {
       const pool = new LightningPool()
       for (let step = 0; step < 30; step += 1)
-        pool.step(packetOf({ release, bassHit: 0.9 }), 1 / 60, REST)
+        pool.step(packetOf({ release, energy, bassHit: 0.9 }), 1 / 60, REST)
       return pool.fired
     }
 
     expect(hits(1)).toBeGreaterThan(0)
     expect(hits(0.1)).toBe(0)
+    // A loud passage is enough on its own: real tracks rarely read a release.
+    expect(hits(0, 0.8)).toBeGreaterThan(0)
+    expect(hits(0, 0.3)).toBe(0)
   })
 
   it('ignores hits under the strength the brief names', () => {
@@ -384,7 +388,7 @@ describe('how much of the frame it lights', () => {
     const out = writeLightningUniform(REST, 1920, 1080, new Float32Array(8))
     expect(out[0]).toBeCloseTo(16 / 9, 6)
     expect(out[1]).toBe(1080)
-    expect(out[2]).toBeCloseTo(2.2, 6)
+    expect(out[2]).toBeCloseTo(1.6, 6)
     expect(out[3]).toBeCloseTo(1, 6)
     expect(out[4]).toBe(CORE_LIFT)
   })

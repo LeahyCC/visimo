@@ -80,8 +80,16 @@ export const STRIKE_GAP_SECONDS = 0.5
 const IMPACT_ON = 0.5
 const IMPACT_OFF = 0.3
 
-/** How high `release` must still be for a hit to fire anything, and how hard the hit. */
+/**
+ * What lets a hit fire: `release` still high, or the passage simply loud, and
+ * how hard the hit has to be. It was `release` alone at first, and on real
+ * tracks `release` rarely passes 0.4 and often never reaches this, so a soloed
+ * study drew nothing for a whole song, the fault the radial burst has. A loud
+ * passage is where a bolt belongs whether or not the estimator called a drop,
+ * and the bucket below still holds the rate under the flash rule.
+ */
 const HIT_RELEASE_MIN = 0.25
+const HIT_ENERGY_MIN = 0.6
 const HIT_STRENGTH_MIN = 0.5
 
 /** The hits that may fire: the low end and the mids, which is where a drop's weight is. */
@@ -105,6 +113,19 @@ const EDGE_SHARE = 0.55
 
 /** How far an edge start sits in from the wall, in frame heights. */
 const EDGE_INSET = 0.02
+
+/**
+ * The band of hues a bolt may take, in turns: cyan through blue to violet, the
+ * colours air glows when a strike ionises it. The key moves the bolt inside
+ * the band and never out of it. Following the key all the way round made a
+ * red bolt in a red key, which read as a hot wire and not as lightning.
+ */
+export const ELECTRIC_HUE = 0.62
+export const ELECTRIC_SWING = 0.1
+
+/** The hue a bolt is built at for a key: the band's middle, swung by the key. */
+export const electricHue = (key: number) =>
+  ELECTRIC_HUE + ELECTRIC_SWING * Math.sin(2 * Math.PI * key)
 
 /** The glow's saturation: a real bolt reads as one hard colour, not a pastel. */
 const GLOW_SATURATION = 0.85
@@ -145,12 +166,12 @@ export const LIGHTNING_RANGES: Record<LightningKnob, readonly [number, number]> 
 }
 
 export const LIGHTNING_DEFAULTS: Record<LightningKnob, number> = {
-  rate: 0.8,
-  forks: 2,
-  length: 0.45,
-  width: 2.2,
-  life: 0.08,
-  intensity: 1.05,
+  rate: 0.85,
+  forks: 3,
+  length: 0.7,
+  width: 1.6,
+  life: 0.18,
+  intensity: 1.8,
 }
 
 export type LightningParams = Record<LightningKnob, number>
@@ -525,7 +546,9 @@ export class LightningPool {
     // The bucket fills whether or not anything is asking, so a drop's first
     // hit is not made to wait, and it holds one so a hit never fires twice.
     this.tokens = Math.min(1, this.tokens + Math.min(params.rate, MAX_REFILL) * dt)
-    if ((features[F.release] ?? 0) >= HIT_RELEASE_MIN && this.tokens >= 1) {
+    const open =
+      (features[F.release] ?? 0) >= HIT_RELEASE_MIN || (features[F.energy] ?? 0) >= HIT_ENERGY_MIN
+    if (open && this.tokens >= 1) {
       let strength = 0
       for (const row of HIT_ROWS) strength = Math.max(strength, features[row] ?? 0)
       if (strength >= HIT_STRENGTH_MIN) {
@@ -555,7 +578,7 @@ export class LightningPool {
     if (!strike) return
     const section = Math.round(features[F.section] ?? 0)
     const seed = (Math.imul(section + 1, 0x85ebca77) ^ Math.imul(counter + 1, 0xc2b2ae3d)) >>> 0
-    buildBolt(strike, seed, strength, params, key)
+    buildBolt(strike, seed, strength, params, electricHue(key))
     strike.born = this.time
     strike.life = params.life
     strike.seed = seed

@@ -109,6 +109,10 @@ const SAFE_POST: Record<PostKnob, readonly [number, number]> = {
   'bloom.threshold': [0.4, 2],
   'bloom.knee': [0, 1],
   'bloom.intensity': [0, 1],
+  // Both are shares of one whole, so they end at 1 and a row that carries them
+  // past it is a row that has run away; the uniform holds them there anyway.
+  'bloom.radius': [0, 1],
+  'bloom.tint': [0, 1],
   'chromatic.amount': [0, 0.01],
   'chromatic.beat': [0, 0.02],
   // Wider than what the grade takes, on purpose: a row may carry a lane past

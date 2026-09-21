@@ -15,17 +15,19 @@ void main() {
   uv = p;
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`
-// The uniform's fifteen vec4s. The eighth is the flow block and nothing on
-// this path solves a velocity field, so it is uploaded and never read; the
-// ninth is the floor and the fade's knee, which the feedback pass below does
-// use. The tenth and eleventh are the ribbon's, which this path does not draw,
-// so nothing reads them. The twelfth is the grade and the thirteenth the gate
-// weave, which only the composite reads. The last two are the canvas hold and
-// what ages inside the loop; the feedback pass below reads the step out of the
-// first of them and all of the second, and leaves the hold itself alone, for
-// the reason the class comment gives. `data` uploads as many of them as the
-// program it belongs to declares live, which is the highest one it reads, so
-// the feedback pass sends all fifteen and so does the composite.
+// The uniform's first fifteen vec4s; the sixteenth is the WebGPU composite's
+// bloom tint, which this path does not have, so it is not declared. The eighth
+// is the flow block and nothing on this path solves a velocity field, so it is
+// uploaded and never read; the ninth is the floor and the fade's knee, which
+// the feedback pass below does use. The tenth and eleventh are the ribbon's,
+// which this path does not draw, so nothing reads them. The twelfth is the
+// grade and the thirteenth the gate weave, which only the composite reads. The
+// last two are the canvas hold and what ages inside the loop; the feedback pass
+// below reads the step out of the first of them and all of the second, and
+// leaves the hold itself alone, for the reason the class comment gives. `data`
+// uploads as many of them as the program it belongs to declares live, which is
+// the highest one it reads, so the feedback pass sends all fifteen and so does
+// the composite.
 const COMMON = `#version 300 es
 precision highp float;
 in vec2 uv;
@@ -160,9 +162,13 @@ type Pass = {
 
 /**
  * The same bloom and composite maths as PostStack, for browsers without a
- * WebGPU adapter. Kaleidoscope is the only scene that reaches it and there is
- * no compute here to solve a fluid with, so the feedback pass carries nothing
- * along a flow; `feedback.carry` reads as zero whatever a preset asks for.
+ * WebGPU adapter. It keeps the three-level Gaussian bloom it always had: the
+ * wide chain, `bloom.radius`, `bloom.tint` and the composite's dither are
+ * WebGPU's, and here they read as if they were at their rest, so a cast that
+ * uses them draws its tight glow and nothing wider. Kaleidoscope is the only
+ * scene that reaches it and there is no compute here to solve a fluid with, so
+ * the feedback pass carries nothing along a flow; `feedback.carry` reads as
+ * zero whatever a preset asks for.
  * `feedback.hold` is skipped for the same kind of reason: it wants a ladder of
  * passes reducing the frame to one texel, and this path is a fallback rather
  * than a second implementation. So a cast that leans on the hold to keep a

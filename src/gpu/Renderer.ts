@@ -37,6 +37,7 @@ import { CausticsInk } from '../impls/CausticsInk'
 import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
+import { GridInk } from '../impls/GridInk'
 import { HaloInk } from '../impls/HaloInk'
 import { LasersInk } from '../impls/LasersInk'
 import { ParticleField } from '../impls/ParticleField'
@@ -675,6 +676,7 @@ class Renderer {
     if (impl === 'spectrum') return new SpectrumInk()
     if (impl === 'sparks') return new ParticleField(SPARKS_PROFILE)
     if (impl === 'lasers') return new LasersInk()
+    if (impl === 'grid') return new GridInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

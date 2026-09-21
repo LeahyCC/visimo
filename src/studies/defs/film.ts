@@ -38,6 +38,8 @@ export const FILM: LookStudy = {
     'bloom.threshold': 0.85,
     'bloom.knee': 0.3,
     'bloom.intensity': 0.28,
+    'bloom.radius': 0.45,
+    'bloom.tint': 0.1,
     'chromatic.amount': 0.0002,
     'chromatic.beat': 0.003,
     'grade.vignette': 0.32,
@@ -51,6 +53,9 @@ export const FILM: LookStudy = {
     { from: 'beatPulse', to: 'bloom.intensity', gain: 0.06, curve: 'linear' },
     { from: 'treble', to: 'bloom.threshold', gain: -0.08, curve: 'linear' },
     { from: 'tension', to: 'bloom.intensity', gain: -0.05, curve: 'linear' },
+    { from: 'swell', to: 'bloom.radius', gain: 0.1, curve: 'linear' },
+    { from: 'tension', to: 'bloom.radius', gain: -0.1, curve: 'linear' },
+    { from: 'keyClarity', to: 'bloom.tint', gain: 0.15, curve: 'linear' },
     { from: 'swell', to: 'grade.vignette', gain: -0.2, curve: 'linear' },
     { from: 'tension', to: 'grade.vignette', gain: 0.15, curve: 'linear' },
     { from: 'energy', to: 'grade.saturation', gain: -0.06, curve: 'square' },
@@ -64,4 +69,6 @@ export const FILM: LookStudy = {
   ],
   cost: 'cheap',
   stages: ['bloom', 'tonemap', 'grain', 'grade'],
+  // Faded stock has one tint and a range of values, which is what mono gold is.
+  palette: 'mono-gold',
 }

@@ -18,6 +18,8 @@ export const HARD_CLEAN: LookStudy = {
     'bloom.threshold': 0.78,
     'bloom.knee': 0.15,
     'bloom.intensity': 0.45,
+    'bloom.radius': 0.2,
+    'bloom.tint': 0,
     'chromatic.amount': 0.0004,
     'chromatic.beat': 0.006,
     'grade.vignette': 0,
@@ -35,7 +37,13 @@ export const HARD_CLEAN: LookStudy = {
     { from: 'swell', to: 'tonemap.exposure', gain: -0.05, curve: 'square' },
     { from: 'hardness', to: 'tonemap.exposure', gain: -0.05, curve: 'square' },
     { from: 'tension', to: 'bloom.threshold', gain: 0.08, curve: 'linear' },
+    { from: 'swell', to: 'bloom.radius', gain: 0.1, curve: 'linear' },
+    { from: 'tension', to: 'bloom.radius', gain: -0.1, curve: 'linear' },
+    { from: 'keyClarity', to: 'bloom.tint', gain: 0.15, curve: 'linear' },
   ],
   cost: 'cheap',
   stages: ['bloom', 'chromatic', 'tonemap'],
+  // The hard end of the catalogue: full chroma, so nothing about the colour
+  // softens what the look has sharpened.
+  palette: 'neon',
 }

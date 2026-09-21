@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { rowsForAxis } from '../director/character'
 import { LOFI, METAL, playSong, SONG_SECONDS } from '../director/song.fixture'
+import type { PaletteChoice } from '../palettes/palette'
 import {
   defaultPostParams,
   mergePostParams,
@@ -924,11 +925,14 @@ describe('a pinned cast reaches its implementations unchanged', () => {
       expect(post.enabled).toBe(expected.enabled)
       for (const stage of POST_STAGES)
         expect(post[stage].enabled, `${golden.preset} ${stage}`).toBe(expected[stage].enabled)
+      // The two knobs the wide bloom added are the looks' to move and are
+      // pinned in studies/cast.test.ts; the captures never had them.
       for (const knob of POST_KNOBS)
-        expect(POST_LANES[knob].read(post), `${golden.preset} ${knob}`).toBeCloseTo(
-          POST_LANES[knob].read(expected),
-          10,
-        )
+        if (knob !== 'bloom.radius' && knob !== 'bloom.tint')
+          expect(POST_LANES[knob].read(post), `${golden.preset} ${knob}`).toBeCloseTo(
+            POST_LANES[knob].read(expected),
+            10,
+          )
     })
   }
 
@@ -1017,11 +1021,15 @@ describe('the director drives the cast', () => {
   async function playThrough(
     preset: 'auto' | ReturnType<typeof castOrDefault>,
     character?: Character,
+    each?: (palette: PaletteChoice, live: number) => void,
   ) {
     vi.resetModules()
     impls.reset()
     stack.reset = 0
     const fresh = (await import('./Renderer')).renderer
+    // The palette is module state, so the copy the renderer just built is the
+    // one to read, and it is only in the registry now the renderer is imported.
+    const { heldPalette } = await import('../palettes/active')
     const { element, draw } = sizedCanvas(1280, 720)
     audio.attached = true
     fresh.setPreset(preset)
@@ -1033,6 +1041,7 @@ describe('the director drives the cast', () => {
       audio.packet = frame.features
       now += 1000 / FPS
       draw(now)
+      each?.(heldPalette(), fresh.liveCast.studies.length)
       frames += 1
       trace.push(
         fresh.liveCast.studies
@@ -1182,6 +1191,29 @@ describe('the director drives the cast', () => {
     expect(new Set(song.trace).size).toBe(1)
     expect(song.renderer.settled).toBe(1)
     song.renderer.dispose()
+  })
+
+  // The colour follows the look, and a pinned cast is exempt: it is a fixed
+  // picture, drawn before looks named a palette.
+  it('colours a chosen cast by its looks, and holds a pinned one to classic', async () => {
+    const chosen = new Set<string>()
+    const auto = await playThrough('auto', undefined, (palette, live) => {
+      // The first frame, before the director has chosen anything, is classic.
+      if (live === 0) return
+      chosen.add(palette.from)
+      chosen.add(palette.to)
+    })
+    auto.renderer.dispose()
+    // The song changes look as it goes, so the colour changes with it.
+    expect(chosen.size).toBeGreaterThan(1)
+    expect(chosen.has('classic')).toBe(false)
+
+    const fixed = new Set<string>()
+    const pinned = await playThrough(castOrDefault('plume'), undefined, (palette) => {
+      fixed.add(`${palette.from} ${palette.to} ${palette.mix}`)
+    })
+    pinned.renderer.dispose()
+    expect([...fixed]).toEqual(['classic classic 0'])
   })
 
   // Everything the director holds is about one song. Carried into the next,

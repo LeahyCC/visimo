@@ -29,6 +29,8 @@
  * pass can read the last frame back along the same current the dye rides.
  */
 import { F } from '../audio/FeatureExtractor'
+import { paletteLut, paletteVersion } from '../palettes/active'
+import { PALETTE_SIZE } from '../palettes/palette'
 import type { Tuning } from '../presets/knobs'
 import common from '../shaders/fluid.common.wgsl?raw'
 import render from '../shaders/fluid.render.wgsl?raw'
@@ -41,8 +43,6 @@ import {
   fluidParams,
   layoutMix,
   layoutOf,
-  PALETTE_SIZE,
-  paletteLut,
   pressureIterations,
   SIM_UNIFORM_FLOATS,
   simSize,
@@ -83,6 +83,8 @@ type Gear = {
   uniform: GPUBuffer
   palette: GPUTextureView
   paletteTexture: GPUTexture
+  /** Which bake of the shared palette the texture holds, so a change is written once. */
+  paletteVersion: number
   layout: GPUBindGroupLayout
   steps: Record<Step, GPUComputePipeline>
   draw: GPURenderPipeline
@@ -213,12 +215,7 @@ export class Fluid {
       format: 'rgba8unorm',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     })
-    device.queue.writeTexture(
-      { texture: paletteTexture },
-      paletteLut(),
-      { bytesPerRow: PALETTE_SIZE * 4 },
-      { width: PALETTE_SIZE, height: 1 },
-    )
+    this.writePalette(device, paletteTexture)
 
     this.gear = {
       device,
@@ -234,6 +231,7 @@ export class Fluid {
       }),
       palette: paletteTexture.createView(),
       paletteTexture,
+      paletteVersion: paletteVersion(),
       layout,
       steps: steps as Record<Step, GPUComputePipeline>,
       // An ink adds light to the shared target rather than owning it, so the
@@ -302,6 +300,16 @@ export class Fluid {
     this.pressure = 0
   }
 
+  /** The shared palette's lookup table, baked and quantised, into the texture. */
+  private writePalette(device: GPUDevice, texture: GPUTexture) {
+    device.queue.writeTexture(
+      { texture },
+      paletteLut(),
+      { bytesPerRow: PALETTE_SIZE * 4 },
+      { width: PALETTE_SIZE, height: 1 },
+    )
+  }
+
   /** The grid does not follow the canvas; only the crop it is drawn with does. */
   resize(width: number, height: number) {
     this.visible = visibleExtent(width, height)
@@ -312,6 +320,13 @@ export class Fluid {
     const context = this.context
     if (!gear || !context) return
     if (this.sized?.size !== simSize(this.wanted, context.software)) this.allocate()
+    // The renderer sets the palette before it updates any flow, so this is the
+    // one the frame is drawn with. A kilobyte, and only when it has changed.
+    if (gear.paletteVersion !== paletteVersion()) {
+      this.writePalette(gear.device, gear.paletteTexture)
+      gear.paletteVersion = paletteVersion()
+    }
+
     const size = this.sized?.size ?? DEFAULT_FLUID_SIZE
     const time = features[F.time] ?? 0
     const section = Math.max(1, Math.round(features[F.section] ?? 1))

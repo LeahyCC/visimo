@@ -7,7 +7,7 @@ struct PostParams {
   texel: vec2<f32>,
   feedback: vec4<f32>,  // amount, decay, zoom, rotate, per drawn frame
   bloom: vec4<f32>,     // threshold, knee, intensity, 0
-  weights: vec4<f32>,   // level 0, 1, 2, bloom on
+  weights: vec4<f32>,   // the tight three levels' weights, bloom on; only the WebGL2 path reads the first three
   chroma: vec4<f32>,    // split, 0, 0, 0
   tone: vec4<f32>,      // exposure, shoulder, on, 0
   grain: vec4<f32>,     // amount, clock, 0, 0
@@ -19,6 +19,7 @@ struct PostParams {
   weave: vec4<f32>,     // gate weave: sample offset xy, span narrowed by zw, all in uv (0 none)
   hold: vec4<f32>,      // this frame in reference frames, the hold's lever, the mean held (0 none), 0
   age: vec4<f32>,       // hue turned this frame, how far the channels part, unsharp this frame, 0
+  glow: vec4<f32>,      // bloom tint strength (0 none), tint colour rgb with its brightest channel at 1
 }
 
 struct Blit {

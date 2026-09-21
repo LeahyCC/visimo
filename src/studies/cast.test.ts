@@ -60,6 +60,9 @@ type PresetFrame = {
 
 const FRAMES = frames as unknown as readonly PresetFrame[]
 
+/** The knobs the wide bloom added; see where the captures are compared. */
+const WIDE_BLOOM_KNOBS: readonly string[] = ['bloom.radius', 'bloom.tint']
+
 /**
  * What the preset path resolved to, as a whole stack. A stage that arrived
  * after the capture is at the stack's own default, which is off and neutral:
@@ -134,14 +137,34 @@ describe('a pinned cast resolves to its preset', () => {
         expect(post.bloom.weights, `${cast.name} bloom weights at ${golden.packet}`).toEqual(
           expected.bloom.weights,
         )
+        // The two bloom knobs that came with the wide chain did not exist
+        // when the frames were captured, so the looks these casts wear move
+        // them and the stack's default is not what they land on. They are
+        // pinned below, at the same packets.
         for (const knob of POST_KNOBS)
-          expect(
-            POST_LANES[knob].read(post),
-            `${cast.name} ${knob} at ${golden.packet}`,
-          ).toBeCloseTo(POST_LANES[knob].read(expected), 10)
+          if (!WIDE_BLOOM_KNOBS.includes(knob))
+            expect(
+              POST_LANES[knob].read(post),
+              `${cast.name} ${knob} at ${golden.packet}`,
+            ).toBeCloseTo(POST_LANES[knob].read(expected), 10)
       }
     })
   }
+
+  it('keeps the wide bloom knobs modest and moving at every packet', () => {
+    for (const cast of CASTS) {
+      for (const golden of framesOf(cast.id)) {
+        const packet = packetAt(golden.level, golden.swell)
+        const { post } = resolveCast(cast, packet, 0, castFrame())
+        // Radius: more than none and no more than the tight glow leaves room
+        // for; tint: a lean and never the whole glow, so the look stays the look.
+        expect(post.bloom.radius, `${cast.name} radius at ${golden.packet}`).toBeGreaterThan(0.1)
+        expect(post.bloom.radius, `${cast.name} radius at ${golden.packet}`).toBeLessThan(0.7)
+        expect(post.bloom.tint, `${cast.name} tint at ${golden.packet}`).toBeGreaterThanOrEqual(0)
+        expect(post.bloom.tint, `${cast.name} tint at ${golden.packet}`).toBeLessThan(0.4)
+      }
+    }
+  })
 
   /**
    * The captures above are walked by the knobs they recorded, so a knob that

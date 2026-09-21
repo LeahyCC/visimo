@@ -1,6 +1,6 @@
 /**
- * The fluid scene's numbers: the palette lookup table, where the emitters sit,
- * and what the simulation is driven with. Pure TypeScript with no GPU objects,
+ * The fluid scene's numbers: where the emitters sit and what the simulation is
+ * driven with. The palette they colour the dye by is `palettes/`. Pure TypeScript with no GPU objects,
  * like `post/params.ts`, so every choice here is unit tested and `Fluid.ts` is
  * left moving data between buffers.
  *
@@ -29,7 +29,6 @@ export const MAX_EVENTS = 32
  * `shaders/fluid.common.wgsl` to match; nothing enforces it.
  */
 export const MAX_EMITTERS = MAX_BED_EMITTERS + MAX_EVENTS
-export const PALETTE_SIZE = 256
 
 /** Floats in the sim uniform; the Sim struct in fluid.common.wgsl matches. */
 export const SIM_UNIFORM_FLOATS = 16 + MAX_EMITTERS * 8
@@ -661,63 +660,6 @@ export function fluidFrame(
     saturation: Math.max(0, params.saturation),
     splats,
   }
-}
-
-type Stop = { at: number; colour: readonly [number, number, number] }
-
-/**
- * Deep blue through teal and green into warm orange and magenta, then back to
- * the first colour so the coordinate can wrap without a seam. The dye carries
- * its place in here as a unit vector, so two plumes that meet average their
- * colours the short way round rather than sweeping the whole palette.
- */
-export const PALETTE_STOPS: readonly Stop[] = [
-  { at: 0, colour: [0.04, 0.09, 0.34] },
-  { at: 0.2, colour: [0.04, 0.45, 0.66] },
-  { at: 0.38, colour: [0.14, 0.74, 0.54] },
-  { at: 0.56, colour: [0.92, 0.72, 0.22] },
-  { at: 0.74, colour: [0.94, 0.31, 0.26] },
-  { at: 0.88, colour: [0.72, 0.22, 0.72] },
-  { at: 1, colour: [0.04, 0.09, 0.34] },
-]
-
-const channel = (value: number) => Math.round(Math.min(1, Math.max(0, value)) * 255)
-
-/**
- * The palette at one coordinate, as three floats from 0 to 1. The coordinate
- * wraps like everything else that names a place in the palette, so 1 is 0 and
- * a negative one counts back from the end. This is the one place the stops are
- * interpolated: the lookup table below is built from it, and anything else that
- * wants a colour of the fluid's asks here rather than keeping a palette of its
- * own.
- */
-export function paletteAt(coordinate: number): [number, number, number] {
-  const at = wrap(coordinate)
-  let next = 1
-  while (next < PALETTE_STOPS.length - 1 && (PALETTE_STOPS[next]?.at ?? 1) < at) next++
-  const from = PALETTE_STOPS[next - 1] ?? PALETTE_STOPS[0]
-  const to = PALETTE_STOPS[next] ?? from
-  if (!from || !to) return [0, 0, 0]
-  const span = to.at - from.at
-  const mix = span > 0 ? (at - from.at) / span : 0
-  const part = (index: number) =>
-    (from.colour[index] ?? 0) + ((to.colour[index] ?? 0) - (from.colour[index] ?? 0)) * mix
-
-  return [part(0), part(1), part(2)]
-}
-
-/** The palette as one row of `rgba8unorm` texels, ready for `writeTexture`. */
-export function paletteLut(size = PALETTE_SIZE): Uint8Array {
-  const out = new Uint8Array(size * 4)
-  for (let index = 0; index < size; index++) {
-    // The last texel is coordinate 1, which wraps to 0; the two are the same
-    // colour by construction, so the row still ends where it began.
-    const colour = paletteAt(size > 1 ? index / (size - 1) : 0)
-    for (let part = 0; part < 3; part++) out[index * 4 + part] = channel(colour[part] ?? 0)
-    out[index * 4 + 3] = 255
-  }
-
-  return out
 }
 
 /**

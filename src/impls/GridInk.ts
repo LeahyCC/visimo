@@ -59,7 +59,8 @@ export class GridInk implements InkImpl {
 
   init({ device, format }: SceneContext) {
     // The kit's declarations first, then the grid's, as one module.
-    const module = device.createShaderModule({ label: 'Grid', code: common + shader })
+    const code = shader
+    const module = device.createShaderModule({ label: 'Grid', code: common + code })
     void module.getCompilationInfo().then((info) => {
       for (const message of info.messages)
         if (message.type === 'error')

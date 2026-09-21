@@ -16,6 +16,7 @@ import { visibleExtent } from '../scenes/fluid.params'
 import { carriedCanvas } from './cast'
 import { findStudy, STUDIES } from './registry'
 import { resolveStudy } from './resolve'
+import type { RowState } from './resolve'
 import type { Character } from './types'
 
 const study = findStudy('beat-pump')
@@ -39,22 +40,105 @@ const beat = (phase: number, confidence = 1, more: Partial<Record<keyof typeof F
 const at = (packet = silent(), tension = 0, presence = 1) =>
   resolveStudy(study, undefined, packet, tension, presence, {})
 
-/** The radial speed the study asks for at this phase, at full presence. */
-const radialAt = (phase: number, confidence = 1, tension = 0) =>
-  at(beat(phase, confidence), tension).radial ?? 0
-
-/** The mean of `read` over one beat, sampled at the middle of `steps` equal slices of it. */
-const overABeat = (read: (phase: number) => number, steps = 1000) => {
-  let sum = 0
-  for (let step = 0; step < steps; step += 1) sum += read((step + 0.5) / steps)
-  return sum / steps
-}
-
 /** A point on the right of the canvas, level with the centre. */
 const RIGHT: readonly [number, number] = [0.9, 0.5]
 
-const velocityAt = (phase: number, confidence = 1, tension = 0, point = RIGHT) =>
-  analyticVelocity(analyticField(at(beat(phase, confidence), tension), 1, WIDE), point)
+type Frame = { phase: number; knobs: Record<string, number> }
+
+type Played = {
+  cycle: readonly Frame[]
+  dt: number
+  /** Seconds a beat lasts, so a phase can be read as a time. */
+  period: number
+}
+
+/**
+ * The study through a steady beat, frame by frame, the way the renderer
+ * resolves it. The phase row carries a spring now, so it is where the seconds
+ * before it put it and a single reading at one phase means nothing: what
+ * comes back is the whole of the cycle the pump has settled into, after
+ * `settle` beats that are played and thrown away.
+ *
+ * The phase is sampled at the middle of each frame's slice of the beat. That
+ * is the one sampling that can compare frame rates: it makes the sampled mean
+ * of the sawtooth exactly a half at every one of them, so a difference
+ * between two rates is the spring's and not the grid's.
+ */
+type PlayOptions = {
+  bpm?: number
+  fps?: number
+  confidence?: number
+  tension?: number
+  presence?: number
+  settle?: number
+  /** A phase held still, for a track whose tempo was never found. */
+  phase?: number
+  more?: Partial<Record<keyof typeof F, number>>
+}
+
+const play = (options: PlayOptions = {}): Played => {
+  const bpm = options.bpm ?? 128
+  const fps = options.fps ?? 60
+  const period = 60 / bpm
+  const frames = Math.round(period * fps)
+  const dt = 1 / fps
+  const settle = options.settle ?? 24
+  const packet = beat(0, options.confidence ?? 1, options.more ?? {})
+  const out: Record<string, number> = {}
+  const states: RowState[] = []
+  const cycle: Frame[] = []
+  for (let frame = 0; frame < (settle + 1) * frames; frame += 1) {
+    const phase = options.phase ?? ((frame % frames) + 0.5) / frames
+    packet[F.beatPhase] = phase
+    resolveStudy(
+      study,
+      undefined,
+      packet,
+      options.tension ?? 0,
+      options.presence ?? 1,
+      out,
+      dt,
+      states,
+    )
+
+    if (frame >= settle * frames) cycle.push({ phase, knobs: { ...out } })
+  }
+
+  return { cycle, dt, period }
+}
+
+const radials = (played: Played) => played.cycle.map((frame) => frame.knobs.radial ?? 0)
+
+/** The mean of a reading over the settled beat, which is what nets to nothing. */
+const meanOver = (played: Played, read: (frame: Frame) => number) => {
+  let sum = 0
+  for (const frame of played.cycle) sum += read(frame)
+  return sum / played.cycle.length
+}
+
+const velocityOf = (frame: Frame, point = RIGHT) =>
+  analyticVelocity(analyticField(frame.knobs, 1, WIDE), point)[0] ?? 0
+
+/** How far the picture moves across the beat, peak to trough, in reference radii. */
+const swingOf = (played: Played) => {
+  const reference = analyticField(played.cycle[0]?.knobs ?? {}, 1, WIDE).reference
+  let position = 0
+  let low = 0
+  let high = 0
+  for (const value of radials(played)) {
+    position += value * played.dt
+    low = Math.min(low, position)
+    high = Math.max(high, position)
+  }
+
+  return (high - low) / reference
+}
+
+/** The frame of the settled beat where the pump pushes hardest outward. */
+const kickOf = (played: Played) =>
+  played.cycle.reduce((best, frame) =>
+    (frame.knobs.radial ?? 0) > (best.knobs.radial ?? 0) ? frame : best,
+  )
 
 /** The mean speed over a grid of the canvas at one phase, and the speed at the corner. */
 const frameSpeed = (tension: number, phase = 0) => {
@@ -127,101 +211,131 @@ describe('the beat pump study', () => {
 // screen, the feedback pass moves the history with the velocity, and the phase
 // is 0 on the beat and rises to 1.
 describe('the shape of one beat', () => {
-  it('kicks outward on the beat and settles inward before the next', () => {
-    const [onBeat] = velocityAt(0)
-    const [justBefore] = velocityAt(0.999)
-    expect(onBeat).toBeGreaterThan(0)
-    expect(justBefore).toBeLessThan(0)
+  it('kicks outward just after the beat and is inward again before the next', () => {
+    const played = play()
+    const kick = kickOf(played)
+    expect(velocityOf(kick)).toBeGreaterThan(0)
+    expect(velocityOf(played.cycle[played.cycle.length - 1] ?? kick)).toBeLessThan(0)
     // A point left of the centre is pushed the other way, which is outward too.
-    expect(velocityAt(0, 1, 0, [0.1, 0.5])[0]).toBeLessThan(0)
+    expect(analyticVelocity(analyticField(kick.knobs, 1, WIDE), [0.1, 0.5])[0]).toBeLessThan(0)
     // And one above the centre goes up, which is a texture's negative y.
-    expect(velocityAt(0, 1, 0, [0.5, 0.3])[1]).toBeLessThan(0)
+    expect(analyticVelocity(analyticField(kick.knobs, 1, WIDE), [0.5, 0.3])[1]).toBeLessThan(0)
   })
 
-  it('peaks on the beat and falls in a straight line to the next', () => {
-    expect(radialAt(0)).toBeCloseTo(0.12, 12)
-    expect(radialAt(0.5)).toBeCloseTo(0, 12)
-    expect(radialAt(1)).toBeCloseTo(-0.12, 12)
-    let last = radialAt(0)
-    for (let phase = 0.05; phase <= 1.0001; phase += 0.05) {
-      const now = radialAt(phase)
-      expect(now).toBeLessThan(last)
-      expect(last - now).toBeCloseTo(0.24 * 0.05, 7)
-      last = now
+  // The spring's own period sets this and not the beat's, so it is the same
+  // number of milliseconds at any tempo: 26 at 8 hertz and a damping of 0.5.
+  // A hit the extractor reacts to arrives 65 to 100 late, which is what the
+  // predicted phase is for, so the reversal has to stay well inside that.
+  it('turns the picture around within 30 milliseconds of the tracker’s beat', () => {
+    for (const bpm of [90, 128, 175]) {
+      const played = play({ bpm })
+      const inward = radials(played)
+      let crossed = -1
+      for (let frame = 1; frame < inward.length; frame += 1)
+        if ((inward[frame - 1] ?? 0) < 0 && (inward[frame] ?? 0) >= 0 && crossed < 0)
+          crossed = frame
+      expect(crossed, `${bpm} BPM`).toBeGreaterThanOrEqual(0)
+      const seconds = (played.cycle[crossed]?.phase ?? 1) * played.period
+      expect(seconds, `${bpm} BPM`).toBeLessThan(0.03)
+    }
+  })
+
+  it('overshoots the sawtooth’s own top on the beat, then rings back onto the slide', () => {
+    const played = play()
+    const kick = kickOf(played)
+    // Deeper than the 0.12 the straight line reached, and by the overshoot a
+    // damping of 0.5 gives: 0.134 at 128 BPM.
+    expect(kick.knobs.radial ?? 0).toBeGreaterThan(0.12)
+    expect(kick.knobs.radial ?? 0).toBeCloseTo(0.134, 2)
+    expect(kick.phase).toBeLessThan(0.25)
+    // Settled, it is the same straight line a little behind itself: a spring
+    // tracking a ramp sits 2 z / w seconds back, 20 milliseconds here, which
+    // is 0.01 of radial at this tempo.
+    for (const frame of played.cycle) {
+      if (frame.phase < 0.5) continue
+      const line = 0.12 - 0.24 * frame.phase
+      expect(Math.abs((frame.knobs.radial ?? 0) - line), `phase ${frame.phase}`).toBeLessThan(0.015)
     }
   })
 
   // The net over a beat is what makes it a pump and not a march: the picture
   // is pushed out as far as it is pulled back, so it breathes about where it
-  // was and does not walk off the edge.
+  // was and does not walk off the edge. A spring has a gain of 1 at nothing
+  // per second, so putting one on the row cannot change this.
   it('nets to nothing over a beat', () => {
-    expect(overABeat((phase) => radialAt(phase))).toBeCloseTo(0, 9)
+    const played = play()
+    expect(meanOver(played, (frame) => frame.knobs.radial ?? 0)).toBeCloseTo(0, 6)
     // At the point of the frame too, not only in the coefficient.
-    expect(overABeat((phase) => velocityAt(phase)[0])).toBeCloseTo(0, 9)
+    expect(meanOver(played, (frame) => velocityOf(frame))).toBeCloseTo(0, 6)
   })
 
   it('nets to nothing over a beat at any falloff tension gives it', () => {
-    for (const tension of [0, 0.4, 1])
+    for (const tension of [0, 0.4, 1]) {
+      const played = play({ tension })
       for (const point of [RIGHT, [0.7, 0.62], [0.55, 0.5]] as const)
-        expect(overABeat((phase) => velocityAt(phase, 1, tension, point)[0])).toBeCloseTo(0, 9)
+        expect(
+          meanOver(
+            played,
+            (frame) => analyticVelocity(analyticField(frame.knobs, 1, WIDE), point)[0],
+          ),
+          `tension ${tension}`,
+        ).toBeCloseTo(0, 6)
+    }
   })
 
-  it('swings the picture by about 2.5 percent at the rim at 128 BPM, and not more than 4 at 90', () => {
+  it('swings the picture by about 2.4 percent at the rim at 128 BPM, and not more than 4 at 90', () => {
     // The position is the running sum of the velocity; the rim is one
     // reference radius from the centre, so the scale change is the distance
-    // moved over that radius.
-    const reference = analyticField(at(beat(0)), 1, WIDE).reference
-    const swing = (bpm: number) => {
-      const seconds = 60 / bpm
-      const steps = 2000
-      let position = 0
-      let low = 0
-      let high = 0
-      for (let step = 0; step < steps; step += 1) {
-        position += radialAt((step + 0.5) / steps) * (seconds / steps)
-        low = Math.min(low, position)
-        high = Math.max(high, position)
-      }
-      return (high - low) / reference
-    }
-
-    expect(swing(128)).toBeGreaterThan(0.022)
-    expect(swing(128)).toBeLessThan(0.027)
-    expect(swing(175)).toBeLessThan(swing(128))
-    expect(swing(90)).toBeLessThan(0.04)
+    // moved over that radius. The spring reshapes the velocity and adds none,
+    // so this is within a few percent of the straight line's 2.45.
+    expect(swingOf(play({ bpm: 128, fps: 480 }))).toBeGreaterThan(0.022)
+    expect(swingOf(play({ bpm: 128, fps: 480 }))).toBeLessThan(0.027)
+    expect(swingOf(play({ bpm: 175, fps: 480 }))).toBeLessThan(
+      swingOf(play({ bpm: 128, fps: 480 })),
+    )
+    expect(swingOf(play({ bpm: 90, fps: 480 }))).toBeLessThan(0.04)
   })
 })
 
-// The bar: the same at any frame rate. The velocity is per second and the
-// resolver holds nothing between frames, so the same beat moves the picture
-// the same distance at 30, 60 and 144 a second. 120 BPM is a whole number of
-// frames at each.
+// The bar: the same at any frame rate. The velocity is per second, and the
+// one thing the resolver now holds between frames is the spring, which is
+// stepped in closed form over the real step, so the same beat moves the
+// picture the same distance at 30, 60 and 144 a second. 120 BPM is a whole
+// number of frames at each.
 describe('at any frame rate', () => {
-  const beatAt = (fps: number) => {
-    const frames = fps / 2
-    let position = 0
-    let high = 0
-    for (let frame = 0; frame < frames; frame += 1) {
-      const phase = (frame + 0.5) / frames
-      position += radialAt(phase) / fps
-      high = Math.max(high, position)
-    }
-    return { net: position, high }
-  }
-
   it('moves the picture the same distance in a beat and returns it', () => {
-    const reference = beatAt(144).high
-    expect(reference).toBeCloseTo((0.24 * 0.5) / 8, 3)
-    for (const fps of [30, 60, 144]) {
-      const { net, high } = beatAt(fps)
-      expect(net, `${fps} fps`).toBeCloseTo(0, 8)
-      expect(Math.abs(high - reference) / reference, `${fps} fps`).toBeLessThan(0.01)
+    const rates = [30, 60, 144].map((fps) => ({ fps, played: play({ bpm: 120, fps }) }))
+    const first = rates[0]
+    if (!first) throw new Error('Expected a frame rate')
+    const reference = {
+      swing: swingOf(first.played),
+      peak: Math.max(...radials(first.played)),
+      trough: Math.min(...radials(first.played)),
+    }
+
+    for (const { fps, played } of rates) {
+      expect(
+        meanOver(played, (frame) => frame.knobs.radial ?? 0),
+        `${fps} fps`,
+      ).toBeCloseTo(0, 6)
+      const near = (value: number, want: number) => Math.abs(value - want) / Math.abs(want)
+      expect(near(swingOf(played), reference.swing), `${fps} fps swing`).toBeLessThan(0.01)
+      expect(near(Math.max(...radials(played)), reference.peak), `${fps} fps peak`).toBeLessThan(
+        0.01,
+      )
+
+      expect(
+        near(Math.min(...radials(played)), reference.trough),
+        `${fps} fps trough`,
+      ).toBeLessThan(0.01)
     }
   })
 })
 
-// Rows add and do not multiply, so confidence cannot scale the pulse. What it
-// takes out is the constant, which is the part that would march the picture.
+// A row could scale the pulse by the confidence and deliberately does not:
+// the tracker keeps the phase running through a bar of doubt. What the
+// confidence row takes out is the constant, which is the part that would
+// march the picture.
 describe('with no steady beat', () => {
   it('draws nothing at a silent packet, and the flow encodes no pass', () => {
     const knobs = at(silent(), 0)
@@ -233,49 +347,74 @@ describe('with no steady beat', () => {
   it('stays still before any tempo has been found, however loud the music is', () => {
     // The phase is stuck at 0 and the confidence at 0 until the tracker has
     // locked, and 0 is the top of the sawtooth: an offset in the resting value
-    // would leave the picture pushed outward for the whole of that time.
+    // would leave the picture pushed outward for the whole of that time. The
+    // spring rests exactly on its signal, so a phase that never moves leaves
+    // it at nothing however long it is held there.
     for (const energy of [0, 0.5, 1]) {
-      const knobs = at(heard({ energy, swell: 1, beatPulse: 1 }), 0)
-      expect(knobs.radial, `energy ${energy}`).toBe(0)
-      expect(fieldMoves(analyticField(knobs, 1, WIDE))).toBe(false)
+      const held = play({ phase: 0, confidence: 0, more: { energy, swell: 1, beatPulse: 1 } })
+      for (const frame of held.cycle) {
+        expect(frame.knobs.radial, `energy ${energy}`).toBe(0)
+        expect(fieldMoves(analyticField(frame.knobs, 1, WIDE))).toBe(false)
+      }
     }
   })
 
   it('takes the constant out, and only the constant, as the beat comes in', () => {
-    const top = (confidence: number) => radialAt(0, confidence)
-    expect(top(0)).toBe(0)
-    expect(top(0.05)).toBeGreaterThan(0)
+    const top = (confidence: number) => Math.max(...radials(play({ confidence })))
+    // With no offset at all the top of the cycle is not quite 0: the spring
+    // passes the sawtooth's bottom on the way down, which is an outward tick
+    // of a twentieth of the swing. What matters is that the constant is gone.
+    expect(top(0)).toBeLessThan(0.24 / 10)
+    expect(top(0.05)).toBeGreaterThan(top(0))
     for (let confidence = 0.05; confidence < 1; confidence += 0.05)
       expect(top(confidence + 0.05)).toBeGreaterThan(top(confidence))
     // The swing does not fade, by design: the tracker keeps the phase running
     // through a bar of doubt. So the pulse is as deep as ever...
-    const swing = (confidence: number) => radialAt(0, confidence) - radialAt(1, confidence)
+    const swing = (confidence: number) => {
+      const read = radials(play({ confidence }))
+      return Math.max(...read) - Math.min(...read)
+    }
+
+    const reference = swing(1)
+    expect(reference).toBeGreaterThan(0.24)
     for (const confidence of [0, 0.2, 0.45, 0.85, 1])
-      expect(swing(confidence)).toBeCloseTo(0.24, 12)
+      expect(swing(confidence), `confidence ${confidence}`).toBeCloseTo(reference, 9)
   })
 
   it('is nearly level on a two-step and level on four to the floor', () => {
-    const mean = (confidence: number) => overABeat((phase) => radialAt(phase, confidence))
+    const mean = (confidence: number) =>
+      meanOver(play({ confidence }), (frame) => frame.knobs.radial ?? 0)
     // ...and what is left is a slow drift inward, at worst half a swing.
-    expect(mean(0)).toBeCloseTo(-0.12, 9)
+    expect(mean(0)).toBeCloseTo(-0.12, 6)
     expect(Math.abs(mean(0.45))).toBeLessThan(0.24 / 5)
     expect(Math.abs(mean(0.85))).toBeLessThan(0.24 / 20)
-    expect(mean(1)).toBeCloseTo(0, 9)
+    expect(mean(1)).toBeCloseTo(0, 6)
     for (const confidence of [0, 0.2, 0.45, 0.85, 1])
-      expect(mean(confidence)).toBeLessThanOrEqual(1e-9)
+      expect(mean(confidence)).toBeLessThanOrEqual(1e-6)
   })
 
   it('costs nothing at presence 0, and scales the whole swing with presence', () => {
     expect(fieldMoves(analyticField(at(beat(0), 1, 0), 0, WIDE))).toBe(false)
-    const half = analyticField(at(beat(0)), 0.5, WIDE)
-    expect(half.radial).toBeCloseTo(0.06, 12)
-    // The mean stays 0 at any presence, since both rows are scaled.
-    expect(overABeat((phase) => analyticField(at(beat(phase)), 0.5, WIDE).radial)).toBeCloseTo(0, 9)
+    const half = play({ presence: 0.5 })
+    const whole = play()
+    // Presence scales the field and not the knobs, so a half fade is half the
+    // speed everywhere and the mean is still nothing.
+    expect(
+      meanOver(half, (frame) => analyticField(frame.knobs, 0.5, WIDE).radial),
+      'mean at half presence',
+    ).toBeCloseTo(0, 6)
+
+    expect(
+      Math.max(...half.cycle.map((frame) => analyticField(frame.knobs, 0.5, WIDE).radial)),
+    ).toBeCloseTo(
+      Math.max(...whole.cycle.map((frame) => analyticField(frame.knobs, 1, WIDE).radial)) / 2,
+      9,
+    )
   })
 })
 
-// The bar: a test shows tension moving a knob. It cannot make the swing bigger,
-// since that is a row's gain and no row multiplies, so it widens the pulse.
+// The bar: a test shows tension moving a knob. It widens the pulse rather than
+// deepening it, and the def says why a scale on the row is the worse answer.
 describe('what tension does to it', () => {
   it('widens the pulse from the rim toward the whole frame, and leaves the swing alone', () => {
     const calm = at(beat(0), 0)
@@ -304,12 +443,17 @@ describe('what tension does to it', () => {
     }
   })
 
+  // The spring passes the sawtooth's own top on the beat, and how far depends
+  // on the tempo: the slowest beat the tracker reports leaves the longest
+  // ramp for it to fall off, and reaches 0.147.
   it('stays inside the range the analytic flow may reach at a full packet', () => {
-    for (const phase of [0, 0.5, 0.999])
+    for (const bpm of [60, 128, 200])
       for (const tension of [0, 1]) {
-        const knobs = at(beat(phase, 1, { energy: 1, swell: 1 }), tension)
-        expect(Math.abs(knobs.radial ?? 0)).toBeLessThanOrEqual(0.12 + 1e-12)
-        expect(knobs.falloff).toBeLessThanOrEqual(1.5 + 1e-12)
+        const played = play({ bpm, tension, more: { energy: 1, swell: 1 } })
+        for (const frame of played.cycle) {
+          expect(Math.abs(frame.knobs.radial ?? 0), `${bpm} BPM`).toBeLessThanOrEqual(0.15)
+          expect(frame.knobs.falloff, `${bpm} BPM`).toBeLessThanOrEqual(1.5 + 1e-12)
+        }
       }
   })
 })

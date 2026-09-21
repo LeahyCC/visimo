@@ -28,11 +28,13 @@ import {
   SETTLE,
   settledPeak,
 } from '../impls/halo.params'
+import { ribbonColour } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import { carriedCanvas } from './cast'
 import { HALO_KNOBS } from './impls'
 import { findStudy, sceneOf } from './registry'
 import { castFrame, resolveLive, resolveStudy } from './resolve'
+import type { RowState } from './resolve'
 import type { Moment } from './types'
 
 const study = findStudy('halo')
@@ -47,6 +49,19 @@ const packetOf = (fields: Partial<Record<keyof typeof F, number>> = {}) => {
 
 const at = (packet: Float32Array, tension = 0) =>
   resolveStudy(study, undefined, packet, tension, 1, {})
+
+/** The hue frame by frame over so many seconds, which is the only shaped row. */
+const hueOver = (packet: Float32Array, seconds: number, fps = 60) => {
+  const out: Record<string, number> = {}
+  const states: RowState[] = []
+  const read: number[] = []
+  for (let frame = 0; frame < Math.round(seconds * fps); frame += 1) {
+    resolveStudy(study, undefined, packet, 0, 1, out, 1 / fps, states)
+    read.push(out.hue ?? 0)
+  }
+
+  return read
+}
 
 /** A quiet passage: a little sound, and nothing winding up. */
 const QUIET = { energy: 0.15 } as const
@@ -190,8 +205,36 @@ describe('what the music does to the halo', () => {
     expect(hard).toBeGreaterThanOrEqual(HALO_RANGES.softness[0])
   })
 
-  it('takes its colour from the ribbon’s palette at the key and leaves the offset alone', () => {
-    expect(at(packetOf({ ...QUIET, keyHue: 0.7 })).hue).toBe(study.knobs.hue)
+  it('takes its colour from the ribbon’s palette at the key, wherever the key is', () => {
+    expect(at(packetOf({ ...QUIET, keyHue: 0.7 })).hue).toBe(
+      at(packetOf({ ...QUIET, keyHue: 0.1 })).hue,
+    )
+  })
+
+  // The one rotation in the library a row can drive, because the hue is an
+  // angle where everything else that turns is a speed the picture integrates.
+  it('walks its colour round the wheel with the music, and holds it in silence', () => {
+    const loud = hueOver(packetOf({ energy: 1 }), 25)
+    // 0.02 turns a second of loud music: half a turn in twenty five seconds.
+    expect(loud[loud.length - 1] ?? 0).toBeCloseTo((study.knobs.hue ?? 0) + 0.5, 2)
+    for (let frame = 1; frame < loud.length; frame += 1)
+      expect(loud[frame], `frame ${frame}`).toBeGreaterThan(loud[frame - 1] ?? 0)
+    const quiet = hueOver(packetOf(), 25)
+    for (const hue of quiet) expect(hue).toBe(study.knobs.hue)
+  })
+
+  it('stays inside the offset the ink allows, and wraps where the palette does', () => {
+    // A minute of loud music is more than a whole turn, so the wrap is in it.
+    const read = hueOver(packetOf({ energy: 1 }), 60)
+    for (const hue of read) {
+      expect(hue).toBeGreaterThanOrEqual(HALO_RANGES.hue[0])
+      expect(hue).toBeLessThanOrEqual(HALO_RANGES.hue[1])
+    }
+
+    // And nothing is seen at the wrap, because half a turn either way from the
+    // key is the same colour.
+    const key = packetOf({ keyHue: 0.3 })
+    expect(ribbonColour(key, HALO_RANGES.hue[0])).toEqual(ribbonColour(key, HALO_RANGES.hue[1]))
   })
 })
 
@@ -232,6 +275,8 @@ describe('what tension does to the halo', () => {
     const calm = at(packet, 0)
     const wound = at(packet, 1)
     expect(wound.softness).toBe(calm.softness)
+    // Nothing winding up touches the hue: it turns with the level alone.
+    expect(study.mapping.filter((row) => row.to === 'hue' && row.from !== 'energy')).toEqual([])
     expect(wound.hue).toBe(calm.hue)
   })
 

@@ -26,6 +26,7 @@ export { parseCast, castStudyIds, CANVAS_KNOBS, isCanvasKnob, MAX_INKS } from '.
 export {
   blendKnobs,
   castFrame,
+  forgetShapes,
   liveCast,
   resolveCast,
   resolveLive,
@@ -50,7 +51,7 @@ export {
 } from './studies/impls'
 export { CHARACTER_AXES, COSTS, MOMENTS, STUDY_FIELDS, STUDY_KINDS, isLook } from './studies/types'
 export type { Cast, CastCanvas, CastOverride, CanvasKnob, PinnedCast } from './studies/cast'
-export type { CastFrame, KnobsAt, LiveCast, LiveStudy } from './studies/resolve'
+export type { CastFrame, KnobsAt, LiveCast, LiveStudy, RowState } from './studies/resolve'
 export type {
   DustKnob,
   ImplId,
@@ -72,8 +73,22 @@ export type {
   StudyField,
   StudyKind,
   StudyMapping,
+  StudyScale,
 } from './studies/types'
-export type { AudioField, Curve, FluidKnob, KaleidoscopeKnob, Tuning } from './presets/knobs'
-export { AUDIO_FIELDS, CURVES } from './presets/knobs'
+export type {
+  AudioField,
+  Curve,
+  FluidKnob,
+  HoldPeriod,
+  KaleidoscopeKnob,
+  Shape,
+  ShapeKind,
+  Tuning,
+} from './presets/knobs'
+export { AUDIO_FIELDS, CURVES, HOLD_PERIODS, SHAPES } from './presets/knobs'
+// The maths the shapes are made of, for a host that wants a row's curve on
+// something of its own.
+export { follow, integrate, SHAPE_MAX_DT, stepSpring, wrapTotal, wrapped } from './presets/shapes'
+export type { Spring } from './presets/shapes'
 export { POST_LANES, POST_KNOBS } from './post/params'
 export type { PostParams } from './post/params'

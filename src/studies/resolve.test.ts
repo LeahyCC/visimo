@@ -6,9 +6,16 @@ import type { PostParams } from '../post/params'
 import type { CastCanvas } from './cast'
 import { LOOK_KNOBS } from './impls'
 import { findStudy } from './registry'
-import { blendKnobs, castFrame, resolveLive, resolveStudy, studyFeature } from './resolve'
-import type { LiveStudy } from './resolve'
-import type { InkStudy } from './types'
+import {
+  blendKnobs,
+  castFrame,
+  forgetShapes,
+  resolveLive,
+  resolveStudy,
+  studyFeature,
+} from './resolve'
+import type { LiveStudy, RowState } from './resolve'
+import type { InkStudy, StudyMapping } from './types'
 
 const packet = (values: Partial<Record<keyof typeof F, number>>) => {
   const out = new Float32Array(PACKET_LENGTH)
@@ -71,6 +78,16 @@ describe('resolveStudy', () => {
     expect(out).toEqual({ dye: 3, saturation: 0.5 })
   })
 
+  // A row that carries neither of the new fields is the row it always was, by
+  // the same arithmetic, whether or not it is handed a step and a state.
+  it('is the same number for a plain row with a step and a state as without', () => {
+    const plain = resolveStudy(ink, undefined, packet({ energy: 0.5 }), 0.5, 1, {})
+    const stepped = resolveStudy(ink, undefined, packet({ energy: 0.5 }), 0.5, 1, {}, 1 / 60, [])
+    expect(stepped).toEqual(plain)
+    expect(plain.dye).toBe(1 + 2 * 0.5)
+    expect(plain.saturation).toBe(0.5 - 0.4 * 0.5)
+  })
+
   it('rewrites the object it is given rather than keeping the last study’s knobs', () => {
     const out: Record<string, number> = {}
     resolveStudy(ink, undefined, packet({}), 0, 1, out)
@@ -78,6 +95,270 @@ describe('resolveStudy', () => {
     if (!fluid) throw new Error('Expected the lazy fluid')
     resolveStudy(fluid, undefined, packet({}), 0, 1, out)
     expect(Object.keys(out).sort()).toEqual(Object.keys(fluid.knobs).sort())
+  })
+})
+
+/** The test ink with one row replaced, for the shapes below. */
+const shapedInk = (row: StudyMapping): InkStudy => ({
+  ...ink,
+  mapping: [row, { from: 'tension', to: 'saturation', gain: -0.4, curve: 'linear' }],
+})
+
+/**
+ * A shaped study stepped for so many seconds at a frame rate, with the packet
+ * free to change, and the knob read at each frame. This is what the renderer
+ * does: one state list per study, kept across frames.
+ */
+function step(
+  study: InkStudy,
+  frames: number,
+  dt: number,
+  write: (packet: Float32Array, frame: number) => Float32Array,
+  knob = 'dye',
+) {
+  const out: Record<string, number> = {}
+  const states: RowState[] = []
+  const read: number[] = []
+  for (let frame = 0; frame < frames; frame += 1) {
+    resolveStudy(study, undefined, write(packet({}), frame), 0, 1, out, dt, states)
+    read.push(out[knob] ?? 0)
+  }
+
+  return read
+}
+
+describe('a row’s scale', () => {
+  const scaled = shapedInk({
+    from: 'beatPulse',
+    to: 'dye',
+    gain: 2,
+    curve: 'linear',
+    scale: { from: 'energy', curve: 'linear' },
+  })
+
+  it('multiplies the row by a second field', () => {
+    const out = resolveStudy(scaled, undefined, packet({ beatPulse: 1, energy: 0.5 }), 0, 1, {})
+    expect(out.dye).toBeCloseTo(1 + 2 * 0.5, 12)
+  })
+
+  // The whole row goes, not just part of it: a scale of nothing is a row
+  // switched off, which is what makes it a gate as well as a depth.
+  it('gives nothing when the field it scales by is 0', () => {
+    const out = resolveStudy(scaled, undefined, packet({ beatPulse: 1, energy: 0 }), 0, 1, {})
+    expect(out.dye).toBe(ink.knobs.dye)
+  })
+
+  it('bends the scale by its own curve', () => {
+    const squared = shapedInk({
+      from: 'beatPulse',
+      to: 'dye',
+      gain: 2,
+      curve: 'linear',
+      scale: { from: 'energy', curve: 'square' },
+    })
+
+    const out = resolveStudy(squared, undefined, packet({ beatPulse: 1, energy: 0.5 }), 0, 1, {})
+    expect(out.dye).toBeCloseTo(1 + 2 * 0.25, 12)
+  })
+
+  it('reads tension and presence as a row does', () => {
+    const byTension = shapedInk({
+      from: 'energy',
+      to: 'dye',
+      gain: 2,
+      curve: 'linear',
+      scale: { from: 'tension', curve: 'linear' },
+    })
+
+    expect(resolveStudy(byTension, undefined, packet({ energy: 1 }), 0, 1, {}).dye).toBe(1)
+    expect(resolveStudy(byTension, undefined, packet({ energy: 1 }), 0.5, 1, {}).dye).toBeCloseTo(
+      2,
+      12,
+    )
+  })
+})
+
+describe('a row’s shape', () => {
+  it('follows a level up fast and down slowly, and lands on it', () => {
+    const study = shapedInk({
+      from: 'energy',
+      to: 'dye',
+      gain: 2,
+      curve: 'linear',
+      shape: { kind: 'envelope', attackMs: 10, releaseMs: 200 },
+    })
+
+    // Half a second of a full level, then half a second of none.
+    const read = step(study, 60, 1 / 60, (out, frame) => {
+      out[F.energy] = frame < 30 ? 1 : 0
+      return out
+    })
+
+    expect(read[29] ?? 0).toBeCloseTo(3, 6)
+    // A release in, a third of the way back; two more and it is nearly home.
+    expect((read[41] ?? 0) - 1).toBeCloseTo(2 * Math.exp(-1), 6)
+    // Two and a half releases on, most of the way back but not there: a
+    // follower approaches and never arrives, which is what a tail is.
+    expect(read[59] ?? 0).toBeLessThan(1.2)
+    expect(read[59] ?? 0).toBeGreaterThan(1)
+  })
+
+  it('springs past a step and settles on it', () => {
+    const study = shapedInk({
+      from: 'energy',
+      to: 'dye',
+      gain: 1,
+      curve: 'linear',
+      shape: { kind: 'spring', frequency: 6, damping: 0.4 },
+    })
+
+    const read = step(study, 120, 1 / 120, (out) => {
+      out[F.energy] = 1
+      return out
+    })
+
+    expect(Math.max(...read)).toBeGreaterThan(2)
+    expect(read[119] ?? 0).toBeCloseTo(2, 3)
+  })
+
+  it('accumulates its signal per second and wraps', () => {
+    const study = shapedInk({
+      from: 'energy',
+      to: 'dye',
+      gain: 1,
+      curve: 'linear',
+      shape: { kind: 'integrate', rate: 1, wrap: 1 },
+    })
+
+    const read = step(study, 180, 1 / 60, (out) => {
+      out[F.energy] = 0.5
+      return out
+    })
+
+    // Half a turn a second: a quarter after half a second, and round again by
+    // three, which the wrap has folded back to the start.
+    expect(read[29] ?? 0).toBeCloseTo(1.25, 2)
+    expect(read[179] ?? 0).toBeCloseTo(1.5, 2)
+  })
+
+  for (const per of ['beat', 'bar'] as const) {
+    const row = per === 'bar' ? F.barPhase : F.beatPhase
+    it(`holds a value between one ${per} and the next, and steps only there`, () => {
+      const study = shapedInk({
+        from: 'energy',
+        to: 'dye',
+        gain: 1,
+        curve: 'linear',
+        shape: { kind: 'hold', per },
+      })
+
+      // Twenty frames to the period, and the level climbs every frame, so a
+      // value that moved between boundaries would be seen at once.
+      const read = step(study, 60, 1 / 60, (out, frame) => {
+        out[row] = (frame % 20) / 20
+        out[F.energy] = frame / 60
+        return out
+      })
+
+      // Nothing is sampled until the first boundary: a row on the bar should
+      // not take a number from whatever frame the study arrived on.
+      for (let frame = 0; frame < 20; frame += 1) expect(read[frame], `frame ${frame}`).toBe(1)
+      const steps = read.filter((value, frame) => frame > 0 && value !== read[frame - 1])
+      expect(steps).toHaveLength(2)
+      for (let frame = 20; frame < 40; frame += 1)
+        expect(read[frame], `frame ${frame}`).toBe(read[20])
+      // The packet is a Float32Array, so what it read back is the level to
+      // about seven places and not to fifteen.
+      expect(read[20] ?? 0).toBeCloseTo(1 + 20 / 60, 6)
+      expect(read[40] ?? 0).toBeCloseTo(1 + 40 / 60, 6)
+    })
+  }
+
+  it('gives each row a memory of its own, the cast’s rows included', () => {
+    const study: InkStudy = {
+      ...ink,
+      mapping: [
+        {
+          from: 'energy',
+          to: 'dye',
+          gain: 1,
+          curve: 'linear',
+          shape: { kind: 'integrate', rate: 1 },
+        },
+        {
+          from: 'energy',
+          to: 'saturation',
+          gain: 1,
+          curve: 'linear',
+          shape: { kind: 'integrate', rate: 2 },
+        },
+        { from: 'tension', to: 'saturation', gain: 0, curve: 'linear' },
+      ],
+    }
+
+    const overrides = {
+      mapping: [
+        {
+          from: 'energy',
+          to: 'dye',
+          gain: 1,
+          curve: 'linear',
+          // Indexed past the study's own rows, so this total is its own and
+          // not a second step of the first row's.
+          shape: { kind: 'integrate', rate: 4 },
+        } as const,
+      ],
+    }
+
+    const out: Record<string, number> = {}
+    const states: RowState[] = []
+    for (let frame = 0; frame < 60; frame += 1)
+      resolveStudy(study, overrides, packet({ energy: 1 }), 0, 1, out, 1 / 60, states)
+    expect(out.dye).toBeCloseTo(1 + 1 + 4, 6)
+    expect(out.saturation).toBeCloseTo(0.5 + 2, 6)
+  })
+})
+
+describe('what the frame remembers', () => {
+  const held: LiveStudy[] = [{ id: 'beat-pump', presence: 1 }]
+  const beating = (phase: number) => packet({ beatPhase: phase, tempoConfidence: 1 })
+
+  const run = (frame = castFrame(), frames = 30) => {
+    for (let at = 0; at < frames; at += 1)
+      resolveLive(held, STILL, beating((at % 10) / 10), 0, frame, 1 / 60)
+    return frame
+  }
+
+  it('keeps a shaped row’s memory from frame to frame', () => {
+    const frame = run()
+    expect(frame.shapes.get('beat-pump')?.[0]).toBeDefined()
+    expect(frame.shapes.get('beat-pump')?.[0]?.velocity).not.toBe(0)
+  })
+
+  it('drops it when the study’s presence returns to 0', () => {
+    const frame = run()
+    expect(frame.shapes.has('beat-pump')).toBe(true)
+    resolveLive([{ id: 'beat-pump', presence: 0 }], STILL, beating(0), 0, frame, 1 / 60)
+    expect(frame.shapes.has('beat-pump')).toBe(false)
+    expect(frame.knobs.has('beat-pump')).toBe(false)
+  })
+
+  // A new track and a seek both mean the seconds the springs are about are the
+  // wrong seconds; the renderer calls this for both.
+  it('forgets every shape on demand, and the next frame starts from rest', () => {
+    const frame = run()
+    forgetShapes(frame)
+    expect(frame.shapes.size).toBe(0)
+    resolveLive(held, STILL, beating(0.5), 0, frame, 1 / 60)
+    const fresh = castFrame()
+    resolveLive(held, STILL, beating(0.5), 0, fresh, 1 / 60)
+    expect(frame.knobs.get('beat-pump')).toEqual(fresh.knobs.get('beat-pump'))
+  })
+
+  it('holds every shape still when it is handed no step', () => {
+    const frame = castFrame()
+    for (let at = 0; at < 30; at += 1) resolveLive(held, STILL, beating(0.5), 0, frame)
+    expect(frame.shapes.get('beat-pump')?.[0]?.value).toBe(0)
   })
 })
 
@@ -339,6 +620,10 @@ describe('a look with the grade, fading out against one without', () => {
 })
 
 describe('resolveLive', () => {
+  // The looks are in the map as well as blended into the stack, so anything
+  // that wants the numbers a study was drawn with finds them by its id. The
+  // renderer draws from the live list and never from the map, so a look
+  // sitting in it draws nothing.
   it('holds two flows and two looks at once, which a cast cannot say', () => {
     const frame = resolveLive(
       [
@@ -352,7 +637,12 @@ describe('resolveLive', () => {
       0,
       castFrame(),
     )
-    expect([...frame.knobs.keys()]).toEqual(['lazy-fluid', 'turbulent-fluid'])
+    expect([...frame.knobs.keys()]).toEqual([
+      'lazy-fluid',
+      'turbulent-fluid',
+      'warm-soft',
+      'hard-clean',
+    ])
   })
 
   it('leaves a study at presence 0 out, and drops one that has gone', () => {

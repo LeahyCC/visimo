@@ -29,8 +29,27 @@ import type { InkStudy } from '../types'
  * the hollow, so a kick pushes the peak of the falloff out from the middle and
  * the glow opens toward a ring and closes again. `hardness` tightens the core
  * of a hard track and softens a soft one, which is the one way the study reads
- * the song's character. The hue is the ribbon's palette at the key and sits
- * still; it is a setting for a cast to offset, and not a level.
+ * the song's character.
+ *
+ * The colour turns, slowly, and it is the one rotation in the library that a
+ * row can drive. Everything else that turns is a velocity the picture itself
+ * integrates: the analytic flow's swirl is turns a second and the feedback
+ * pass moves the history by it, the ring's spin is the same, and a row on any
+ * of them sets a speed and not an angle. The hue is an angle, an offset from
+ * the ribbon's colour at the key, so a row that accumulates is the only way
+ * it can move at all. It takes `energy` through an `integrate` at 0.02 turns
+ * a second, so a loud passage walks the glow once round the wheel in fifty
+ * seconds and a quiet one in two minutes, and silence holds it where it is.
+ * A glow that sits at the middle of the frame for a whole intro is the one
+ * ink where a colour that never moves is noticed.
+ *
+ * The rest value is -0.5 rather than 0 and the row climbs a whole turn, so the
+ * offset runs -0.5 to 0.5, which is the range the ink allows. The wrap at the
+ * top is not seen: the palette is a circle and paletteAt(-0.5) is
+ * paletteAt(0.5), so half a turn from the key is one colour approached from
+ * either side. It does mean the glow no longer opens on the key's own colour
+ * but on its opposite, which for one small glow beside an ink that does sit
+ * on the key is a difference worth having rather than a loss.
  *
  * Tension tightens it to a point, as the catalogue says: it takes the radius
  * down by 0.07 of the short side and the hollow to nothing, and lifts the
@@ -81,7 +100,7 @@ export const HALO: InkStudy = {
     hollow: 0.15,
     softness: 0.6,
     intensity: 0.055,
-    hue: 0,
+    hue: -0.5,
   },
   mapping: [
     { from: 'energy', to: 'radius', gain: 0.26, curve: 'sqrt' },
@@ -94,6 +113,15 @@ export const HALO: InkStudy = {
     { from: 'swell', to: 'intensity', gain: -0.006, curve: 'square' },
     { from: 'hardness', to: 'intensity', gain: -0.006, curve: 'square' },
     { from: 'tension', to: 'intensity', gain: 0.002, curve: 'linear' },
+    {
+      from: 'energy',
+      to: 'hue',
+      gain: 1,
+      curve: 'linear',
+      // A whole turn of the wheel, at 0.02 turns a second of loud music, and
+      // it wraps where the palette does so nothing steps. See above.
+      shape: { kind: 'integrate', rate: 0.02, wrap: 1 },
+    },
   ],
   cost: 'cheap',
 }

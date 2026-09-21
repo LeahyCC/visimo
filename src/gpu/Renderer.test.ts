@@ -394,6 +394,26 @@ vi.mock('../impls/HaloInk', () => ({
   },
 }))
 
+vi.mock('../impls/LasersInk', () => ({
+  LasersInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.lasers = (impls.built.lasers ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('lasers', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('lasers')
+    }
+    dispose() {
+      impls.disposed.lasers = (impls.disposed.lasers ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/FlowBlend', () => ({
   FlowBlend: class {
     init() {}

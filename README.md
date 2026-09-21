@@ -1268,6 +1268,7 @@ A look has one more field than the rest, `palette`: the palette the picture is c
 | `sparks`          | ink  | `sparks`       | G D       | cheap  |
 | `lasers`          | ink  | `lasers`       | G b D     | cheap  |
 | `chord-petals`    | ink  | `petals`       | I G b R   | cheap  |
+| `lightning`       | ink  | `lightning`    | g D       | cheap  |
 | `warm-soft`       | look | `look`         | I G R O   | cheap  |
 | `clean-glass`     | look | `look`         | G b D     | cheap  |
 | `hard-clean`      | look | `look`         | G b D     | cheap  |

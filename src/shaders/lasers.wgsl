@@ -44,7 +44,8 @@ const REACH = 1.6;
 // How many glow widths the haze spreads to.
 const HAZE_SPREAD = 6.0;
 // How far a beam's core is pulled to white. A laser's core clips in a camera
-// and in the eye, and the colour lives in the glow round it.
+// and in the eye, and the colour lives in the glow round it. Only the very
+// middle of the core goes white, or a swept fan sums to pastel.
 const CORE_WHITE = 0.55;
 
 // A fully saturated hue, brightest channel at 1: three cosines a third of a
@@ -120,7 +121,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         haze = haze * (1.0 + params.beam.z);
       }
       let fade = exp(-along / (REACH * params.screen.y));
-      light = light + (mix(colour, vec3<f32>(1.0), CORE_WHITE) * core + colour * haze) * fade;
+      light = light + (mix(colour, vec3<f32>(1.0), CORE_WHITE * pow(1.0 - at, 6.0)) * core + colour * haze) * fade;
     }
   }
 

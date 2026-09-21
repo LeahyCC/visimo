@@ -133,7 +133,8 @@ describe('the fans', () => {
 
   it('fans the beams evenly across the spread, centred on the base direction', () => {
     const open = laserParams({ ...REST, spread: 1 })
-    const beams = laserBeams(open, 0.5, 1920, 1080).slice(0, open.beams)
+    // On the beat the swing is 0, so the spread is all that leans a beam.
+    const beams = laserBeams(open, 0, 1920, 1080).slice(0, open.beams)
     const first = beams[0]
     const last = beams[beams.length - 1]
     if (!first || !last) throw new Error('Expected beams')
@@ -154,8 +155,10 @@ describe('the fans', () => {
       const beam = laserBeam(swung, 0, fan, 0, 1920, 1080)
       expect(Math.abs(beam.dirX), `fan ${fan} on the beat`).toBeLessThan(1e-9)
     }
+    const even = laserBeam(swung, 0.5, 0, 0, 1920, 1080)
     const odd = laserBeam(swung, 0.5, 1, 0, 1920, 1080)
-    expect(odd.dirX).toBeLessThan(0)
+    expect(even.dirX).toBeLessThan(0)
+    expect(odd.dirX).toBeCloseTo(-even.dirX, 9)
   })
 
   it('flicks exactly one beam of each fan', () => {
@@ -227,7 +230,14 @@ describe('the light at a pixel', () => {
       y: beam.originY + beam.dirY * 500,
     }
     const quiet = lasersAt(at.x, at.y, one, 0, 960, 1080)
-    const hit = lasersAt(at.x, at.y, laserParams({ ...REST, fans: 1, beams: 2, spread: 0.9, sweep: 0, flick: 1 }), 0, 960, 1080)
+    const hit = lasersAt(
+      at.x,
+      at.y,
+      laserParams({ ...REST, fans: 1, beams: 2, spread: 0.9, sweep: 0, flick: 1 }),
+      0,
+      960,
+      1080,
+    )
     expect(beam.flicked).toBe(true)
     expect(quiet).toBeGreaterThan(0.99)
     expect(hit - quiet).toBeGreaterThan(1.5)
@@ -295,9 +305,9 @@ describe('the uniform', () => {
     expect(out[8]).toBeCloseTo(1.2, 6)
     expect(out[9]).toBeCloseTo(1.0, 6)
     expect(out[10]).toBe(0)
-    // The colour is the ribbon's at the key with nothing sounding: grey.
-    expect(out[12]).toBeCloseTo(out[13], 9)
-    expect(out[13]).toBeCloseTo(out[14], 9)
+    // The colour is the ribbon's palette at the key, scaled so its brightest
+    // channel is the intensity and no channel passes it.
+    expect(Math.max(out[12] ?? 0, out[13] ?? 0, out[14] ?? 0)).toBeCloseTo(0.8, 6)
     expect(out[15]).toBe(0)
   })
 

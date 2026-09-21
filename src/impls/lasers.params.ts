@@ -265,10 +265,7 @@ export function lasersCoverage(
   let lit = 0
   for (let row = 0; row < rows; row += 1)
     for (let column = 0; column < columns; column += 1)
-      if (
-        lasersAt(column + 0.5, row + 0.5, params, 0.5, columns, rows) > LIT_THRESHOLD
-      )
-        lit += 1
+      if (lasersAt(column + 0.5, row + 0.5, params, 0.5, columns, rows) > LIT_THRESHOLD) lit += 1
 
   return lit / (columns * rows)
 }

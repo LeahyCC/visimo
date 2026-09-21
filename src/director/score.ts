@@ -58,16 +58,31 @@ export const momentFit = (moments: Moments, weights: MomentWeights): number => {
 }
 
 /**
+ * What every study is worth on a track that has not been heard yet: the same
+ * for all of them, and the best a closeness can be. Nobody knows where the
+ * track sits, so nobody is out of place, and the moment fit alone ranks the
+ * opening cast.
+ *
+ * It used to be the study's own `reach`. That read as "the study that welcomes
+ * the most songs suits an unknown one best", and it handed the first ten to
+ * thirty seconds of every track to whichever study had the widest reach, and a
+ * sitting member then kept its seat on the margin for the rest of the track.
+ * A wide reach says a study can sit anywhere, not that it is wanted there.
+ */
+export const UNHEARD_PLACE = 1
+
+/**
  * Half of the score: how much this study belongs to this track at all.
  *
  * `settled` is how far the character is to be believed, from
- * `CharacterReader`. At 1 this is the closeness; at 0 it is the study's reach
- * instead, so a track that has not been heard yet picks the studies whose
- * welcome is widest and drifts into its own as the reading settles.
+ * `CharacterReader`. At 1 this is the closeness; at 0 it is `UNHEARD_PLACE`
+ * for every study alike, so a track that has not been heard yet is cast by the
+ * moment and the tie-break, and drifts into its own family as the reading
+ * settles.
  */
 export const place = (study: Study, character: Character, settled = 1): number => {
   const held = clamp01(settled)
-  return held * closeness(study, character) + (1 - held) * clamp01(study.reach)
+  return held * closeness(study, character) + (1 - held) * UNHEARD_PLACE
 }
 
 /**

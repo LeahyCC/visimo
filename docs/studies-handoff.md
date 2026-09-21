@@ -112,6 +112,8 @@ Every study also receives, every frame: the packet, its own resolved knobs, and 
 
 This replaces the per-scene preset union in `src/presets/types.ts`. A preset becomes a pinned cast: a list of studies with overrides, for a host that wants a fixed look. Plume, Wash, Prism, Drift and Melt must survive as pinned casts that look as they do now. This is the breaking release the plan warned about; Musimo consumes visimo at a tag, so cut a new tag and do not move the old one.
 
+Wash and Drift were folded into Plume on 2026-09-20 at the owner's request: three casts now, and the ids `wash` and `drift` still resolve, to Plume.
+
 ## The director
 
 The thing that chooses. It is domain logic, so it lives beside the presets (`src/presets/` or a new `src/director/`), pure and fully unit tested, with no GPU in it.
@@ -179,7 +181,7 @@ A starting list, deliberately long. It is a menu, not a contract: build the ones
 | Study          | What it draws                                              | Moments | Character      | Tension does                        |
 | -------------- | ---------------------------------------------------------- | ------- | -------------- | ----------------------------------- |
 | dye plumes     | today's Plume emitters, one per band                       | I G R   | soft to mid    | dye thins                           |
-| ribbon         | the waveform, line or circle (built)                       | G B D   | any            | circle shrinks, line thins          |
+| ribbon         | the waveform, line or circle (built)                       | g B d   | steady, hard   | circle shrinks, line thins          |
 | fractal glints | Prism's raymarched ridges, bright parts only, half size    | G D     | hard, tonal    | zoom sweeps in                      |
 | shards         | flat sharp polygons thrown on hits                         | D       | hard           | none; held back, released on impact |
 | sparks         | particles off treble hits that ride the flow               | G D     | bright, fast   | rate climbs                         |
@@ -235,7 +237,7 @@ Agents on the board cannot see a GPU. Every study that comes back gets looked at
 1. Land F and G if they are still open. Re-read the presets afterwards; F rewrites their mappings.
 
 2. The moment estimator.            audio only, no conflicts, can start at once
-3. The study contract and registry. replaces the preset union; pinned casts keep the five looks
+3. The study contract and registry. replaces the preset union; pinned casts keep the looks (three of the five now, see above)
    + a study bench in the demo: solo any study, with sliders for character,
      moment, tension and an impact button, so a study can be judged without
      hunting for the right bar of the right song

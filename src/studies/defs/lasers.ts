@@ -53,7 +53,7 @@ import type { InkStudy } from '../types'
  * of luminance on or off, so there is no strobe in the construction.
  *
  * The intensity is the number to trust least. It rests at 0.8, gated by the
- * tempo confidence, and `energy`, `swell` and `hardness` pull it back as the
+ * tempo confidence, and `energy` and `hardness` pull it back (not `swell`, which rests at a half in silence and would take a gated intensity under 0) as the
  * frame fills, the halo's arithmetic: a beam is thin and moves, so it adds
  * its one frame and the floor eats the wake, and crossings only sum a few
  * beams at a pixel before the sweep carries them on. If it is faint beside
@@ -90,7 +90,6 @@ export const LASERS: InkStudy = {
     { from: 'hardness', to: 'glow', gain: -0.5, curve: 'linear' },
     { from: 'tempoConfidence', to: 'intensity', gain: -0.8, curve: 'invert' },
     { from: 'energy', to: 'intensity', gain: -0.12, curve: 'square' },
-    { from: 'swell', to: 'intensity', gain: -0.04, curve: 'square' },
     { from: 'hardness', to: 'intensity', gain: -0.04, curve: 'square' },
     { from: 'beatPulse', to: 'intensity', gain: 0.06, curve: 'linear' },
     { from: 'tension', to: 'intensity', gain: 0.02, curve: 'linear' },

@@ -16,12 +16,7 @@ import { INK_BLEND } from '../scenes/Impl'
 import type { InkImpl } from '../scenes/Impl'
 import type { SceneContext } from '../scenes/Scene'
 import shader from '../shaders/lasers.wgsl?raw'
-import {
-  LASER_UNIFORM_FLOATS,
-  laserParams,
-  lasersLit,
-  writeLasersUniform,
-} from './lasers.params'
+import { LASER_UNIFORM_FLOATS, laserParams, lasersLit, writeLasersUniform } from './lasers.params'
 
 /** Vertices in the one triangle that covers the frame. */
 const TRIANGLE_VERTICES = 3

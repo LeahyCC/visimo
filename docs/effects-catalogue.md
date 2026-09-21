@@ -40,9 +40,9 @@ A study owns these files and nothing else:
 | `README.md` study table             | ONE appended row                      |
 | director, score, post stack, packet | nobody. Ask the lead                  |
 
-Two things make this hold, and both are cards that land before any study card starts:
+Two things make this hold:
 
-- **Split the registry.** Today all 24 studies are literals in `src/studies/registry.ts`, so every new study edits the same 1,500 line file. Move each to `src/studies/defs/<id>.ts` and leave the registry as a list of imports. A new study then adds one line, and one-line appends merge cleanly.
+- **The registry is split.** Each study is its own file, `src/studies/defs/<id>.ts`, and `src/studies/registry.ts` is a list of imports. A new study adds one import and one row, and one-line appends merge cleanly. Anything several studies share goes in `src/studies/defs/shared.ts`.
 - **Shared helpers first.** Several rows need the same building block (see "Shared pieces" below). Each is built once, by its own card, before the studies that use it. A study card never writes a shared helper on the side.
 
 If a study needs something the contract cannot do (a new packet row, a new blend mode, a new input texture), it stops and raises it. It does not add it.
@@ -122,7 +122,7 @@ Built once, before the rows that need them. Six pieces.
 | `grid-3d`       | ink  | a neon grid floor to the horizon that ripples with the bass                                        | height-kit as grid lines only                             | synthwave, house, electro | G B     | grid rushes toward you           | cheap  | S    | open   |
 | `liquid-chrome` | ink  | a blob of liquid metal that wobbles with the bass and reflects the rest of the picture. 3D texture | raymarch-kit metaballs, canvas-sampler as the reflection  | dubstep, trap, bass       | G D     | blob pulls into a sphere         | heavy  | S    | open   |
 | `echo-shapes`   | ink  | shapes filled with the picture itself, so it repeats inward. Hall of mirrors                       | instanced n-gons textured by canvas-sampler               | electro, funk, disco      | G D     | shapes shrink and multiply       | medium | S    | open   |
-| `lasers`        | ink  | club laser fans sweeping through haze, on the beat                                                 | analytic beams with soft falloff, angle from beatPhase    | house, trance, techno     | G D     | fans close to a single beam      | cheap  | S    | claimed: feature/study-lasers |
+| `lasers`        | ink  | club laser fans sweeping through haze, on the beat                                                 | analytic beams with soft falloff, angle from beatPhase    | house, trance, techno     | G D     | fans close to a single beam      | cheap  | S    | built  |
 | `city`          | ink  | flying over a skyline at night. Tower heights are the spectrum, windows light on treble            | height-kit as boxes, window mask texture                  | hip hop, synthwave, trap  | G B     | flight speeds up, towers rise    | heavy  | A    | open   |
 | `matrix-rain`   | ink  | falling columns of glyphs, speed from the pace, brightness from the bands                          | glyph atlas, per column state in a buffer                 | techno, industrial, IDM   | G B     | columns speed up, glyphs flicker | cheap  | A    | open   |
 | `scope`         | ink  | left channel against right as one glowing knot. Ribbon's cousin                                    | XY plot of the stereo waveform, same path as ribbon       | any with wide stereo      | G B D   | knot shrinks                     | cheap  | A    | open   |
@@ -216,7 +216,7 @@ The "mid, groovy, tonal" row is why so much music lands in the kaleidoscope: `fr
 ## Build order
 
 ```text
-Wave 0   registry split, then the six shared pieces           (no study starts before these)
+Wave 0   the six shared pieces                                 (no study starts before these)
 Wave 1   S tier, cheap:   cymatics, chord-petals, mirror-fold, grid-3d, lasers, lightning, mandala
 Wave 2   S tier, medium:  murmuration, reaction, ridgeline, ocean, aurora, oil-slick, echo-shapes, god-rays, void-tendrils, black-hole
 Wave 3   S tier, heavy:   wormhole, nebula, shape-morph, liquid-chrome      + looks: neon, spectral-split

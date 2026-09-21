@@ -18,7 +18,7 @@ import type { PostStage } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import { bend } from '../presets/resolve'
 import { castStudyIds } from './cast'
-import type { Cast } from './cast'
+import type { CanvasKnob, Cast } from './cast'
 import { CASTS, findCast } from './casts/index'
 import { findStudy } from './registry'
 import { castFrame, resolveCast, studyFeature } from './resolve'
@@ -81,6 +81,35 @@ describe('nothing a cast puts on screen is static', () => {
       }
     })
   }
+
+  // The guard sweeps `POST_KNOBS`, so a knob added to a stage is covered the
+  // moment it becomes a lane. That is the whole of the contract, and it is
+  // worth writing down: the five that came with the canvas hold are all off
+  // by default, so a cast that switches the feedback on and drives only one
+  // of them must still count as a canvas that moves.
+  it('sweeps the knobs the canvas hold brought with it', () => {
+    const living: readonly CanvasKnob[] = [
+      'feedback.fade',
+      'feedback.hold',
+      'feedback.hue',
+      'feedback.cool',
+      'feedback.sharpen',
+    ]
+    for (const knob of living) expect(POST_KNOBS, knob).toContain(knob)
+    const plume = findCast('plume')
+    if (!plume) throw new Error('Expected the Plume cast')
+    for (const knob of living) {
+      const only: Cast = {
+        ...plume,
+        canvas: {
+          ...plume.canvas,
+          mapping: [{ from: 'energy', to: knob, gain: 0.01, curve: 'linear' }],
+        },
+        overrides: {},
+      }
+      expect(stageMoves(only, 'feedback'), knob).toBe(true)
+    }
+  })
 
   // The guard is only worth having if it can fail.
   it('notices a cast whose stage has nothing driving it', () => {

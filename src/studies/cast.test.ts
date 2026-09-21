@@ -23,6 +23,7 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import {
   defaultPostParams,
   feedbackStep,
+  mergePostParams,
   POST_KNOBS,
   POST_LANES,
   POST_STAGES,
@@ -32,7 +33,7 @@ import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import type { AudioField } from '../presets/knobs'
 import { glintLevel, kaleidoscopeParams } from '../scenes/kaleidoscope.params'
-import { CANVAS_KNOBS, castStudyIds, parseCast } from './cast'
+import { CANVAS_KNOBS, castStudyIds, defaultCanvas, parseCast } from './cast'
 import { castOrDefault, CASTS, DEFAULT_CAST_ID, findCast, stepCast } from './casts/index'
 import melt from './casts/melt.json'
 import plume from './casts/plume.json'
@@ -63,12 +64,14 @@ const FRAMES = frames as unknown as readonly PresetFrame[]
  * What the preset path resolved to, as a whole stack. A stage that arrived
  * after the capture is at the stack's own default, which is off and neutral:
  * the preset path had no such stage, so that is what it did, and it is what
- * the shipped casts must still do.
+ * the shipped casts must still do. The merge is per stage rather than a
+ * spread over the whole object, so a knob added to a stage the capture does
+ * record, as the canvas hold and its company were to the feedback, reads the
+ * stack's default for it and not `undefined`. Every one of those defaults is
+ * exactly off, which is why the pinned casts need no compatibility path.
  */
-const expectedPost = (golden: PresetFrame): PostParams => ({
-  ...defaultPostParams(),
-  ...golden.post,
-})
+const expectedPost = (golden: PresetFrame): PostParams =>
+  mergePostParams(defaultPostParams(), golden.post)
 
 /**
  * The moment rows. The frames were captured before these existed, so a packet
@@ -420,11 +423,17 @@ describe('Plume, the three fluid casts folded into one', () => {
         ).toBe(true)
     }
 
-    for (const knob of CANVAS_KNOBS)
+    // Only the knobs Plume moved off the stack's own defaults: a knob it
+    // leaves where the stack rests it is a knob it has not set, and the ones
+    // that arrived with the canvas hold are all off there.
+    const rest = defaultCanvas().knobs
+    for (const knob of CANVAS_KNOBS) {
+      if (plume.canvas.knobs[knob] === rest[knob]) continue
       expect(
         plume.canvas.mapping.some((row) => row.to === knob),
         `the canvas sets ${knob} and no row moves it`,
       ).toBe(true)
+    }
   })
 
   // The light knobs sit at their resting values at a silent packet, and no row

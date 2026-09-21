@@ -21,7 +21,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { rowsForAxis } from '../director/character'
 import { LOFI, METAL, playSong, SONG_SECONDS } from '../director/song.fixture'
-import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES } from '../post/params'
+import {
+  defaultPostParams,
+  mergePostParams,
+  POST_KNOBS,
+  POST_LANES,
+  POST_STAGES,
+} from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import { defaultCanvas, parseCast } from '../studies/cast'
@@ -907,7 +913,10 @@ describe('a pinned cast reaches its implementations unchanged', () => {
       const post = stack.params as PostParams
       // A stage that arrived after the capture is at the stack's default,
       // off and neutral, which is what the preset path did without it.
-      const expected: PostParams = { ...defaultPostParams(), ...golden.post }
+      // Merged a stage at a time, so a knob added to a stage the capture does
+      // record reads the stack's own default for it; see `expectedPost` in
+      // studies/cast.test.ts, which says why.
+      const expected: PostParams = mergePostParams(defaultPostParams(), golden.post)
       expect(post.enabled).toBe(expected.enabled)
       for (const stage of POST_STAGES)
         expect(post[stage].enabled, `${golden.preset} ${stage}`).toBe(expected[stage].enabled)

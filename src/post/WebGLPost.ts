@@ -15,19 +15,22 @@ void main() {
   uv = p;
   gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
 }`
-// The uniform's thirteen vec4s. The eighth is the flow block and nothing on
+// The uniform's fifteen vec4s. The eighth is the flow block and nothing on
 // this path solves a velocity field, so it is uploaded and never read; the
-// ninth is the floor, which the feedback pass below does use. The tenth and
-// eleventh are the ribbon's, which this path does not draw, so nothing reads
-// them. The twelfth is the grade and the last is the gate weave, which only the
-// composite reads. `data` uploads as many of them as the program it belongs to
-// declares live, which is the highest one it reads, so the feedback pass sends
-// nine and the composite all thirteen.
+// ninth is the floor and the fade's knee, which the feedback pass below does
+// use. The tenth and eleventh are the ribbon's, which this path does not draw,
+// so nothing reads them. The twelfth is the grade and the thirteenth the gate
+// weave, which only the composite reads. The last two are the canvas hold and
+// what ages inside the loop; the feedback pass below reads the step out of the
+// first of them and all of the second, and leaves the hold itself alone, for
+// the reason the class comment gives. `data` uploads as many of them as the
+// program it belongs to declares live, which is the highest one it reads, so
+// the feedback pass sends all fifteen and so does the composite.
 const COMMON = `#version 300 es
 precision highp float;
 in vec2 uv;
 out vec4 result;
-uniform vec4 post[13];
+uniform vec4 post[15];
 uniform sampler2D source;
 `
 const BRIGHT = `
@@ -50,32 +53,57 @@ void main() {
   sum += (texture(source, uv + farTap).rgb + texture(source, uv - farTap).rgb) * 0.0702702703;
   result = vec4(sum, 1.0);
 }`
-// The zoom and the turn, then the floor and the ceiling, which is everything
-// the WGSL pass does except the carry: with no fluid here there is no
-// velocity field to read the last frame back along, so that term is the
-// identity whatever a preset asks for. The floor and the ceiling depend on
-// nothing but the history, so both are the same maths as post.feedback.wgsl.
+// The zoom and the turn, then the sharpen, the two floors, the ceiling, the
+// channels parting and the hue turning: everything the WGSL pass does except
+// the carry and the canvas hold. With no fluid here there is no velocity field
+// to read the last frame back along, so that term is the identity whatever a
+// cast asks for, and the hold wants a ladder of passes down to one texel,
+// which is the one thing on this path worth skipping. Everything else depends
+// on nothing but the history, so all of it is the same maths as
+// post.feedback.wgsl, and every term is exactly off at zero.
 const FEEDBACK = `
 void main() {
   float zoom = max(post[1].z, 0.001), angle = -post[1].w;
   vec2 aspect = vec2(post[0].x / max(post[0].y, 1.0), 1.0);
   vec2 centred = (uv - 0.5) * aspect;
   float s = sin(angle), c = cos(angle);
-  vec2 turned = vec2(centred.x * c - centred.y * s, centred.x * s + centred.y * c) / zoom;
-  vec2 wanted = turned / aspect + 0.5;
+  vec2 spun = vec2(centred.x * c - centred.y * s, centred.x * s + centred.y * c) / zoom;
+  vec2 wanted = spun / aspect + 0.5;
   vec2 at = clamp(wanted, vec2(0.0), vec2(1.0));
   // Nothing to carry from off the edge; see post.feedback.wgsl.
   vec2 off = max(abs(wanted - 0.5) - 0.5, vec2(0.0));
   float inside = off.x + off.y <= 0.0 ? 1.0 : 0.0;
-  vec3 old = texture(source, at).rgb * post[1].x * post[1].y * inside;
-  // The brightest channel carries both limits and the other two follow it,
+  float frames = post[13].x;
+  vec3 taken = texture(source, at).rgb;
+  float crisp = post[14].z;
+  if (crisp > 0.0) {
+    vec2 reach = post[0].zw;
+    vec3 around = texture(source, clamp(at + vec2(reach.x, 0.0), 0.0, 1.0)).rgb
+                + texture(source, clamp(at - vec2(reach.x, 0.0), 0.0, 1.0)).rgb
+                + texture(source, clamp(at + vec2(0.0, reach.y), 0.0, 1.0)).rgb
+                + texture(source, clamp(at - vec2(0.0, reach.y), 0.0, 1.0)).rgb;
+    taken = max(taken + (taken - around * 0.25) * crisp, 0.0);
+  }
+  float cool = post[14].y;
+  vec3 parted = vec3(1.0 - max(cool, 0.0), 1.0, 1.0 - max(-cool, 0.0));
+  vec3 old = taken * post[1].x * post[1].y * pow(parted, vec3(frames)) * inside;
+  // The brightest channel carries every limit and the other two follow it,
   // so a long trail loses brightness rather than colour.
   float peak = max(max(old.r, max(old.g, old.b)), 0.0);
   float left = max(peak - post[8].x, 0.0);
-  float knee = max(post[7].y, 1e-4) * 0.5;
-  float over = max(left - knee, 0.0);
-  float rolled = min(left, knee) + knee * over / (over + knee);
-  result = vec4(old * (rolled / max(peak, 1e-5)), 1.0);
+  float knee = post[8].y;
+  if (knee > 0.0) left *= pow(left / (left + knee), frames);
+  float shoulder = max(post[7].y, 1e-4) * 0.5;
+  float over = max(left - shoulder, 0.0);
+  float rolled = min(left, shoulder) + shoulder * over / (over + shoulder);
+  vec3 carried = old * (rolled / max(peak, 1e-5));
+  // The hue of what survives, turned about the grey axis; 0 is the identity.
+  float turn = post[14].x;
+  vec3 axis = vec3(0.5773502692);
+  vec3 aged = turn == 0.0 ? carried
+    : carried * cos(turn) + cross(axis, carried) * sin(turn)
+      + axis * dot(axis, carried) * (1.0 - cos(turn));
+  result = vec4(max(aged, 0.0), 1.0);
 }`
 const COMPOSITE = `
 uniform sampler2D bloom0;
@@ -135,9 +163,14 @@ type Pass = {
  * WebGPU adapter. Kaleidoscope is the only scene that reaches it and there is
  * no compute here to solve a fluid with, so the feedback pass carries nothing
  * along a flow; `feedback.carry` reads as zero whatever a preset asks for.
- * `feedback.floor` and `feedback.ceiling` need no flow, so both apply here
- * exactly as they do on the WebGPU path, and so does the grade, a few lines of
- * the composite, the gate weave among them. The ribbon is skipped: it wants the
+ * `feedback.hold` is skipped for the same kind of reason: it wants a ladder of
+ * passes reducing the frame to one texel, and this path is a fallback rather
+ * than a second implementation. So a cast that leans on the hold to keep a
+ * long memory in bounds here has only `feedback.ceiling` holding it, which is
+ * what held it before the hold existed. `floor`, `fade`, `cool`, `hue`,
+ * `sharpen` and `ceiling` need no flow and no measurement, so all six apply
+ * here exactly as they do on the WebGPU path, and so does the grade, a few
+ * lines of the composite, the gate weave among them. The ribbon is skipped: it wants the
  * analyser's waveform and a strip drawn into the scene's target, and this path
  * has neither. A preset that turns it on still draws, without the line, and
  * nothing here reads or throws on its numbers.

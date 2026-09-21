@@ -215,6 +215,8 @@ A starting list, deliberately long. It is a menu, not a contract: build the ones
 
 ## The bar for "perfect"
 
+This is the engineering bar. What a study has to look like is in [the effects catalogue](effects-catalogue.md) under "The visual bar", written after the first studies built from it had to be redone once they were seen.
+
 A study is done when all of this is true. Put it in every study card's acceptance.
 
 - **Nothing static.** Every knob it enables has a mapping row. Card F adds a guard test over presets; extend it over studies.

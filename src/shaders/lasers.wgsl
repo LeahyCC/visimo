@@ -42,7 +42,7 @@ const MAX_BEAMS = 12u;
 // beam thins into the haze, and without it the far ends read as flat lines.
 const REACH = 1.6;
 // How many glow widths the haze spreads to.
-const HAZE_SPREAD = 9.0;
+const HAZE_SPREAD = 6.0;
 // How far a beam's core is pulled to white. A laser's core clips in a camera
 // and in the eye, and the colour lives in the glow round it.
 const CORE_WHITE = 0.55;

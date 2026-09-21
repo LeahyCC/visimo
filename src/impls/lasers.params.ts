@@ -67,7 +67,7 @@ export const FLICK_GAIN = 2
 export const REACH = 1.6
 
 /** How many glow widths the haze spreads to. Mirrors HAZE_SPREAD in the shader. */
-export const HAZE_SPREAD = 9
+export const HAZE_SPREAD = 6
 
 /**
  * What each knob may reach, inclusive. The params clamp to them, and the

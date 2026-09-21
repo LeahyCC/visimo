@@ -1006,6 +1006,7 @@ A mapping row reads what a preset's does, plus one field that is not in the pack
 | `beat-rings`      | ink  | `rings`        | G B     | cheap  |
 | `spectrum-ring`   | ink  | `spectrum`     | G       | cheap  |
 | `sparks`          | ink  | `sparks`       | G D     | cheap  |
+| `lasers`          | ink  | `lasers`       | G b D   | cheap  |
 | `warm-soft`       | look | `look`         | I G R O | cheap  |
 | `clean-glass`     | look | `look`         | G b D   | cheap  |
 | `hard-clean`      | look | `look`         | G b D   | cheap  |

@@ -20,9 +20,10 @@ A fan is a point origin and a spread of beams about a base direction. Origins
 alternate between just off the top edge and just off the bottom edge, spread
 evenly along the x axis, so even and odd fans lean across each other. The base
 direction points straight into the frame, and the whole fan swings with the
-beat: the swing angle is `sweep x (0.5 - beatPhase)`, so every fan crosses the
-middle of its travel exactly on the predicted beat, and neighbouring fans sweep
-opposite ways so they cross each other twice a beat. `beatPhase` is read
+beat: the swing angle is `sweep x (|beatPhase - 0.5| - 0.5)`, so every fan
+is centred on the predicted beat, sweeps to one side and back inside the
+beat, and neighbouring fans sweep opposite ways so they cross each other on
+the way. `beatPhase` is read
 straight from the packet, the way the rings read it, so the sweep lands where
 the tracker expects the beat and nowhere else; the tempo confidence gates the
 light, as it gates the rings, because a sweep on a wrong tempo is a steady
@@ -55,13 +56,13 @@ Every number the study owns, resting value first:
   `tension` closes it to 0 (every fan down to one beam), and `impact` throws
   it to the top of its range on the drop's frame.
 - `sweep` 0.25: the swing amplitude in radians. `energy` lifts it to 0.55, so
-  a loud passage sweeps wider. The beat clock drives the position, not a knob:
-  the shader reads `beatPhase` from the packet, so the sweep is a prediction
-  and lands on the beat.
+  a loud passage sweeps wider. The beat clock drives the position, not a
+  knob: the shader reads `beatPhase` from the packet, so the fan is centred
+  on the predicted beat and the sweep is a prediction, not a reaction.
 - `width` 1.2: the beam core's half width in pixels at 1080 high, scaled with
-  the short side. `energy` thickens it to 1.7. Always thin.
-- `glow` 1.2: the soft edge on each side of the core, in pixels at 1080 high.
-  `hardness` takes it down to 0.6 on a hard track, so hard music gets sharper
+  the short side. `energy` thickens it to 1.5. Always thin.
+- `glow` 1.0: the soft edge on each side of the core, in pixels at 1080 high.
+  `hardness` takes it down to 0.5 on a hard track, so hard music gets sharper
   beams and soft music hazier ones.
 - `intensity` 0.8: the light one beam adds at its core. The tempo confidence
   gates it (`tempoConfidence` through `invert`), so a track with no steady
@@ -90,14 +91,14 @@ width and the colour alone.
 
 The worst frame there is: a full packet, six fans of six beams, full spread,
 soft beams (a soft track at full energy). Each beam lights a band about
-4.5 pixels wide across at most the frame's diagonal, and the beams cross in
-small groups, so the lit share of a 16:9 frame stays around 10 percent,
+5 pixels wide across at most the frame's diagonal, and the beams cross in
+small groups, so the lit share of a 16:9 frame stays around 8 percent,
 measured by `lasersCoverage` on a grid, with the count of every lit pixel
 taken once however many beams cross it. A test holds it under 15 percent at a
-full packet.
+full packet on a 16:9, a square and a tall canvas.
 
-That is also the flash statement for WCAG 2.3.1. The lit area is a tenth of
-the frame at most, the beams move continuously with the beat, and nothing in
+That is also the flash statement for WCAG 2.3.1. The lit area is a small
+share of the frame, the beams move continuously with the beat, and nothing in
 the study toggles a large area of luminance on or off: there is no strobe in
 the construction, so there is nothing to count flashes of.
 

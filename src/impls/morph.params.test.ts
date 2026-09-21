@@ -9,8 +9,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { peakPaletteAt, RIBBON_TINT } from '../post/params'
+import { hueGap, srgbToOklch } from '../colour/oklch'
+import type { Rgb } from '../colour/oklch'
+import { paletteAt } from '../palettes/active'
+import { RIBBON_TINT } from '../post/params'
 import {
+  BODY,
+  FOV,
   FORMS,
   HALF_VIEW,
   luminance,
@@ -23,25 +28,26 @@ import {
   morphGate,
   morphGlintLevel,
   morphHash,
-  morphKeyColour,
+  morphLights,
   morphLit,
   morphParams,
   morphPeak,
-  morphRimColour,
   MorphShape,
   morphSteps,
   nextForm,
-  RIM_TURN,
+  RIM_BASE,
+  RIM_TURN_DEGREES,
+  RIM_WRAP,
   RIPPLE_CEILING,
   SILENT_FLOOR,
   SOFTWARE_STEPS,
   writeMorphUniform,
 } from './morph.params'
-import type { MorphKnob } from './morph.params'
+import type { MorphKnob, MorphParams } from './morph.params'
 
 /** What the study rests at, which is what a quiet groove resolves near. */
 const REST = {
-  size: 0.5,
+  size: 0.55,
   ripple: 0.012,
   rippleScale: 9,
   spin: 0,
@@ -49,8 +55,8 @@ const REST = {
   rim: 0.35,
   specular: 1.4,
   hue: 0,
-  intensity: 0.9,
-  glint: 0.35,
+  intensity: 0.06,
+  glint: 0.4,
   glintKnee: 0.45,
 }
 
@@ -258,26 +264,35 @@ function shapeAt(dt: number): MorphShape {
 }
 
 describe('the light and its threshold', () => {
-  const key = morphKeyColour(LOUD, morphParams(REST))
-  const rim = morphRimColour(LOUD, morphParams(REST))
+  const { key, rim } = morphLights(LOUD, morphParams(REST))
 
-  it('takes both lights from the palette showing, a third of a turn apart', () => {
-    expect(key).toEqual(peakPaletteAt(RIBBON_TINT))
-    expect(rim).toEqual(peakPaletteAt(RIBBON_TINT + RIM_TURN))
-    expect(key).not.toEqual(rim)
+  it('takes its hue from the palette at the key, and puts the rim a third of the circle on', () => {
+    const hueOf = (colour: Rgb) => srgbToOklch(colour).h
+    expect(hueOf(key)).toBeCloseTo(srgbToOklch(paletteAt(RIBBON_TINT)).h, 0)
+    expect(Math.abs(hueGap(hueOf(key), hueOf(rim)))).toBeCloseTo(RIM_TURN_DEGREES, 0)
+  })
+
+  it('lights rather than tints: both are saturated, whatever the palette is like', () => {
+    for (const colour of [key, rim]) {
+      // The brightest channel is 1, as every other ink's colour is.
+      expect(Math.max(...colour)).toBeCloseTo(1, 6)
+      // And the dimmest is well under it, which a pastel's would not be.
+      expect(Math.min(...colour)).toBeLessThan(0.5)
+      expect(srgbToOklch(colour).c).toBeGreaterThan(0.1)
+    }
   })
 
   it('turns both with the key, keeping the gap between them', () => {
     const packet = packetAt(1)
     packet[F.keyHue] = 0.3
     const params = morphParams(REST)
-    const turned = packet[F.keyHue] ?? 0
-    const near = (a: readonly number[], b: readonly number[]) => {
-      for (let at = 0; at < 3; at += 1) expect(a[at]).toBeCloseTo(b[at] ?? 0, 6)
-    }
-
-    near(morphKeyColour(packet, params), peakPaletteAt(turned + RIBBON_TINT))
-    near(morphRimColour(packet, params), peakPaletteAt(turned + RIBBON_TINT + RIM_TURN))
+    const turned = morphLights(packet, params)
+    const hueOf = (colour: Rgb) => srgbToOklch(colour).h
+    expect(hueOf(turned.key)).not.toBeCloseTo(hueOf(key), 1)
+    expect(Math.abs(hueGap(hueOf(turned.key), hueOf(turned.rim)))).toBeCloseTo(
+      RIM_TURN_DEGREES,
+      0,
+    )
   })
 
   it('has a peak that counts every light and rises with each of them', () => {
@@ -285,22 +300,29 @@ describe('the light and its threshold', () => {
     expect(rest).toBeGreaterThan(0)
     expect(morphPeak(morphParams({ ...REST, rim: 0.9 }), key, rim)).toBeGreaterThan(rest)
     expect(morphPeak(morphParams({ ...REST, specular: 2 }), key, rim)).toBeGreaterThan(rest)
-    expect(morphPeak(morphParams({ ...REST, intensity: 0.5 }), key, rim)).toBeLessThan(rest)
+    expect(morphPeak(morphParams({ ...REST, intensity: 0.03 }), key, rim)).toBeLessThan(rest)
     expect(morphPeak(morphParams({ ...REST, intensity: 0 }), key, rim)).toBe(0)
   })
 
-  it('cuts under a lit face at rest, and over the fill', () => {
+  it('lets the whole lit side through and takes only what is near black', () => {
     const params = morphParams(REST)
     const level = morphGlintLevel(params, key, rim)
-    const peak = morphPeak(params, key, rim)
     expect(level).toBeGreaterThan(0)
-    // The peak counts the specular and both rims on top of a lit face, so the
-    // cut is a small share of it and still most of a face.
-    expect(level / peak).toBeLessThan(0.2)
-    const litFace = luminance(key) * params.intensity * MORPH_LIGHT
-    expect(level).toBeLessThan(litFace)
-    // A face lit by neither light, a fifth of one that is, does not survive.
-    expect(litFace * 0.2).toBeLessThan(level)
+    // A face square to the key light is the modelling, and all of it passes:
+    // a solid is already sparse by having a dark side, so the threshold is
+    // here to keep the near-black fill out of the canvas's memory and not to
+    // carve the form.
+    const litFace = luminance(key) * BODY * params.intensity * MORPH_LIGHT
+    expect(level).toBeLessThan(litFace * 0.5)
+    // What it does take is the fringe: a twentieth of a lit face is cut.
+    expect(litFace * 0.05).toBeLessThan(level)
+  })
+
+  it('holds the body well under the edge, so the canvas keeps an outline', () => {
+    const params = morphParams(REST)
+    const body = luminance(key) * BODY * params.intensity * MORPH_LIGHT
+    const edge = (RIM_WRAP + RIM_BASE + params.rim) * luminance(rim) * params.intensity * MORPH_LIGHT
+    expect(edge).toBeGreaterThan(body * 5)
   })
 
   it('cuts harder as the music fills the canvas', () => {
@@ -316,12 +338,19 @@ describe('the light and its threshold', () => {
 })
 
 describe('what it covers', () => {
-  it('is a small share of the frame at rest, and under a twentieth at its largest', () => {
-    expect(morphCoverage(morphParams(REST), 2560, 1440)).toBeLessThan(0.03)
-    // The most the mapping can reach: the bass spring at its overshoot, and
-    // the ripple on top of it.
-    const largest = morphParams({ ...REST, size: 0.71, ripple: 0.031, rippleScale: 9 })
-    expect(morphCoverage(largest, 2560, 1440)).toBeLessThan(0.06)
+  it('fills a good share of the short side, which is what makes it an object', () => {
+    // The point of the camera: a solid at the resting size is about half the
+    // short side across, not a detail in an empty frame.
+    const across = (params: MorphParams) => (params.size + params.ripple) / HALF_VIEW
+    expect(across(morphParams(REST))).toBeGreaterThan(0.4)
+    expect(across(morphParams(REST))).toBeLessThan(0.6)
+    // And the disc that subtends is a fifth of a 16:9 frame at the largest
+    // the mapping reaches, which is a bound and not what is lit: the body is
+    // held under the edge, so what fills it is a haze and the edge is the
+    // bright part.
+    const largest = morphParams({ ...REST, size: 0.76, ripple: 0.031, rippleScale: 9 })
+    expect(morphCoverage(largest, 2560, 1440)).toBeLessThan(0.25)
+    expect(morphCoverage(morphParams(REST), 2560, 1440)).toBeLessThan(0.15)
   })
 
   it('is the same share on a canvas of the same shape, and the same solid on any shape', () => {
@@ -338,7 +367,7 @@ describe('what it covers', () => {
     // one hold the same solid and a square is the worst case of the three.
     expect(morphCoverage(params, 1080, 1920)).toBeCloseTo(wide, 4)
     expect(morphCoverage(params, 1440, 1440)).toBeGreaterThan(wide)
-    expect(morphCoverage(params, 1440, 1440)).toBeLessThan(0.06)
+    expect(morphCoverage(params, 1440, 1440)).toBeLessThan(0.35)
   })
 
   it('grows with the solid, and is nothing on a canvas with no area', () => {
@@ -352,7 +381,9 @@ describe('what it covers', () => {
   })
 
   it('measures against what the camera sees, which nothing moves', () => {
-    expect(HALF_VIEW).toBeCloseTo(3.8 * Math.tan(0.5), 10)
+    expect(HALF_VIEW).toBeCloseTo(3.8 * Math.tan(FOV / 2), 10)
+    // A short telephoto: the solid fills the frame and the perspective is flat.
+    expect(FOV).toBeLessThan(0.7)
   })
 })
 
@@ -372,7 +403,7 @@ describe('the uniform', () => {
     expect(out[3]).toBeCloseTo(shape.clock, 6)
     expect([out[4], out[5]]).toEqual([0, 0])
     expect(out[6]).toBeCloseTo(-3.8, 6)
-    expect(out[7]).toBeCloseTo(1, 6)
+    expect(out[7]).toBeCloseTo(FOV, 6)
     expect(out[8]).toBe(shape.leaving)
     expect(out[9]).toBe(shape.arriving)
     // The melt is smoothed here, so what the surface is at is what a test reads.
@@ -386,8 +417,7 @@ describe('the uniform', () => {
     expect(out[17]).toBeCloseTo(params.specular, 6)
     expect(out[18]).toBeCloseTo(params.intensity, 6)
     expect(out[23]).toBeCloseTo(params.glintKnee, 6)
-    const key = morphKeyColour(packet, params)
-    const rim = morphRimColour(packet, params)
+    const { key, rim } = morphLights(packet, params)
     for (let at = 0; at < 3; at += 1) {
       expect(out[20 + at]).toBeCloseTo(key[at] ?? 0, 6)
       expect(out[24 + at]).toBeCloseTo(rim[at] ?? 0, 6)
@@ -408,7 +438,7 @@ describe('the uniform', () => {
     expect(out[19]).toBeGreaterThan(0)
     writeMorphUniform(params, shape, packetAt(0.012), 1280, 720, MARCH_STEPS, out)
     expect(out[19]).toBeLessThan(
-      morphGlintLevel(params, morphKeyColour(LOUD, params), morphRimColour(LOUD, params)),
+      morphGlintLevel(params, morphLights(LOUD, params).key, morphLights(LOUD, params).rim),
     )
   })
 

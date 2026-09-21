@@ -47,31 +47,32 @@ import type { InkStudy } from '../types'
  * rule, and it does not dim then either, which is the point of it. The punch
  * goes into the size, the ripple, the spin and the width of the rim. The one
  * row on the light is a gate rather than a level: `energy` through `invert` at
- * -0.02 leaves the intensity at rest when the music is there and takes nearly
+ * -0.024 leaves the intensity at rest when the music is there and takes nearly
  * half of it away when there is nothing, which is the same shape the lasers
  * gate themselves with. Under `SILENT_FLOOR` the ink encodes no pass at all.
  *
- * **The light rests at 0.05, which is low on purpose.** A solid sits still in
- * the middle of a canvas that keeps 0.975 of itself a frame, so a pixel it
- * lights every frame settles at about forty times what one frame adds: at the
- * intensity this was first written with, the whole silhouette pinned at the
- * canvas's ceiling inside a second and the study drew a white blob with a
- * halo, which is Melt's fault in miniature. At 0.05 the lit half settles near
- * a third of the ceiling, the terminator survives as a gradient, and the
- * specular still passes it, so the highlight is what blooms.
+ * **The light rests at 0.06, and what it is spent on matters more than how
+ * much of it there is.** A solid sits still in the middle of a canvas that
+ * keeps 0.975 of itself a frame, so a pixel it lights every frame settles at
+ * about forty times what one frame adds. The body of the solid is held to a
+ * twelfth of what its edge carries (`BODY` in the params), so the swept
+ * volume fills with a faint haze while the fresnel outline and the specular,
+ * which are thin and sweep across the frame as the solid turns, leave bright
+ * trails. What the canvas remembers is a long exposure of a lit edge rather
+ * than a smear of a filled shape, which is what the first cut drew.
  *
- * **The threshold is what keeps the rest.** `glint` rests at 0.4 and rises
- * with `energy` and `release` to 0.8 at a full packet, the same two rows and
- * the same reasoning the fractal carries. At rest it cuts under the lit faces
- * and takes the near-black fill; at a drop it cuts through them and leaves the
- * rim, the specular and the brightest facets, so the loudest moment is the one
- * with the most black in it. What is left on the canvas is a sculpted trail of
- * lit edges behind a turning solid.
+ * **The threshold takes the fringe and nothing else.** `glint` rests at 0.4
+ * and rises with `energy` and `release` to 0.8 at a full packet, the same two
+ * rows the fractal carries, but it cuts at about a fifth of a lit face rather
+ * than through it: a solid is already sparse by having a dark side, so the
+ * threshold is here to keep the near-black out of the canvas's memory and not
+ * to carve the form. The first cut had it at four times this and it ate the
+ * modelling, which is what the lead saw.
  *
- * **It is sparse by construction.** Every form is written to one bounding
- * radius and the camera does not move, so the solid covers 3.4 percent of a
- * 16:9 frame over a groove and 5.2 percent at the largest the mapping can make
- * it (`morphCoverage`), before the threshold takes its dim half away.
+ * **It fills the frame.** The camera is a short telephoto (33 degrees) and the
+ * solid is about half the short side across at rest, breathing up from there
+ * and shrinking on a build. The disc it subtends is a fifth of a 16:9 frame at
+ * the largest the mapping reaches, which is a bound and not what is lit.
  *
  * **Its home** is the middle of the dance floor: a drive of 0.58, steady at
  * 0.7, hard at 0.6, with no opinion about tonality, and a reach of 0.35. Of
@@ -90,7 +91,7 @@ export const SHAPE_MORPH: InkStudy = {
   reach: 0.35,
   moments: { intro: 0, groove: 1, build: 0.8, drop: 0.8, rest: 0, outro: 0 },
   knobs: {
-    size: 0.5,
+    size: 0.55,
     ripple: 0.012,
     rippleScale: 9,
     spin: 0,
@@ -98,7 +99,7 @@ export const SHAPE_MORPH: InkStudy = {
     rim: 0.35,
     specular: 1.4,
     hue: 0,
-    intensity: 0.05,
+    intensity: 0.06,
     glint: 0.4,
     glintKnee: 0.45,
   },
@@ -144,9 +145,9 @@ export const SHAPE_MORPH: InkStudy = {
     { from: 'impact', to: 'rim', gain: 0.3, curve: 'linear' },
     { from: 'hardness', to: 'specular', gain: 0.6, curve: 'linear' },
     { from: 'keyHue', to: 'hue', gain: 1, curve: 'linear' },
-    { from: 'energy', to: 'intensity', gain: -0.02, curve: 'invert' },
-    { from: 'swell', to: 'intensity', gain: -0.0035, curve: 'square' },
-    { from: 'hardness', to: 'intensity', gain: -0.005, curve: 'square' },
+    { from: 'energy', to: 'intensity', gain: -0.024, curve: 'invert' },
+    { from: 'swell', to: 'intensity', gain: -0.004, curve: 'square' },
+    { from: 'hardness', to: 'intensity', gain: -0.006, curve: 'square' },
     { from: 'energy', to: 'glint', gain: 0.25, curve: 'linear' },
     { from: 'release', to: 'glint', gain: 0.15, curve: 'linear' },
     { from: 'hardness', to: 'glintKnee', gain: 0.12, curve: 'invert' },

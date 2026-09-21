@@ -139,7 +139,8 @@ describe('the shape morph ink', () => {
 
   it('says what is on screen, and at what size, for the overlay', () => {
     draw(packetAt(1, 1))
-    expect(ink.detail).toMatch(/1280x720 marched$/)
+    // Marched at the ink target's own size, not the kit's half.
+    expect(ink.detail).toMatch(/2560x1440 marched$/)
     expect(FORMS.some((form) => ink.detail.startsWith(form))).toBe(true)
   })
 
@@ -181,11 +182,12 @@ describe('the shader and the ink agree', () => {
 
   it('keeps the numbers it shares with its params file in step', () => {
     for (const [name, value] of [
-      ['RIM_BASE', '0.55'],
+      ['RIM_BASE', '0.6'],
+      ['RIM_WRAP', '0.22'],
+      ['BODY', '0.08'],
       ['SPECULAR_WHITE', '0.65'],
       ['MORPH_LIGHT', '2.0'],
       ['MARCH_SAFETY', '0.55'],
-      ['RIM_FLOOR', '0.3'],
     ])
       expect(shader).toContain(`const ${name} = ${value};`)
   })

@@ -81,21 +81,37 @@ The one thing that is not a melt is the drop. `impact` cuts to the next form on
 the frame it fires, with the same hysteresis the shards read it with, so one
 drop is one cut however long the row takes to fall.
 
-The light is a key light up and to the left, and two rim lights behind at 45
-degrees either side. The key's colour is the palette showing at the song's key,
-as every other ink takes it; the rims' is a third of a turn on round the same
-palette. The key shapes the form and casts a soft self-shadow, the rims draw
-the outline, a fresnel term gathers them at the silhouette, and a tight
-specular passes 1 on purpose so the bloom catches it. There is no ambient
-light: a face that points at nothing is black, and that is what makes a solid
-read as a solid.
+The light is a key up and to the left and two rims behind at 45 degrees either
+side, and there is no fill: a face pointing at neither is black, which is what
+makes a solid read as a solid.
+
+Both colours are lights and not pigments. The hue is the palette's at the
+song's key, so the picture still turns with the music and with the look's
+palette, and everything else about the colour is the light's own: one
+lightness, the chroma pushed to the edge of what the screen can show, and the
+rims a third of the hue circle on from the key. The first cut read two places
+on the palette's ring instead, which on a designed ring can be the same hue
+again a little darker, and a solid lit by two of those reads as one washed-out
+colour. Only the specular goes near white; the two colours are added and never
+mixed, so neither hue is diluted by the other.
+
+The light is split three ways on purpose, and the split is what the canvas
+sees:
+
+```text
+body     diffuse x shade x occlusion, a twelfth of the edge   a faint haze
+wrap     the rims reaching round the terminator               a coloured dark side
+outline  a fresnel edge, the brightest but the highlight      a bright line
+specular tight, passes 1                                      a flash the bloom takes
+```
 
 ## Knobs
 
 Every number the study owns, resting value first:
 
-- `size` 0.5: the bounding radius in world units. The bass swells it through a
-  `spring` at 3.2 Hz damped at 0.55 (+0.18), and tension shrinks it (-0.18).
+- `size` 0.55: the bounding radius in world units, which is about half the
+  short side of the frame across. The bass swells it through a `spring` at
+  3.2 Hz damped at 0.55 (+0.18), and tension shrinks it (-0.18).
 - `ripple` 0.012: a displacement of the surface in world units. `highMid`
   raises it through an `envelope`, 40 ms up and 420 down (+0.035).
 - `rippleScale` 9: waves of that ripple across a world unit. `pace` adds 2.
@@ -103,13 +119,13 @@ Every number the study owns, resting value first:
   turns a second, wrapping at a turn, with tension adding another 0.25.
 - `tumble` 0: turns about the horizontal axis, an `integrate` of `swell` at
   0.08 turns a second.
-- `rim` 0.35: how much light the two rims carry above their base, and how wide
-  the band they gather in is. `energy` opens it (+0.25 through a square root)
-  and `impact` throws it wide (+0.3).
+- `rim` 0.35: how much light the fresnel outline carries above `RIM_BASE`, and
+  how wide the band it gathers in is. `energy` opens it (+0.25 through a square
+  root) and `impact` throws it wide (+0.3).
 - `specular` 1.4: the highlight's strength. `hardness` sharpens it (+0.6).
-- `hue` 0: where on the palette the key light sits, as an offset from the
-  song's key, which `keyHue` moves with the music.
-- `intensity` 0.05: the last multiply on the colour. See the light budget.
+- `hue` 0: where on the palette the key light's hue is taken from, as an offset
+  from the song's key, which `keyHue` moves with the music.
+- `intensity` 0.06: the last multiply on the colour. See the light budget.
 - `glint` 0.4: the share of the frame's own brightest that light must clear to
   be drawn at all. `energy` (+0.25) and `release` (+0.15) raise it.
 - `glintKnee` 0.45: how soft that edge is, as a share of the level. A harder
@@ -126,52 +142,53 @@ tension, so a build is a smaller, faster solid and not a brighter one.
 
 A solid sits still in the middle of a canvas that keeps 0.975 of itself every
 frame. A pixel it lights every frame settles at about forty times what one
-frame adds, so the first version of this study, written at the intensity an ink
-with no canvas would use, pinned its whole silhouette at the canvas's ceiling
-inside a second: a white blob with a magenta halo and no modelling left in it.
-That is Melt's fault at a twentieth of the size, and the measurements are in
-the bench.
+frame adds, and that one fact decides nearly every number here.
 
-Two numbers fix it, and they were found by looking at the study soloed over a
-synthetic groove at 2560 by 1440:
+The first cut got it wrong twice, in opposite directions, and the second was
+the one that showed. Written at the intensity an ink with no canvas would use,
+it pinned its whole silhouette at the ceiling inside a second and drew a white
+blob. Pulling the light down fixed that and left a new problem: the threshold
+had been raised to carve the body away, so what reached the canvas was a lit
+cap about a sixth of the frame tall, soft edged and low in saturation, which is
+what the lead saw and sent back.
 
-- **`intensity` rests at 0.05**, not the 0.9 an uncarried ink would want. The
-  lit half then settles near a third of the ceiling, the terminator survives as
-  a gradient rather than clipping flat, and the specular still passes it, so
-  the highlight is the thing that blooms.
-- **`MORPH_CUT` is 0.35** (`impls/morph.params.ts`), so the resting `glint` of
-  0.4 cuts at 0.14 of the brightest the ink can be. The peak counts the
-  specular and both rims on top of a lit face, so a lit face is about a quarter
-  of it: the cut lands under one and over the near-black fill. At the 0.8 a
-  full packet resolves, the cut lands at 0.28, over a lit face, and what
-  survives is the rim, the specular and the brightest facets. The loudest
-  moment is the one with the most black in it.
+What it is now:
 
-The third number is the spin. At a tenth of the rate it now runs at, the canvas
-is handed the same silhouette every frame and sums it into a flat disc; at 0.22
-turns a second a facet sweeps out of its own trail and the memory reads as a
-sculpted smear behind a turning solid. A sphere is the one form with nothing to
-sweep, and it is the one form this looks weakest on.
+- **The body is a twelfth of the edge** (`BODY` is 0.08 against a rim carrying
+  0.82 to 1.5). A lit face covers a large part of the frame and barely moves
+  while the solid turns, so it is the one term that can sum into a flat mass;
+  the outline and the highlight are thin and sweep across the frame, so they
+  streak instead. At a groove the body settles near 0.17 of the canvas's
+  ceiling and the edge clips it, which is the long exposure of a lit wireframe
+  the study is after.
+- **`intensity` rests at 0.06**, and the gate row takes it to 0.036 in near
+  silence.
+- **`MORPH_CUT` is 0.015**, so the resting `glint` of 0.4 cuts at about a fifth
+  of a lit face rather than through it. The whole lit side passes; what the
+  threshold takes is the fringe and the near-black, which is all it needs to
+  take, because a solid is already sparse by having a dark side.
+- **It marches at the ink target's own size**, not the kit's half. A bilinear
+  upscale of a thin bright outline is a soft one, and this study is read by its
+  edges. It costs 0.2 ms rather than 0.09.
 
-## Sparse by construction
+## How much of the frame it takes
 
 Every form is written to one bounding radius and the camera does not move, so
-the share of the frame the solid can cover is arithmetic rather than a raster
-(`morphCoverage`): the disc that radius subtends, with the ripple added to it
-because a crest is the furthest the surface reaches. It is a ceiling twice
-over, since a torus is mostly hole and the threshold then drops whatever is not
-brightly lit.
+the disc the solid subtends is arithmetic rather than a raster
+(`morphCoverage`), with the ripple added to the radius because a crest is the
+furthest the surface reaches.
 
-| moment                          | size | 16:9 | square |
-| ------------------------------- | ---- | ---- | ------ |
-| a groove (every row at 0.3)     | 0.55 | 3.4% | 6.1%   |
-| a full packet, nothing wound up | 0.68 | 5.2% | 9.3%   |
-| a full packet at full tension   | 0.50 | 2.9% | 5.2%   |
+| moment                          | size | across the short side | the disc, 16:9 |
+| ------------------------------- | ---- | --------------------- | -------------- |
+| a groove (every row at 0.3)     | 0.60 | 56%                   | 14.0%          |
+| a full packet, nothing wound up | 0.73 | 69%                   | 20.8%          |
+| a full packet at full tension   | 0.55 | 53%                   | 12.2%          |
 
-A square canvas is the worst shape, because the camera's field of view is
-across the short side, so the same solid is a larger share of a frame that is
-not wide. `studies/shapeMorph.test.ts` holds it under a tenth on eight shapes
-of canvas including a square and a tall one.
+The disc is a ceiling three times over. A form is not a disc, a torus is mostly
+hole, and what fills the outline is the body term, which is a twelfth of what
+the edge carries. Rendered against the canvas the director builds and measured
+on the adapter, the share of the frame over a tenth of the ceiling's brightness
+is about 9 percent at a groove.
 
 There is no flash in the construction: nothing toggles a large area on or off,
 the solid's light is continuous in the size, the turn and the level, and the
@@ -194,40 +211,61 @@ quiet bar has already landed when the music comes back.
 
 ## Cost
 
-Measured through headless Edge on an RTX 5080, at 2560 by 1440 with the march
-at half of it (1280 by 720):
+Measured through headless Edge on an RTX 5080, at 2560 by 1440, marched at the
+same size:
 
 - The ink's own two passes, timed over 120 frames with the queue drained
-  against the same run without them: **about 0.1 ms a frame**. At full size
-  rather than half it is about 0.2 ms.
-- In the demo's bench, soloed at 2240 by 1440 with the feedback, the bloom, the
-  split and the tonemap live, the frame time does not move when the study is
-  switched on: 5.6 ms either way, which is the rest of the loop.
+  against the same run without them: **about 0.2 ms a frame**. At half size it
+  is 0.09 ms, which is what the kit's default would cost and is not worth the
+  softer edges.
+- In the demo, soloed under Clean glass with Curl drift beneath it, playing the
+  reference track at 2560 by 1440 in full view, `data-frame-ms` reads 5.6 ms,
+  which is what the same cast reads with the study switched off.
 
 Most rays never hit anything. The solid is bounded, so the march has a far
 plane of its own and a ray that misses leaves after a handful of steps; the
 budget of 96 is what a ray grazing the silhouette spends. It is still declared
 `heavy`, because a march is heavy on a weaker adapter and the director's budget
-is not written for one GPU.
-
-No WGSL message and no validation message appears in the console, at any of the
-four moments looked at.
+is not written for one GPU. It sets no `maxFps` for the same measurement: the
+renderer takes the lowest cap among the live inks, and one here would hold a
+whole cast to 60 for an ink that costs a fifth of a millisecond.
 
 ## Looked at
 
-In the bench, soloed under Hard clean, at 2240 by 1440, over a synthetic beat:
-a quiet passage (level 0.18), a groove (0.6), a build (0.6 with tension at 0.9)
-and a drop (0.95 with release at 0.9). The quiet and the groove read as a lit
-solid with a clean terminator falling to black, a coloured rim on two edges and
-a specular; the build is visibly smaller and turning faster; the drop keeps
-only the lit cap, the rim and the highlight, and the rest of the frame is
-black.
+On the reference track (`Ecstasy Of Soul`), in the cast the lead used: Curl
+drift under it, Clean glass over it, at 2560 by 1440 in full view, in headless
+Edge on the real adapter, at a quiet passage (30 s) and through the loud one
+after the first drop (108 s).
 
-The forms other than the sphere were looked at through a harness that renders
-the shader on the adapter and models the canvas's memory on the CPU, because
-the bench's synthetic packet never changes `section` and so never leaves the
-form the first hash gives it. That is worth fixing in the bench one day; it is
-not this study's file to change.
+At the quiet passage the section's form is a capsule, about 60 percent of the
+short side tall. It reads as a lit object: a magenta outline down both sides
+where the rims gather at the silhouette, a blue body with the terminator
+falling through it, two white specular flashes on the near shoulder, and black
+everywhere outside it. The trail is a soft second copy of the outline, lifted
+and bent by the flow, which is the long exposure the references describe.
+
+At the loud passage the form is an octahedron, and the facets read: three
+planes at three different values, magenta edges between them, a hot specular
+crossing one plane, and a smoke trail drawn upward by the curl. The two hues
+are clearly two hues rather than one family, which was the point of taking the
+light's colour from the key's hue and turning the rim a third of the circle
+rather than reading the palette's ring twice.
+
+Against the references: the McNamara setup is there (a key that shapes, a pair
+of rims that outline, nothing filling the shadows, a black frame), the weld
+from the Quilez article shows through the middle of a melt, and the Shadertoy
+morphs' point, that character survives the interpolation, holds because the mix
+is welded rather than cross-faded. What those references do not have is the
+canvas's memory, and that is still the thing this study is tuned around.
+
+No WGSL message and no validation message appears in the console at either
+passage.
+
+The forms other than the two the track happened to draw were looked at through
+a harness that renders the shader on the adapter and models the canvas's memory
+on the CPU, because the bench's synthetic packet never changes `section` and so
+never leaves the form the first hash gives it. That is worth fixing in the
+bench one day; it is not this study's file to change.
 
 One thing seen while looking, which is not this study's: with the study at
 presence 0 and nothing else drawing, a single green texel sits at the exact

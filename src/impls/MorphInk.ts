@@ -22,6 +22,7 @@
  * hold the whole cast to 60 for an ink that costs nothing.
  */
 import type { Tuning } from '../presets/knobs'
+import { MAX_SCALE } from './raymarch.params'
 import shader from '../shaders/morph.wgsl?raw'
 import {
   MORPH_UNIFORM_FLOATS,
@@ -42,6 +43,21 @@ export class MorphInk extends RaymarchInk {
 
   get detail() {
     return `${this.shape.detail} / ${this.marchWidth}x${this.marchHeight} marched`
+  }
+
+  /**
+   * Marched at the ink target's own size rather than the kit's half.
+   *
+   * The kit halves by default because a march is expensive, and this one is
+   * not: measured at 0.2 ms at 2560x1440 on the development GPU, against 0.09
+   * at half. What half cost instead was the picture. A solid is read by its
+   * edges, and a bilinear upscale of a thin bright outline is a soft one; at
+   * full size the facets have hard planes and the fresnel edge is a line
+   * rather than a glow. The knob is the kit's to offer and this ink's to
+   * decline.
+   */
+  protected scaleOf(): number {
+    return MAX_SCALE
   }
 
   protected fill(

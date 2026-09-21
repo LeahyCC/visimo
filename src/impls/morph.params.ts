@@ -29,7 +29,10 @@
  * the brightness threshold has to be measured against them.
  */
 import { F } from '../audio/FeatureExtractor'
-import { peakPaletteAt, RIBBON_TINT } from '../post/params'
+import { oklchToSrgb, srgbToOklch, wrapHue } from '../colour/oklch'
+import type { Rgb } from '../colour/oklch'
+import { paletteAt } from '../palettes/active'
+import { RIBBON_TINT } from '../post/params'
 
 /** Floats in the uniform; the shader's `Params` struct reads them in this order. */
 export const MORPH_UNIFORM_FLOATS = 28
@@ -69,9 +72,17 @@ export const EYE: readonly [number, number, number] = [0, 0, -3.8]
 export const LOOK: readonly [number, number, number] = [0, 0, 0]
 /**
  * The field of view in radians, across the short side of the canvas, which is
- * how the kit's camera reads it. A normal lens: 57 degrees.
+ * how the kit's camera reads it.
+ *
+ * A short telephoto, 33 degrees, rather than the 57 this was written with.
+ * Two reasons, and the first is the one that matters: the solid has to fill
+ * the frame. At 57 degrees a solid of the resting size covered a quarter of
+ * the short side and read as a detail in an empty frame; at 33 it covers
+ * about 45 percent of it and breathes up from there. The second is that a
+ * long lens flattens the perspective, which is what a product render uses and
+ * what keeps a box reading as a box rather than as a wedge.
  */
-export const FOV = 1.0
+export const FOV = 0.57
 
 /**
  * Half of what the camera sees across the short side, in world units, which is
@@ -89,8 +100,29 @@ export const HALF_VIEW =
  */
 export const MORPH_LIGHT = 2.0
 
-/** The rim's light at a `rim` of 0, so the edge never goes out entirely. */
-export const RIM_BASE = 0.55
+/** What the fresnel outline carries at a `rim` of 0, so the edge never goes out. */
+export const RIM_BASE = 0.6
+
+/**
+ * What the far side of the terminator keeps of the rims' colour. A back light
+ * reaches round a curve, so the dark half is a deep wash of the second hue
+ * rather than pure black, and the form still reads there.
+ */
+export const RIM_WRAP = 0.22
+
+/**
+ * How much of the light a face square to the key light carries, against the
+ * edge and the highlight.
+ *
+ * It is the number that decides what the canvas remembers. A lit face covers
+ * a large part of the frame and barely moves while the solid turns, so on a
+ * canvas that keeps most of itself every frame it is the one term that can
+ * sum into a flat mass; the outline and the highlight sweep across the frame
+ * and leave trails instead. Holding the body at a fifth of what the edge
+ * carries is what makes the trail read as a long exposure of a lit edge and
+ * not as a smudge.
+ */
+export const BODY = 0.08
 
 /**
  * How much of the rim light a surface square to the camera keeps, the rest
@@ -105,13 +137,33 @@ export const RIM_FLOOR = 0.3
 export const SPECULAR_WHITE = 0.65
 
 /**
- * How far round the palette the rim light sits from the key light. A third of
- * a turn is the gap a two-gel studio setup uses: far enough that the edge
- * reads as a second light and not as the same one, near enough that the two
- * still look like one scene. The palette is a ring, so this holds whatever
- * palette the look chose and wherever the key has turned it.
+ * What a light's colour is held at in OKLCH: bright, and as saturated as the
+ * screen can show at that lightness.
+ *
+ * The palette is a ring of pigments, and reading two places on it gave two
+ * pastels that often landed in the same family (the aurora palette's green
+ * and its yellow-green), which on a solid lit by both read as one washed-out
+ * colour. A light is a gel, not a pigment: it takes its hue from the palette
+ * at the song's key and nothing else, and the chroma is pushed to the edge of
+ * the gamut, so the two lights are two hues and the solid is lit rather than
+ * tinted. `oklchToSrgb` brings the chroma in where the screen cannot hold it,
+ * keeping the hue and the lightness.
  */
-export const RIM_TURN = 1 / 3
+export const LIGHT_LIGHTNESS = 0.72
+export const LIGHT_CHROMA = 0.3
+
+/**
+ * How far round the hue circle the rim lights sit from the key, in degrees. A
+ * third of a turn is the gap a two-gel studio setup uses: far enough that the
+ * edge reads as a second light and not as the same one, near enough that the
+ * two still look like one scene.
+ *
+ * It is a third of the hue circle and not a third of the palette's ring,
+ * which is the mistake the first cut made: a palette's ring is a designed
+ * sequence of pigments and a third of the way round it can be the same hue
+ * again a little darker.
+ */
+export const RIM_TURN_DEGREES = 120
 
 /**
  * Where a `glint` of 1 cuts, as a share of the brightest the ink can be this
@@ -133,7 +185,7 @@ export const RIM_TURN = 1 / 3
  * fault in miniature; at three times it there was nothing on screen but a
  * highlight.
  */
-export const MORPH_CUT = 0.35
+export const MORPH_CUT = 0.015
 
 /**
  * Where the knob stops being a threshold, the same reasoning the fractal's
@@ -383,21 +435,37 @@ export class MorphShape {
 export const luminance = (rgb: readonly [number, number, number]) =>
   0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
 
-/** The key light's colour: the palette showing, at the key, offset by `hue`. */
-export const morphKeyColour = (
+/**
+ * The two lights this frame: the key, and the rims a third of the hue circle
+ * on from it.
+ *
+ * The hue is the palette's at the song's key, so the picture still turns with
+ * the music and with whatever palette the look chose; everything else about
+ * the colour is the light's own. Both are held at one lightness and one
+ * chroma, then scaled so the brightest channel is 1, which is what
+ * `peakPaletteAt` does for every other ink and what makes `intensity` mean
+ * the same thing in every key.
+ */
+export function morphLights(
   features: Float32Array,
   params: MorphParams,
-): [number, number, number] => ribbonHue(features, params.hue)
+): { key: Rgb; rim: Rgb } {
+  const turn = features[F.keyHue] ?? 0
+  const place = (Number.isFinite(turn) ? turn : 0) + RIBBON_TINT + params.hue
+  const hue = srgbToOklch(paletteAt(place)).h
+  return {
+    key: gel(hue),
+    rim: gel(wrapHue(hue + RIM_TURN_DEGREES)),
+  }
+}
 
-/** The rim light's: a third of a turn on round the same palette. */
-export const morphRimColour = (
-  features: Float32Array,
-  params: MorphParams,
-): [number, number, number] => ribbonHue(features, params.hue + RIM_TURN)
-
-const ribbonHue = (features: Float32Array, offset: number): [number, number, number] => {
-  const key = features[F.keyHue] ?? 0
-  return peakPaletteAt((Number.isFinite(key) ? key : 0) + RIBBON_TINT + offset)
+/** One light: a hue, at the lightness and chroma a gel has, brightest channel at 1. */
+function gel(hue: number): Rgb {
+  const [red, green, blue] = oklchToSrgb({ l: LIGHT_LIGHTNESS, c: LIGHT_CHROMA, h: hue })
+  const peak = Math.max(red, green, blue)
+  // Written so that a hue the conversion could not place falls through to
+  // white rather than to nothing.
+  return peak > 1e-4 ? [red / peak, green / peak, blue / peak] : [1, 1, 1]
 }
 
 /**
@@ -411,23 +479,16 @@ const ribbonHue = (features: Float32Array, offset: number): [number, number, num
  * is: the shader would have to be handed the two palette colours' weights a
  * second time, and a copy of a curve is a copy that drifts.
  */
-export function morphPeak(
-  params: MorphParams,
-  key: readonly [number, number, number],
-  rim: readonly [number, number, number],
-): number {
+export function morphPeak(params: MorphParams, key: Rgb, rim: Rgb): number {
   const keyLuma = luminance(key)
   const specular = keyLuma * (1 - SPECULAR_WHITE) + SPECULAR_WHITE
-  const rimLight = (RIM_BASE + params.rim) * luminance(rim)
-  return params.intensity * MORPH_LIGHT * (keyLuma + rimLight + params.specular * specular)
+  const body = keyLuma * BODY
+  const edge = (RIM_WRAP + RIM_BASE + params.rim) * luminance(rim)
+  return params.intensity * MORPH_LIGHT * (body + edge + params.specular * specular)
 }
 
 /** The luminance the ink's own light is cut at this frame, 0 for no cut. */
-export function morphGlintLevel(
-  params: MorphParams,
-  key: readonly [number, number, number],
-  rim: readonly [number, number, number],
-): number {
+export function morphGlintLevel(params: MorphParams, key: Rgb, rim: Rgb): number {
   if (params.glint <= GLINT_OFF) return 0
   return params.glint * MORPH_CUT * morphPeak(params, key, rim)
 }
@@ -477,8 +538,7 @@ export function writeMorphUniform(
   steps: number,
   out: Float32Array,
 ): Float32Array {
-  const key = morphKeyColour(features, params)
-  const rim = morphRimColour(features, params)
+  const { key, rim } = morphLights(features, params)
   const gate = morphGate(features)
   const lit = { ...params, intensity: params.intensity * gate }
   out[0] = Math.max(1, width)

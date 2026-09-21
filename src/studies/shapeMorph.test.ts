@@ -13,15 +13,15 @@ import { closeness, momentFit } from '../director/score'
 import { HARDSTYLE, HOUSE, LOFI } from '../director/song.fixture'
 import { TRACKS } from '../director/tracks.fixture'
 import {
+  BODY,
+  HALF_VIEW,
   luminance,
   MORPH_LIGHT,
   morphCoverage,
   morphGlintLevel,
-  morphKeyColour,
+  morphLights,
   morphLit,
   morphParams,
-  morphPeak,
-  morphRimColour,
 } from '../impls/morph.params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import { MORPH_KNOBS } from './impls'
@@ -220,7 +220,8 @@ describe('what the music does to it', () => {
     const packet = packetOf({ keyHue: 0.4 })
     expect(at(packet).hue ?? 0).toBeCloseTo(packet[F.keyHue] ?? 0, 6)
     const params = morphParams(at(packet))
-    expect(morphKeyColour(packet, params)).not.toEqual(morphRimColour(packet, params))
+    const { key, rim } = morphLights(packet, params)
+    expect(key).not.toEqual(rim)
   })
 })
 
@@ -256,47 +257,53 @@ describe('it does not wash the canvas out', () => {
     expect(at(filled(1)).glint ?? 0).toBeLessThan(0.9)
   })
 
-  it('covers a small share of the frame on any shape of canvas, at its largest', () => {
-    // The worst the mapping reaches: the bass spring at its overshoot with no
-    // tension pulling the solid in, and the ripple fully out. A square canvas
-    // is the worst shape, since the solid is sized by the short side.
-    const worst = morphParams(settled(filled(1), 0))
-    for (const [width, height] of SHAPES)
-      expect(morphCoverage(worst, width, height), `${width}x${height}`).toBeLessThan(0.1)
+  it('fills the frame as an object rather than sitting in it as a detail', () => {
+    // What the lead asked for after the first look: about half the short side
+    // at rest, breathing up from there.
+    const across = (knobs: Record<string, number>) => {
+      const params = morphParams(knobs)
+      return (params.size + params.ripple) / HALF_VIEW
+    }
 
-    expect(morphCoverage(worst, 2560, 1440)).toBeLessThan(0.06)
-    // And a good deal less at rest, on the frame the study states.
-    expect(morphCoverage(morphParams(settled(packetOf({ energy: 0.3 }))), 2560, 1440)).toBeLessThan(
-      0.03,
-    )
+    expect(across(settled(packetOf({ energy: 0.3 })))).toBeGreaterThan(0.4)
+    expect(across(settled(filled(1), 0))).toBeGreaterThan(across(settled(packetOf({ energy: 0.3 }))))
+    expect(across(settled(filled(1), 0))).toBeLessThan(0.8)
   })
 
-  it('cuts under the modelling over a groove and through it on a drop', () => {
+  it('bounds what it can cover on any shape of canvas', () => {
+    // The disc the solid subtends, which is a ceiling twice over: a form is
+    // not a disc, and the body inside the outline is held to a fifth of what
+    // the edge carries, so what fills it is a haze and not a mass.
+    const worst = morphParams(settled(filled(1), 0))
+    for (const [width, height] of SHAPES)
+      expect(morphCoverage(worst, width, height), `${width}x${height}`).toBeLessThan(0.45)
+
+    expect(morphCoverage(worst, 2560, 1440)).toBeLessThan(0.25)
+  })
+
+  it('cuts only what is near black, and leaves the modelling', () => {
     const cut = (packet: Float32Array, tension: number) => {
       const params = morphParams(settled(packet, tension))
-      const key = morphKeyColour(packet, params)
-      const rim = morphRimColour(packet, params)
+      const { key, rim } = morphLights(packet, params)
       return {
         level: morphGlintLevel(params, key, rim),
-        peak: morphPeak(params, key, rim),
         // What a face square to the key light is worth, which is the
-        // modelling: the thing the threshold either keeps or takes.
-        lit: luminance(key) * params.intensity * MORPH_LIGHT,
+        // modelling: the thing the threshold must not carve.
+        lit: luminance(key) * BODY * params.intensity * MORPH_LIGHT,
       }
     }
 
-    // Over a groove the cut sits under a lit face, so the terminator survives
-    // as a gradient and only the near-black fill is dropped.
-    const groove = cut(packetOf({ energy: 0.45, bass: 0.6 }), 0)
-    expect(groove.level).toBeGreaterThan(0)
-    expect(groove.level).toBeLessThan(groove.lit)
-    expect(groove.level).toBeGreaterThan(groove.lit * 0.2)
-
-    // On a drop it sits above one, so what is left is the rim, the specular
-    // and the brightest facets, and the frame keeps its blacks.
-    const drop = cut(filled(1), 0)
-    expect(drop.level).toBeGreaterThan(drop.lit)
-    // And never so high that the highlight goes with them.
-    for (const one of [groove, drop]) expect(one.level).toBeLessThan(one.peak * 0.35)
+    for (const [packet, tension] of [
+      [packetOf({ energy: 0.45, bass: 0.6 }), 0],
+      [filled(1), 0],
+      [filled(1), 1],
+    ] as const) {
+      const one = cut(packet, tension)
+      expect(one.level).toBeGreaterThan(0)
+      // The whole lit side passes; a solid is already sparse by having a dark
+      // side, so the threshold is here for the fringe and nothing else.
+      expect(one.level).toBeLessThan(one.lit * 0.6)
+      expect(one.level).toBeGreaterThan(one.lit * 0.05)
+    }
   })
 })

@@ -53,9 +53,15 @@ const KEY_DIR = vec3<f32>(-0.4832, 0.6853, -0.5447);
 const RIM_RIGHT = vec3<f32>(0.8556, 0.1208, 0.5033);
 const RIM_LEFT = vec3<f32>(-0.798, -0.2494, 0.5486);
 
-// The rim's light at a `rim` of 0, so the edge never goes out. Mirrors
-// RIM_BASE in morph.params.ts.
-const RIM_BASE = 0.55;
+// What the fresnel outline carries at a `rim` of 0, so the edge never goes
+// out. Mirrors RIM_BASE in morph.params.ts.
+const RIM_BASE = 0.6;
+// What the far side of the terminator keeps of the rims' colour. Mirrors
+// RIM_WRAP.
+const RIM_WRAP = 0.22;
+// How much of the light a face square to the key light carries, against the
+// edge and the highlight. Mirrors BODY.
+const BODY = 0.08;
 // How far the specular is pulled to white. Mirrors SPECULAR_WHITE.
 const SPECULAR_WHITE = 0.65;
 // The last multiply on the colour. Mirrors MORPH_LIGHT.
@@ -67,11 +73,8 @@ const MARCH_SAFETY = 0.55;
 const GLOSS = 48.0;
 // The fresnel powers the rim knob runs between: a hairline edge and a broad
 // wrapped one.
-const RIM_TIGHT = 6.0;
-const RIM_WIDE = 1.6;
-// How much of the rim light a surface square to the camera keeps. Mirrors
-// RIM_FLOOR in morph.params.ts.
-const RIM_FLOOR = 0.3;
+const RIM_TIGHT = 10.0;
+const RIM_WIDE = 3.0;
 // The surface tolerance and the normal's sample spacing, both as a share of
 // how far the ray has gone, so a far pixel is not marched to a precision it
 // could not show.
@@ -178,35 +181,40 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   let shade = rmShadow(point + normal * 0.015, KEY_DIR, 0.02, 3.0, 24, 10.0);
   let occlusion = rmOcclusion(point, normal, params.form.w * 0.18);
 
-  // The rim light draws the outline. It is the back light's own diffuse term,
-  // lifted where the surface turns away from the camera: `RIM_FLOOR` of it
-  // reaches a face square on and the rest gathers at the silhouette. The floor
-  // is what makes a faceted form work at all, since a facet's normal is
-  // constant and a pure fresnel over one is a flat nothing; on a round form
-  // the fresnel is still most of the term and reads as an edge that glows.
-  // The knob widens the band and strengthens it at once, so a loud passage
-  // gets a broader, hotter edge without the light itself climbing.
-  let width = mix(RIM_TIGHT, RIM_WIDE, clamp(params.light.x, 0.0, 1.0));
-  let facing = rmFresnel(normal, ray, width);
-  // Wrapped rather than a plain dot product, and squared: a back light on a
-  // solid is only ever seen on the far side of the terminator, so the term has
-  // to reach round the curve rather than stopping dead at 90 degrees, and the
-  // square keeps it off the faces the key light already owns.
+  // The rim lights do two separate jobs, and the study needs both.
+  //
+  // The wrap is the far side of the terminator taking the rims' colour: a
+  // back light reaches round a curve, so the dark half is not black but a
+  // deep wash of the second hue. It is small, because it is a wash.
   let right = max(0.0, dot(normal, RIM_RIGHT) * 0.5 + 0.5);
   let left = max(0.0, dot(normal, RIM_LEFT) * 0.5 + 0.5);
   // The stronger of the two rather than their sum, so the pair cannot add up
   // past what one light is worth and the peak the threshold is measured
   // against stays a true ceiling.
-  let wrapped = max(right * right, left * left);
-  let edge = wrapped * (RIM_FLOOR + (1.0 - RIM_FLOOR) * facing);
-  let rimLight = (RIM_BASE + params.light.x) * edge;
+  let reached = max(right * right, left * left);
+  //
+  // The outline is the fresnel edge, and it is the brightest thing on the
+  // solid after the highlight. It is what draws the form on a black frame,
+  // and it is what the canvas's memory is meant to keep: a thin hot edge
+  // sweeping as the solid turns leaves a light trail, where a filled body
+  // leaves a smudge. The knob widens the band and strengthens it at once, so
+  // a loud passage gets a broader, hotter edge without the light climbing.
+  let width = mix(RIM_TIGHT, RIM_WIDE, clamp(params.light.x, 0.0, 1.0));
+  let outline = rmFresnel(normal, ray, width) * reached;
+  let rimLight = RIM_WRAP * reached + (RIM_BASE + params.light.x) * outline;
 
-  // The specular may pass 1 on purpose, so the bloom catches it.
+  // The specular passes 1 on purpose, so the bloom catches it.
   let gloss = pow(max(0.0, dot(reflect(ray, normal), KEY_DIR)), GLOSS);
   let hot = mix(params.key.rgb, vec3<f32>(1.0), SPECULAR_WHITE);
 
+  // The body is held well under the edges. A lit face covers a large part of
+  // the frame and sits still while the solid turns, so on a canvas that keeps
+  // most of itself every frame it is the one term that can sum into a flat
+  // mass; the edge and the highlight move across the frame and streak. The
+  // two colours are added rather than mixed, and only the highlight goes near
+  // white, so neither hue is diluted by the other.
   let colour =
-    params.key.rgb * diffuse * shade * occlusion + params.rim.rgb * rimLight +
+    params.key.rgb * (diffuse * shade * occlusion * BODY) + params.rim.rgb * rimLight +
     hot * gloss * params.light.y;
   let light = colour * params.light.z * MORPH_LIGHT;
 

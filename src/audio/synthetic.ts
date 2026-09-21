@@ -55,7 +55,17 @@ export type Pattern = {
   sweep?: Sweep
   /** A wall of noise under everything, for a dense track; absent for none. */
   wall?: Wall
+  /** Held notes under everything, for a chord the harmony can name; absent for none. */
+  notes?: Notes
 }
+
+/**
+ * Notes held through a section, each a fundamental with its first three
+ * harmonics falling away, which is what puts a note's pitch class in the
+ * chroma more than once and its neighbours' in it less. `gain` is the
+ * amplitude of one fundamental.
+ */
+export type Notes = { hz: readonly number[]; gain: number }
 
 /** A run of one pattern for so many seconds; sections are played back to back. */
 export type Section = { pattern: Pattern; seconds: number }
@@ -209,6 +219,17 @@ export function synthesize(sections: readonly Section[], sampleRate = 48000): Fl
           0.5 * Math.sin(2 * Math.PI * 659.3 * t)
         out[offset + index] = (out[offset + index] ?? 0) + chord * pattern.pad * 0.25
       }
+    }
+
+    if (pattern.notes) {
+      const { hz, gain } = pattern.notes
+      for (const note of hz)
+        for (let harmonic = 1; harmonic <= 4; harmonic++) {
+          const step = (2 * Math.PI * note * harmonic) / sampleRate
+          const each = gain / harmonic
+          for (let index = 0; index < length; index++)
+            out[offset + index] = (out[offset + index] ?? 0) + Math.sin(step * index) * each
+        }
     }
 
     if (pattern.wall) {
@@ -455,6 +476,21 @@ export function densePassage(bpm: number, tilt: number, busy: boolean): Pattern 
 /** The two passages of the dense song: a verse and the chorus it opens into. */
 export const denseVerse = (bpm = 150): Pattern => densePassage(bpm, 0.35, false)
 export const denseChorus = (bpm = 150): Pattern => densePassage(bpm, 0.55, true)
+
+/** The frequency of a pitch class, 0 for C to 11 for B, in the octave whose C is `c` Hz up from 16.35. */
+export const pitchHz = (pitchClass: number, octave = 3) =>
+  440 * 2 ** ((12 * (octave - 4) + pitchClass - 9) / 12)
+
+/**
+ * A held chord of these pitch classes and nothing struck: what the note rows
+ * are asked a question with, since a pad that is a fixed A major says nothing
+ * about which of the twelve should light. The notes sit in the octave below
+ * middle C, so the fundamentals and their harmonics land inside the range the
+ * chroma reads.
+ */
+export function chord(bpm: number, pitchClasses: readonly number[], gain = 0.2): Pattern {
+  return { bpm, beats: 4, hits: [], notes: { hz: pitchClasses.map((k) => pitchHz(k)), gain } }
+}
 
 /** A sustained chord and nothing struck at all: no onsets after the first. */
 export function padOnly(bpm: number, pad = 0.5): Pattern {

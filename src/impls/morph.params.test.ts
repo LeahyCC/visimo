@@ -14,7 +14,6 @@ import type { Rgb } from '../colour/oklch'
 import { paletteAt } from '../palettes/active'
 import { RIBBON_TINT } from '../post/params'
 import {
-  BODY,
   FORMS,
   FOV,
   HALF_VIEW,
@@ -30,6 +29,7 @@ import {
   morphHash,
   morphLights,
   morphLit,
+  morphLitFace,
   morphParams,
   morphPeak,
   MorphShape,
@@ -37,8 +37,8 @@ import {
   nextForm,
   RIM_BASE,
   RIM_TURN_DEGREES,
-  RIM_WRAP,
   RIPPLE_CEILING,
+  SHADE_FLOOR,
   SILENT_FLOOR,
   SOFTWARE_STEPS,
   writeMorphUniform,
@@ -301,26 +301,22 @@ describe('the light and its threshold', () => {
     expect(morphPeak(morphParams({ ...REST, intensity: 0 }), key, rim)).toBe(0)
   })
 
-  it('lets the whole lit side through and takes only what is near black', () => {
+  it('lets the whole lit side through and takes only the fringe', () => {
     const params = morphParams(REST)
     const level = morphGlintLevel(params, key, rim)
     expect(level).toBeGreaterThan(0)
-    // A face square to the key light is the modelling, and all of it passes:
-    // a solid is already sparse by having a dark side, so the threshold is
-    // here to keep the near-black fill out of the canvas's memory and not to
-    // carve the form.
-    const litFace = luminance(key) * BODY * params.intensity * MORPH_LIGHT
-    expect(level).toBeLessThan(litFace * 0.5)
-    // What it does take is the fringe: a twentieth of a lit face is cut.
-    expect(litFace * 0.05).toBeLessThan(level)
+    // The dimmest a lit face may be is `SHADE_FLOOR` of one square to the key
+    // light, and the cut sits well under even that: the terminator is what
+    // makes this ink sparse, and the threshold only clears the fringe under
+    // it. The first two cuts had it above a lit face and drew a dark ball.
+    const dimmest = morphLitFace(params, key) * SHADE_FLOOR
+    expect(level).toBeLessThan(dimmest * 0.25)
   })
 
-  it('holds the body well under the edge, so the canvas keeps an outline', () => {
+  it('carries an outline brighter than the side the key light lights', () => {
     const params = morphParams(REST)
-    const body = luminance(key) * BODY * params.intensity * MORPH_LIGHT
-    const edge =
-      (RIM_WRAP + RIM_BASE + params.rim) * luminance(rim) * params.intensity * MORPH_LIGHT
-    expect(edge).toBeGreaterThan(body * 5)
+    const edge = (RIM_BASE + params.rim) * luminance(rim) * params.intensity * MORPH_LIGHT
+    expect(edge).toBeGreaterThan(morphLitFace(params, key))
   })
 
   it('cuts harder as the music fills the canvas', () => {

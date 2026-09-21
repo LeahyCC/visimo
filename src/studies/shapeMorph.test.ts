@@ -13,15 +13,14 @@ import { closeness, momentFit } from '../director/score'
 import { HARDSTYLE, HOUSE, LOFI } from '../director/song.fixture'
 import { TRACKS } from '../director/tracks.fixture'
 import {
-  BODY,
   HALF_VIEW,
-  luminance,
-  MORPH_LIGHT,
   morphCoverage,
   morphGlintLevel,
   morphLights,
   morphLit,
+  morphLitFace,
   morphParams,
+  SHADE_FLOOR,
 } from '../impls/morph.params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import { MORPH_KNOBS } from './impls'
@@ -191,7 +190,10 @@ describe('what the music does to it', () => {
   })
 
   it('turns it with the energy, and holds it still in silence', () => {
-    expect(settled(packetOf({ energy: 1 })).spin ?? 0).toBeGreaterThan(0.2)
+    // Four seconds of a full packet is about a twentieth of a turn: the solid
+    // turns slowly on purpose, because the canvas keeps seconds of it and a
+    // fast turn fills its own dark side with what it lit a moment ago.
+    expect(settled(packetOf({ energy: 1 })).spin ?? 0).toBeGreaterThan(0.1)
     expect(settled(packetOf({ energy: 0.2 })).spin ?? 0).toBeLessThan(
       settled(packetOf({ energy: 1 })).spin ?? 0,
     )
@@ -291,7 +293,7 @@ describe('it does not wash the canvas out', () => {
         level: morphGlintLevel(params, key, rim),
         // What a face square to the key light is worth, which is the
         // modelling: the thing the threshold must not carve.
-        lit: luminance(key) * BODY * params.intensity * MORPH_LIGHT,
+        lit: morphLitFace(params, key),
       }
     }
 
@@ -302,10 +304,10 @@ describe('it does not wash the canvas out', () => {
     ] as const) {
       const one = cut(packet, tension)
       expect(one.level).toBeGreaterThan(0)
-      // The whole lit side passes; a solid is already sparse by having a dark
-      // side, so the threshold is here for the fringe and nothing else.
-      expect(one.level).toBeLessThan(one.lit * 0.6)
-      expect(one.level).toBeGreaterThan(one.lit * 0.05)
+      // The whole lit side passes, the dimmest part of it included: a solid
+      // is sparse by having a dark side, so the threshold is here for the
+      // fringe under the terminator and nothing else.
+      expect(one.level).toBeLessThan(one.lit * SHADE_FLOOR * 0.3)
     }
   })
 })

@@ -182,9 +182,10 @@ describe('the shader and the ink agree', () => {
 
   it('keeps the numbers it shares with its params file in step', () => {
     for (const [name, value] of [
-      ['RIM_BASE', '0.6'],
-      ['RIM_WRAP', '0.22'],
-      ['BODY', '0.08'],
+      ['RIM_BASE', '1.8'],
+      ['RIM_FRONT', '0.45'],
+      ['SHADE_FLOOR', '0.5'],
+      ['TERMINATOR', '0.035'],
       ['SPECULAR_WHITE', '0.65'],
       ['MORPH_LIGHT', '2.0'],
       ['MARCH_SAFETY', '0.55'],

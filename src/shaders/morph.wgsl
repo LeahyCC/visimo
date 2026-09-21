@@ -39,7 +39,12 @@ struct Params {
 
 // The two lights, as directions from the surface toward each light. Written
 // out already normalised, since a module constant may not call a function.
-// The key is up, left and toward the camera (-0.55, 0.78, -0.62). The rim is
+// The key is up, well to the left, and a little behind the plane the solid
+// sits in (-0.88, 0.45, 0.15). The last of those three numbers is the one
+// that matters: with the light in front of that plane every surface facing
+// the camera is lit, which is most of what can be seen, and the study has no
+// dark side to read against. Behind it, the terminator crosses the solid and
+// about a third of the silhouette falls to nothing. The rim is
 // two lights of one colour rather than one, at (0.85, 0.12, 0.5) and
 // (-0.8, -0.25, 0.55): right and behind, left and below and behind. That is
 // the studio setup the study was built to, a coloured key and a pair of rim
@@ -49,20 +54,29 @@ struct Params {
 // camera. It is the two-gel studio setup:
 // one light shapes the form, one draws its outline, and nothing fills in
 // between, which is what keeps the dark faces black.
-const KEY_DIR = vec3<f32>(-0.4832, 0.6853, -0.5447);
+const KEY_DIR = vec3<f32>(-0.8892, 0.4547, 0.0505);
 const RIM_RIGHT = vec3<f32>(0.8556, 0.1208, 0.5033);
 const RIM_LEFT = vec3<f32>(-0.798, -0.2494, 0.5486);
 
-// What the fresnel outline carries at a `rim` of 0, so the edge never goes
-// out. Mirrors RIM_BASE in morph.params.ts.
-const RIM_BASE = 0.6;
-// What the far side of the terminator keeps of the rims' colour. Mirrors
-// RIM_WRAP.
-const RIM_WRAP = 0.22;
-// How much of the light a face square to the key light carries, against the
-// edge and the highlight. Mirrors BODY.
-const BODY = 0.08;
-// How far the specular is pulled to white. Mirrors SPECULAR_WHITE.
+// What the fresnel outline carries at a `rim` of 0. Over 1 on purpose: the
+// outline is the brightest thing on the solid after the highlight, and the
+// bloom has to catch it. Mirrors RIM_BASE in morph.params.ts.
+const RIM_BASE = 1.8;
+// How much of the outline reaches the side the key light owns. The rims stand
+// behind the solid, so the far side gets all of it, but an outline that stops
+// at the terminator is half an outline. Mirrors RIM_FRONT.
+const RIM_FRONT = 0.45;
+// The dimmest a lit face may be, as a share of one square to the key light.
+// The lit side is lit whole: the gradient across it runs from here to 1 and
+// the dark side is exactly nothing. Mirrors SHADE_FLOOR.
+const SHADE_FLOOR = 0.5;
+// How soft the terminator is, in cosine units. Small: a hard shadow edge is
+// what puts the dark side at true black instead of a wash. Mirrors TERMINATOR.
+const TERMINATOR = 0.035;
+// How much of the body the outline takes at the silhouette. Mirrors EDGE_GIVE.
+const EDGE_GIVE = 0.9;
+// How far the specular is pulled to white. A highlight is the light, not the
+// paint. Mirrors SPECULAR_WHITE.
 const SPECULAR_WHITE = 0.65;
 // The last multiply on the colour. Mirrors MORPH_LIGHT.
 const MORPH_LIGHT = 2.0;
@@ -71,10 +85,18 @@ const MARCH_SAFETY = 0.55;
 // How tight the highlight is. A hard, small highlight is what reads as a
 // polished solid rather than as a lit cloud.
 const GLOSS = 48.0;
-// The fresnel powers the rim knob runs between: a hairline edge and a broad
-// wrapped one.
-const RIM_TIGHT = 10.0;
-const RIM_WIDE = 3.0;
+// Where the outline's band starts, in the fresnel's own units, at the two
+// ends of the rim knob.
+//
+// A power on the fresnel is the wrong shape for this: a high one is a two
+// percent hairline the upscale loses, and a low one is not a band at all but
+// a wash over the whole solid, which is what the second cut drew. A
+// smoothstep from here to the silhouette is a band of a stated width. On a
+// sphere the fraction `f` of the radius from the edge sits at a fresnel of
+// `1 - sqrt(1 - (1 - f)^2)`, so 0.53 is the outer 12 percent and 0.43 the
+// outer 18, which is the width the study was asked for.
+const RIM_NARROW = 0.53;
+const RIM_BROAD = 0.43;
 // The surface tolerance and the normal's sample spacing, both as a share of
 // how far the ray has gone, so a far pixel is not marched to a precision it
 // could not show.
@@ -112,6 +134,15 @@ fn formDistance(form: i32, point: vec3<f32>, size: f32) -> f32 {
   }
 }
 
+// Whether the ripple is part of the field this call measures. The march, the
+// shadow and the occlusion all want the displaced surface, which is the one
+// that is really there; the shading normal does not, because a facet's normal
+// has to be the face's for the planes to read as flat steps of brightness and
+// a ripple crawling over a box turns every plane into a gradient. Module
+// state rather than a parameter, because the kit's `rmNormal` calls
+// `sceneDistance` with one argument and should not have to know.
+var<private> rippled = true;
+
 // The one function the kit's march, normal, shadow and occlusion all call.
 fn sceneDistance(point: vec3<f32>) -> f32 {
   // Into the solid's own frame. The camera is still and the solid turns, so
@@ -139,6 +170,10 @@ fn sceneDistance(point: vec3<f32>) -> f32 {
   // crests are islands rather than stripes. Its amplitude is held against its
   // frequency on the CPU, so the displaced field is still something the march
   // can step over.
+  if (!rippled) {
+    return solid;
+  }
+
   let k = params.motion.w;
   let clock = params.screen.w;
   let wave =
@@ -152,7 +187,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   // No light is no solid. The gate is already in the intensity, so a packet
   // fading in fades the solid in with it and silence draws nothing.
   if (params.light.z <= 0.0) {
-    return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
   }
 
   let size = params.screen.xy;
@@ -168,57 +203,73 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   let far = length(params.camera.xyz) + reach + 0.2;
   let hit = rmMarch(camera.eye, ray, 0.1, far, i32(params.rim.w + 0.5), SURFACE, MARCH_SAFETY);
   if (!hit.hit) {
-    return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
   }
 
   let point = camera.eye + ray * hit.travel;
+  // Off for the normal and on again for everything after it: see `rippled`.
+  rippled = false;
   let normal = rmNormal(point, max(0.002, hit.travel * NORMAL_STEP));
+  rippled = true;
 
-  // The key light shapes the form: a face square to it is lit, a face turned
-  // away is black, and the solid shadows itself, which is what makes a torus
-  // read as a ring and not as a disc.
-  let diffuse = max(0.0, dot(normal, KEY_DIR));
+  // The key light shapes the form, and it does it with a hard terminator: the
+  // lit side is lit whole, from `SHADE_FLOOR` at the edge of the light to 1
+  // square to it, and the dark side is exactly nothing. That split is what
+  // makes a solid read as a solid, and it is also what keeps the ink sparse:
+  // a third of the silhouette adds no light at all, so the canvas keeps its
+  // blacks without a brightness threshold carving the modelling away, which
+  // is what the first two cuts of this study did.
+  let lambert = dot(normal, KEY_DIR);
+  let side = smoothstep(-TERMINATOR, TERMINATOR, lambert);
+  let shaped = SHADE_FLOOR + (1.0 - SHADE_FLOOR) * sqrt(max(lambert, 0.0));
   let shade = rmShadow(point + normal * 0.015, KEY_DIR, 0.02, 3.0, 24, 10.0);
   let occlusion = rmOcclusion(point, normal, params.form.w * 0.18);
+  let diffuse = side * shaped * shade * occlusion;
 
-  // The rim lights do two separate jobs, and the study needs both.
-  //
-  // The wrap is the far side of the terminator taking the rims' colour: a
-  // back light reaches round a curve, so the dark half is not black but a
-  // deep wash of the second hue. It is small, because it is a wash.
-  let right = max(0.0, dot(normal, RIM_RIGHT) * 0.5 + 0.5);
-  let left = max(0.0, dot(normal, RIM_LEFT) * 0.5 + 0.5);
-  // The stronger of the two rather than their sum, so the pair cannot add up
-  // past what one light is worth and the peak the threshold is measured
-  // against stays a true ceiling.
-  let reached = max(right * right, left * left);
-  //
-  // The outline is the fresnel edge, and it is the brightest thing on the
-  // solid after the highlight. It is what draws the form on a black frame,
-  // and it is what the canvas's memory is meant to keep: a thin hot edge
-  // sweeping as the solid turns leaves a light trail, where a filled body
+  // The outline is the fresnel edge, in the second hue, and it is the
+  // brightest thing on the solid after the highlight. It is what draws the
+  // form against a black frame and what the canvas's memory keeps: a band
+  // sweeping as the solid turns leaves a light trail where a filled body
   // leaves a smudge. The knob widens the band and strengthens it at once, so
   // a loud passage gets a broader, hotter edge without the light climbing.
-  let width = mix(RIM_TIGHT, RIM_WIDE, clamp(params.light.x, 0.0, 1.0));
-  let outline = rmFresnel(normal, ray, width) * reached;
-  let rimLight = RIM_WRAP * reached + (RIM_BASE + params.light.x) * outline;
+  let inner = mix(RIM_NARROW, RIM_BROAD, clamp(params.light.x, 0.0, 1.0));
+  let facing = smoothstep(inner, 1.0, rmFresnel(normal, ray, 1.0));
+  // The two rims stand behind the solid, so the far side takes all of the
+  // band and the near side `RIM_FRONT` of it. Wrapped rather than a plain dot
+  // product, because a back light reaches round a curve.
+  let right = max(0.0, dot(normal, RIM_RIGHT) * 0.5 + 0.5);
+  let left = max(0.0, dot(normal, RIM_LEFT) * 0.5 + 0.5);
+  let reached = max(right * right, left * left);
+  let rimLight = (RIM_BASE + params.light.x) * facing * (RIM_FRONT + (1.0 - RIM_FRONT) * reached);
 
-  // The specular passes 1 on purpose, so the bloom catches it.
+  // The body gives the edge up to the outline. A surface seen at a grazing
+  // angle reflects rather than scatters, so dimming the diffuse where the
+  // fresnel rises is what a real one does, and it is also what stops the two
+  // hues mixing into one along the band: inside the solid the key's colour
+  // owns the pixel, in the band the rim's does.
+
+  // The specular passes 1 on purpose, so the bloom catches it. It is the one
+  // term allowed near white.
   let gloss = pow(max(0.0, dot(reflect(ray, normal), KEY_DIR)), GLOSS);
   let hot = mix(params.key.rgb, vec3<f32>(1.0), SPECULAR_WHITE);
 
-  // The body is held well under the edges. A lit face covers a large part of
-  // the frame and sits still while the solid turns, so on a canvas that keeps
-  // most of itself every frame it is the one term that can sum into a flat
-  // mass; the edge and the highlight move across the frame and streak. The
-  // two colours are added rather than mixed, and only the highlight goes near
-  // white, so neither hue is diluted by the other.
+  // The two colours are added and never mixed, so neither hue is diluted by
+  // the other: the lit side is the key's hue, the outline is the rim's, and
+  // only the highlight is white.
+  let grazing = 1.0 - EDGE_GIVE * facing;
   let colour =
-    params.key.rgb * (diffuse * shade * occlusion * BODY) + params.rim.rgb * rimLight +
+    params.key.rgb * (diffuse * grazing) + params.rim.rgb * rimLight +
     hot * gloss * params.light.y;
   let light = colour * params.light.z * MORPH_LIGHT;
 
-  // The threshold last, so what enters the canvas is the lit part of the
-  // solid and the frame keeps its blacks however long the trails hold.
+  // The threshold last, and it has little left to do: the dark side is
+  // already nothing, so this only clears the fringe where the terminator and
+  // the outline fall away.
+  //
+  // The alpha channel carries whether this pixel is inside the solid. The ink
+  // blend adds the colour and leaves the target's alpha alone (`INK_BLEND` in
+  // scenes/Impl.ts), so nothing downstream sees it, and a harness reading the
+  // marched target back has the silhouette for free, which is what the
+  // brightness measurements in docs/studies/shape-morph.md are counted over.
   return vec4<f32>(light * rmGlint(light, params.light.w, params.key.w), 1.0);
 }

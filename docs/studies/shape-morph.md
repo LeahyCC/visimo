@@ -81,29 +81,40 @@ The one thing that is not a melt is the drop. `impact` cuts to the next form on
 the frame it fires, with the same hysteresis the shards read it with, so one
 drop is one cut however long the row takes to fall.
 
-The light is a key up and to the left and two rims behind at 45 degrees either
-side, and there is no fill: a face pointing at neither is black, which is what
-makes a solid read as a solid.
+The light is a key up, well to the left and a little behind the plane the
+solid sits in, and two rims behind it at 45 degrees either side. There is no
+fill. That last number on the key is the one that decides whether this reads
+as a solid at all: with the light in front of that plane every surface facing
+the camera is lit, which is most of what can be seen, and the picture is flat.
+Behind it, the terminator crosses the solid and about a third of the
+silhouette falls to nothing.
 
-Both colours are lights and not pigments. The hue is the palette's at the
-song's key, so the picture still turns with the music and with the look's
-palette, and everything else about the colour is the light's own: one
-lightness, the chroma pushed to the edge of what the screen can show, and the
-rims a third of the hue circle on from the key. The first cut read two places
-on the palette's ring instead, which on a designed ring can be the same hue
-again a little darker, and a solid lit by two of those reads as one washed-out
-colour. Only the specular goes near white; the two colours are added and never
-mixed, so neither hue is diluted by the other.
+Both colours are lights and not pigments. Each takes its hue from the palette
+at the song's key, so the picture still turns with the music and with the
+look's palette, and nothing else about the colour comes from the palette: the
+dimmest channel goes to nothing and the brightest to 1, so what lands on the
+solid is the hue at full saturation and full value. The rims sit a third of
+the hue circle away from the key. The first cut read two places on the
+palette's ring instead, which on a designed ring can be the same hue again a
+little darker, and a solid lit by two of those reads as one washed-out colour.
 
-The light is split three ways on purpose, and the split is what the canvas
-sees:
+The light is three terms, and each has one job:
 
 ```text
-body     diffuse x shade x occlusion, a twelfth of the edge   a faint haze
-wrap     the rims reaching round the terminator               a coloured dark side
-outline  a fresnel edge, the brightest but the highlight      a bright line
-specular tight, passes 1                                      a flash the bloom takes
+body      a hard terminator, then a gradient from half to full     the lit side
+outline   a fresnel band over the outer 12 to 18 percent, over 1   the form's edge
+specular  tight, passes 1                                          two white dots
 ```
+
+The body gives the edge up to the outline: a surface seen at a grazing angle
+reflects rather than scatters, so the diffuse is dimmed exactly where the
+fresnel band rises. That is what stops the two hues mixing into one along the
+edge, and it is what a real surface does.
+
+A faceted form is shaded from the face's own normal. The ripple displaces the
+surface, which moves the silhouette, but the shading normal is taken from the
+solid without it, so a box shows three flat steps of brightness rather than
+three gradients with a ripple crawling over them.
 
 ## Knobs
 
@@ -115,17 +126,17 @@ Every number the study owns, resting value first:
 - `ripple` 0.012: a displacement of the surface in world units. `highMid`
   raises it through an `envelope`, 40 ms up and 420 down (+0.035).
 - `rippleScale` 9: waves of that ripple across a world unit. `pace` adds 2.
-- `spin` 0: turns about the vertical axis, an `integrate` of `energy` at 0.22
-  turns a second, wrapping at a turn, with tension adding another 0.25.
+- `spin` 0: turns about the vertical axis, an `integrate` of `energy` at 0.04
+  turns a second, wrapping at a turn, with tension adding another 0.06.
 - `tumble` 0: turns about the horizontal axis, an `integrate` of `swell` at
-  0.08 turns a second.
+  0.015 turns a second.
 - `rim` 0.35: how much light the fresnel outline carries above `RIM_BASE`, and
-  how wide the band it gathers in is. `energy` opens it (+0.25 through a square
-  root) and `impact` throws it wide (+0.3).
+  how wide the band is. `energy` opens it (+0.25 through a square root) and
+  `impact` throws it wide (+0.3).
 - `specular` 1.4: the highlight's strength. `hardness` sharpens it (+0.6).
 - `hue` 0: where on the palette the key light's hue is taken from, as an offset
   from the song's key, which `keyHue` moves with the music.
-- `intensity` 0.06: the last multiply on the colour. See the light budget.
+- `intensity` 0.026: the last multiply on the colour. See the light budget.
 - `glint` 0.4: the share of the frame's own brightest that light must clear to
   be drawn at all. `energy` (+0.25) and `release` (+0.15) raise it.
 - `glintKnee` 0.45: how soft that edge is, as a share of the level. A harder
@@ -142,31 +153,33 @@ tension, so a build is a smaller, faster solid and not a brighter one.
 
 A solid sits still in the middle of a canvas that keeps 0.975 of itself every
 frame. A pixel it lights every frame settles at about forty times what one
-frame adds, and that one fact decides nearly every number here.
+frame adds, and that one fact decides nearly every number here. Three cuts of
+this study got it wrong in three different ways, all of them measurable:
 
-The first cut got it wrong twice, in opposite directions, and the second was
-the one that showed. Written at the intensity an ink with no canvas would use,
-it pinned its whole silhouette at the ceiling inside a second and drew a white
-blob. Pulling the light down fixed that and left a new problem: the threshold
-had been raised to carve the body away, so what reached the canvas was a lit
-cap about a sixth of the frame tall, soft edged and low in saturation, which is
-what the lead saw and sent back.
+1. Written at the intensity an ink with no canvas would use, the whole
+   silhouette pinned at the ceiling inside a second and drew a white blob.
+2. Pulling the light down fixed that and left the threshold carving the body
+   away, which drew a dark ball with a dim rim: on the adapter, under 3 percent
+   of the silhouette was over 0.3.
+3. Letting the diffuse through whole but holding it to a twelfth of the edge
+   left the lit side invisible again.
 
 What it is now:
 
-- **The body is a twelfth of the edge** (`BODY` is 0.08 against a rim carrying
-  0.82 to 1.5). A lit face covers a large part of the frame and barely moves
-  while the solid turns, so it is the one term that can sum into a flat mass;
-  the outline and the highlight are thin and sweep across the frame, so they
-  streak instead. At a groove the body settles near 0.17 of the canvas's
-  ceiling and the edge clips it, which is the long exposure of a lit wireframe
-  the study is after.
-- **`intensity` rests at 0.06**, and the gate row takes it to 0.036 in near
-  silence.
-- **`MORPH_CUT` is 0.015**, so the resting `glint` of 0.4 cuts at about a fifth
-  of a lit face rather than through it. The whole lit side passes; what the
-  threshold takes is the fringe and the near-black, which is all it needs to
-  take, because a solid is already sparse by having a dark side.
+- **The terminator does the work the threshold was doing.** The lit side is lit
+  whole, from half value at the edge of the light to full square to it, and the
+  dark side is exactly nothing. A lit solid is sparse by having a dark side.
+- **The threshold cuts at a twentieth of a lit face** (`MORPH_CUT` is 0.02, so
+  the resting `glint` of 0.4 lands there). It clears the fringe under the
+  terminator and nothing else.
+- **`intensity` rests at 0.026**, which puts the lit side across the middle of
+  the range once the canvas has summed it rather than flat at the ceiling.
+- **The spin is 0.032 turns a second at a loud passage.** The canvas remembers
+  for seconds, so a solid that turns quickly lights its own dark side with what
+  it lit a moment ago. Measured: at 0.176 turns a second the dark side of a
+  faceted form is 1 percent of the silhouette, at 0.05 it is 6, at 0.032 it is
+  19, and at 0.012 it is 36. The study takes 0.032 as the trade between a solid
+  that turns and a solid with a dark side.
 - **It marches at the ink target's own size**, not the kit's half. A bilinear
   upscale of a thin bright outline is a soft one, and this study is read by its
   edges. It costs 0.2 ms rather than 0.09.
@@ -184,11 +197,11 @@ furthest the surface reaches.
 | a full packet, nothing wound up | 0.73 | 69%                   | 20.8%          |
 | a full packet at full tension   | 0.55 | 53%                   | 12.2%          |
 
-The disc is a ceiling three times over. A form is not a disc, a torus is mostly
-hole, and what fills the outline is the body term, which is a twelfth of what
-the edge carries. Rendered against the canvas the director builds and measured
-on the adapter, the share of the frame over a tenth of the ceiling's brightness
-is about 9 percent at a groove.
+The disc is a ceiling twice over: a form is not a disc, and about a third of
+what is inside it is the dark side, which adds no light at all. Rendered
+against the canvas the director builds and measured on the adapter, the solid
+itself covers 8 to 18 percent of the frame depending on the form, and 98 to 99
+percent of everything outside it is under 0.02, trails included.
 
 There is no flash in the construction: nothing toggles a large area on or off,
 the solid's light is continuous in the size, the turn and the level, and the
@@ -230,45 +243,74 @@ is not written for one GPU. It sets no `maxFps` for the same measurement: the
 renderer takes the lowest cap among the live inks, and one here would hold a
 whole cast to 60 for an ink that costs a fifth of a millisecond.
 
+## Measured
+
+Rendered on the adapter in headless Edge, at the numbers the study resolves at
+a loud passage, with the canvas the director builds modelled as the post stack
+applies it (0.975 kept a frame, the soft ceiling, the hold at 0.13) and the
+composite's own tonemap over it. The silhouette is the alpha channel the
+shader writes, which the ink blend discards, so the counts are over the solid
+and not over a guess at where it is; each figure is the mean over thirteen
+poses across ten seconds.
+
+| target                               | sphere | rounded box | octahedron | torus | capsule |
+| ------------------------------------ | ------ | ----------- | ---------- | ----- | ------- |
+| over 0.3 inside, want 40%            | 57%    | 60%         | 61%        | 56%   | 68%     |
+| over 0.8 inside, want 10%            | 12%    | 8%          | 11%        | 9%    | 11%     |
+| dark inside, want about a third      | 39%    | 23%         | 19%        | 19%   | 23%     |
+| dark outside, want 85%               | 99%    | 99%         | 98%        | 99%   | 99%     |
+| hue gap lit to rim, want 90 degrees  | 120    | 115         | 113        | 121   | 119     |
+| saturation of the lit side, want 0.7 | 0.92   | 0.92        | 0.82       | 0.90  | 0.93    |
+
+Four of the five hold on every form. The dark side holds on a smooth one and
+falls short on a faceted one, and the reason is the canvas rather than the
+light: in the ink's own frame, before anything is carried, the dark side is 38
+to 46 percent of the silhouette on every form. A facet swaps between lit and
+dark as the solid turns, and the canvas keeps what it lit for about two and a
+half seconds, so the dark side carries the last pose's light. Slowing the turn
+recovers it (36 percent at 0.012 turns a second) at the cost of the motion;
+0.032 is where this sits.
+
+At a quiet passage the same sphere reads 56 percent over 0.3, 6 percent over
+0.8, 40 percent dark, a hue gap of 120 degrees and a saturation of 0.93. It is
+dimmer, which is what a quiet passage should be.
+
+## Each form, from one frame
+
+- **Sphere**: a cyan lit half, a hard terminator through the middle, a black
+  dark half and a magenta rim right round. Recognisable.
+- **Rounded box**: three faces at three values with softened corners, the rim
+  running the near edges. Recognisable as a box with its corners taken off.
+- **Octahedron**: a flat cyan facet, a black facet beside it, the rim drawing
+  the diamond outline. Recognisable.
+- **Torus**: the ring, the hole, the rim outlining both, the lit band across
+  the upper right. Recognisable, and the most legible of the six.
+- **Capsule**: two round ends and a straight body, cyan on the lit side and a
+  magenta rim down the other. Recognisable.
+
 ## Looked at
 
-On the reference track (`Ecstasy Of Soul`), in the cast the lead used: Curl
-drift under it, Clean glass over it, at 2560 by 1440 in full view, in headless
-Edge on the real adapter, at a quiet passage (30 s) and through the loud one
-after the first drop (108 s).
+On the reference track in the cast the lead used, Curl drift under it and
+Clean glass over it, at 2560 by 1440 in full view, in headless Edge on the
+real adapter, at a quiet passage (30 s) and through the loud one after the
+first drop (108 s). No WGSL message and no validation message in the console
+at either.
 
-At the quiet passage the section's form is a capsule, about 60 percent of the
-short side tall. It reads as a lit object: a magenta outline down both sides
-where the rims gather at the silhouette, a blue body with the terminator
-falling through it, two white specular flashes on the near shoulder, and black
-everywhere outside it. The trail is a soft second copy of the outline, lifted
-and bent by the flow, which is the long exposure the references describe.
-
-At the loud passage the form is an octahedron, and the facets read: three
-planes at three different values, magenta edges between them, a hot specular
-crossing one plane, and a smoke trail drawn upward by the curl. The two hues
-are clearly two hues rather than one family, which was the point of taking the
-light's colour from the key's hue and turning the rim a third of the circle
-rather than reading the palette's ring twice.
-
-Against the references: the McNamara setup is there (a key that shapes, a pair
-of rims that outline, nothing filling the shadows, a black frame), the weld
-from the Quilez article shows through the middle of a melt, and the Shadertoy
-morphs' point, that character survives the interpolation, holds because the mix
-is welded rather than cross-faded. What those references do not have is the
-canvas's memory, and that is still the thing this study is tuned around.
-
-No WGSL message and no validation message appears in the console at either
-passage.
+Against the references: the McNamara gel setup is what is on screen, a key
+that shapes and rims that outline with nothing filling the shadows and a black
+frame; the weld from the Quilez article shows through the middle of a melt;
+and the Shadertoy morphs' point, that character survives the interpolation,
+holds because the mix is welded rather than cross-faded. What none of those
+references has is a canvas that remembers for seconds, and that is the thing
+this study is tuned around.
 
 The forms other than the two the track happened to draw were looked at through
-a harness that renders the shader on the adapter and models the canvas's memory
-on the CPU, because the bench's synthetic packet never changes `section` and so
-never leaves the form the first hash gives it. That is worth fixing in the
-bench one day; it is not this study's file to change.
+the harness above, because the bench's synthetic packet never changes
+`section` and so never leaves the form the first hash gives it. That is worth
+fixing in the bench one day; it is not this study's file to change.
 
 One thing seen while looking, which is not this study's: with the study at
 presence 0 and nothing else drawing, a single green texel sits at the exact
-centre of the canvas, and the bloom and the split turn it into a coloured cross
-once anything bright is on screen. It is there with the ink off, so it belongs
-to the stack or the canvas rather than here.
+centre of the canvas, and the bloom and the split turn it into a coloured
+cross once anything bright is on screen. It is there with the ink off, so it
+belongs to the stack or the canvas rather than here.

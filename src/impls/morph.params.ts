@@ -100,56 +100,55 @@ export const HALF_VIEW =
  */
 export const MORPH_LIGHT = 2.0
 
-/** What the fresnel outline carries at a `rim` of 0, so the edge never goes out. */
-export const RIM_BASE = 0.6
-
 /**
- * What the far side of the terminator keeps of the rims' colour. A back light
- * reaches round a curve, so the dark half is a deep wash of the second hue
- * rather than pure black, and the form still reads there.
+ * What the fresnel outline carries at a `rim` of 0. Over 1 on purpose: the
+ * outline is the brightest thing on the solid after the highlight, it is what
+ * draws the form against a black frame, and the bloom has to catch it.
  */
-export const RIM_WRAP = 0.22
+export const RIM_BASE = 1.8
 
 /**
- * How much of the light a face square to the key light carries, against the
- * edge and the highlight.
+ * How much of the outline reaches the side the key light owns. The two rims
+ * stand behind the solid, so the far side takes all of the band, but an
+ * outline that stops dead at the terminator is half an outline.
+ */
+export const RIM_FRONT = 0.45
+
+/**
+ * The dimmest a lit face may be, as a share of one square to the key light.
  *
- * It is the number that decides what the canvas remembers. A lit face covers
- * a large part of the frame and barely moves while the solid turns, so on a
- * canvas that keeps most of itself every frame it is the one term that can
- * sum into a flat mass; the outline and the highlight sweep across the frame
- * and leave trails instead. Holding the body at a fifth of what the edge
- * carries is what makes the trail read as a long exposure of a lit edge and
- * not as a smudge.
+ * The lit side is lit whole: the gradient across it runs from here to 1 and
+ * the dark side is exactly nothing. That split is the whole of how this reads
+ * as a solid, and it is also what keeps the ink sparse, so the brightness
+ * threshold no longer has to do it. The first two cuts of this study had the
+ * threshold cutting through the lit side instead, and drew a dark ball with a
+ * dim rim on it.
  */
-export const BODY = 0.08
+export const SHADE_FLOOR = 0.5
 
-/**
- * How much of the rim light a surface square to the camera keeps, the rest
- * gathering at the silhouette. A pure fresnel rim is nothing at all on a
- * faceted form, because a facet's normal does not change across it, so the
- * floor is what draws the back planes of a box or an octahedron in the second
- * hue while a sphere still gets an edge that glows.
- */
-export const RIM_FLOOR = 0.3
+/** How soft the terminator is, in cosine units. A hard edge is what puts the dark side at black. */
+export const TERMINATOR = 0.035
 
 /** How far the specular is pulled to white. A highlight is the light, not the paint. */
 export const SPECULAR_WHITE = 0.65
 
 /**
- * What a light's colour is held at in OKLCH: bright, and as saturated as the
- * screen can show at that lightness.
+ * What a light's colour is: a hue from the palette, and nothing else.
  *
  * The palette is a ring of pigments, and reading two places on it gave two
- * pastels that often landed in the same family (the aurora palette's green
- * and its yellow-green), which on a solid lit by both read as one washed-out
- * colour. A light is a gel, not a pigment: it takes its hue from the palette
- * at the song's key and nothing else, and the chroma is pushed to the edge of
- * the gamut, so the two lights are two hues and the solid is lit rather than
- * tinted. `oklchToSrgb` brings the chroma in where the screen cannot hold it,
- * keeping the hue and the lightness.
+ * pastels that often landed in the same family, which on a solid lit by both
+ * read as one washed-out colour. A light is a gel. It takes its hue from the
+ * palette at the song's key, is then pushed to the edge of what sRGB can show
+ * at that hue (the dimmest channel goes to nothing) and scaled so the
+ * brightest is 1. What lands on the solid is the hue at full value and full
+ * saturation, and only the specular is allowed anywhere near white.
+ *
+ * The lightness and chroma below only pick the ratios the hue is read at;
+ * saturating afterwards is what makes the number that matters, the HSV
+ * saturation of a lit pixel, come out at 1 rather than at the 0.64 the first
+ * cut measured.
  */
-export const LIGHT_LIGHTNESS = 0.72
+export const LIGHT_LIGHTNESS = 0.62
 export const LIGHT_CHROMA = 0.3
 
 /**
@@ -169,23 +168,19 @@ export const RIM_TURN_DEGREES = 120
  * Where a `glint` of 1 cuts, as a share of the brightest the ink can be this
  * frame (`morphPeak`).
  *
- * The peak counts the specular and both rim lights on top of a lit face, so a
- * face square to the key light sits near a quarter of it. That is the number
- * this is set against: at the study's resting `glint` of 0.4 the cut lands at
- * 0.14 of the peak, which is under a lit face and over the fill, so the
- * terminator survives as a gradient and the near-black half of the solid never
- * reaches the canvas; at the 0.8 a full packet resolves it lands at 0.28,
- * above a lit face, and what is left is the rim, the specular and the
- * brightest facets. The loudest moment is the one with the most black in it,
- * which is the whole point of a threshold on a canvas that remembers.
+ * It is small, and the reason is that the threshold is no longer what makes
+ * this ink sparse. A lit solid is sparse by having a dark side: the
+ * terminator puts a third of the silhouette at exactly nothing, and the
+ * canvas keeps its blacks from that alone. What is left for the threshold is
+ * the fringe, where the terminator and the outline fall away into values too
+ * dim to be anything but a haze once the canvas has summed them.
  *
- * It was set by looking, on the adapter, at the study soloed in the bench over
- * a quiet passage, a build and a drop. At a twentieth of this the lit half of
- * the solid summed into a flat white disc inside a second, which is Melt's
- * fault in miniature; at three times it there was nothing on screen but a
- * highlight.
+ * At the resting `glint` of 0.4 the cut lands near a twentieth of a lit face
+ * (`morphLitFace`), and at the 0.8 a full packet resolves, near a tenth. The
+ * first two cuts of this study had it at 0.35 and 0.045 of the peak, which
+ * put the cut above a lit face and left a dark ball with a dim rim on it.
  */
-export const MORPH_CUT = 0.015
+export const MORPH_CUT = 0.02
 
 /**
  * Where the knob stops being a threshold, the same reasoning the fractal's
@@ -456,13 +451,21 @@ export function morphLights(features: Float32Array, params: MorphParams): { key:
   }
 }
 
-/** One light: a hue, at the lightness and chroma a gel has, brightest channel at 1. */
+/**
+ * One light: the hue at full saturation and full value. The dimmest channel
+ * is taken to nothing, which is what saturation means, and the brightest is
+ * scaled to 1, which is what every other ink's colour does so that
+ * `intensity` means the same thing in every key.
+ */
 function gel(hue: number): Rgb {
-  const [red, green, blue] = oklchToSrgb({ l: LIGHT_LIGHTNESS, c: LIGHT_CHROMA, h: hue })
-  const peak = Math.max(red, green, blue)
-  // Written so that a hue the conversion could not place falls through to
-  // white rather than to nothing.
-  return peak > 1e-4 ? [red / peak, green / peak, blue / peak] : [1, 1, 1]
+  const rgb = oklchToSrgb({ l: LIGHT_LIGHTNESS, c: LIGHT_CHROMA, h: hue })
+  const low = Math.min(...rgb)
+  const high = Math.max(...rgb)
+  const span = high - low
+  // Written so that a hue the conversion could not place, or a grey, falls
+  // through to white rather than to nothing.
+  if (!(span > 1e-4)) return [1, 1, 1]
+  return [(rgb[0] - low) / span, (rgb[1] - low) / span, (rgb[2] - low) / span]
 }
 
 /**
@@ -479,10 +482,18 @@ function gel(hue: number): Rgb {
 export function morphPeak(params: MorphParams, key: Rgb, rim: Rgb): number {
   const keyLuma = luminance(key)
   const specular = keyLuma * (1 - SPECULAR_WHITE) + SPECULAR_WHITE
-  const body = keyLuma * BODY
-  const edge = (RIM_WRAP + RIM_BASE + params.rim) * luminance(rim)
-  return params.intensity * MORPH_LIGHT * (body + edge + params.specular * specular)
+  const edge = (RIM_BASE + params.rim) * luminance(rim)
+  return params.intensity * MORPH_LIGHT * (keyLuma + edge + params.specular * specular)
 }
+
+/**
+ * What a face square to the key light is worth, which is the modelling. The
+ * threshold is set against this and has to stay well under it: everything
+ * from `SHADE_FLOOR` of this up to it is the lit side, and all of it has to
+ * reach the canvas.
+ */
+export const morphLitFace = (params: MorphParams, key: Rgb) =>
+  luminance(key) * params.intensity * MORPH_LIGHT
 
 /** The luminance the ink's own light is cut at this frame, 0 for no cut. */
 export function morphGlintLevel(params: MorphParams, key: Rgb, rim: Rgb): number {

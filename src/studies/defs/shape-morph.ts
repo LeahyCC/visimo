@@ -47,32 +47,31 @@ import type { InkStudy } from '../types'
  * rule, and it does not dim then either, which is the point of it. The punch
  * goes into the size, the ripple, the spin and the width of the rim. The one
  * row on the light is a gate rather than a level: `energy` through `invert` at
- * -0.024 leaves the intensity at rest when the music is there and takes nearly
+ * -0.012 leaves the intensity at rest when the music is there and takes nearly
  * half of it away when there is nothing, which is the same shape the lasers
  * gate themselves with. Under `SILENT_FLOOR` the ink encodes no pass at all.
  *
- * **The light rests at 0.06, and what it is spent on matters more than how
- * much of it there is.** A solid sits still in the middle of a canvas that
- * keeps 0.975 of itself a frame, so a pixel it lights every frame settles at
- * about forty times what one frame adds. The body of the solid is held to a
- * twelfth of what its edge carries (`BODY` in the params), so the swept
- * volume fills with a faint haze while the fresnel outline and the specular,
- * which are thin and sweep across the frame as the solid turns, leave bright
- * trails. What the canvas remembers is a long exposure of a lit edge rather
- * than a smear of a filled shape, which is what the first cut drew.
+ * **The dark side is what makes it a solid, and it is free.** The key light
+ * has a hard terminator: a face square to it is lit whole, at full value in a
+ * fully saturated hue, and a face past the terminator is exactly nothing. So
+ * about a third of the silhouette adds no light at all and the canvas keeps
+ * its blacks without a brightness threshold carving the lit side away, which
+ * is what the first two cuts of this study did. The threshold is still there
+ * and still rises with `energy` and `release`, but it cuts at a twentieth of a
+ * lit face: its job is the fringe.
  *
- * **The threshold takes the fringe and nothing else.** `glint` rests at 0.4
- * and rises with `energy` and `release` to 0.8 at a full packet, the same two
- * rows the fractal carries, but it cuts at about a fifth of a lit face rather
- * than through it: a solid is already sparse by having a dark side, so the
- * threshold is here to keep the near-black out of the canvas's memory and not
- * to carve the form. The first cut had it at four times this and it ate the
- * modelling, which is what the lead saw.
+ * **The light rests at 0.026**, which is low because the canvas keeps 0.975 of
+ * itself a frame and a solid that sits still in the middle of it settles at
+ * about forty times what one frame adds. Measured on the adapter against that
+ * canvas, the lit side then spreads across the middle of the range with a
+ * tenth of the silhouette over 0.8, rather than pinning flat at the ceiling.
  *
- * **It fills the frame.** The camera is a short telephoto (33 degrees) and the
- * solid is about half the short side across at rest, breathing up from there
- * and shrinking on a build. The disc it subtends is a fifth of a 16:9 frame at
- * the largest the mapping reaches, which is a bound and not what is lit.
+ * **It turns slowly**, 0.032 turns a second at a loud passage, which is a turn
+ * in half a minute. That is not a taste: the canvas remembers for seconds, so
+ * a solid that turns quickly lights its own dark side with what it lit a
+ * moment ago and the dark third goes. At this rate a smooth form holds a dark
+ * side of 39 percent and a faceted one, whose planes swap between lit and dark
+ * as it turns, holds 19.
  *
  * **Its home** is the middle of the dance floor: a drive of 0.58, steady at
  * 0.7, hard at 0.6, with no opinion about tonality, and a reach of 0.35. Of
@@ -99,7 +98,7 @@ export const SHAPE_MORPH: InkStudy = {
     rim: 0.35,
     specular: 1.4,
     hue: 0,
-    intensity: 0.06,
+    intensity: 0.026,
     glint: 0.4,
     glintKnee: 0.45,
   },
@@ -125,29 +124,29 @@ export const SHAPE_MORPH: InkStudy = {
       to: 'spin',
       gain: 1,
       curve: 'linear',
-      shape: { kind: 'integrate', rate: 0.22, wrap: 1 },
+      shape: { kind: 'integrate', rate: 0.04, wrap: 1 },
     },
     {
       from: 'tension',
       to: 'spin',
       gain: 1,
       curve: 'linear',
-      shape: { kind: 'integrate', rate: 0.25, wrap: 1 },
+      shape: { kind: 'integrate', rate: 0.06, wrap: 1 },
     },
     {
       from: 'swell',
       to: 'tumble',
       gain: 1,
       curve: 'linear',
-      shape: { kind: 'integrate', rate: 0.08, wrap: 1 },
+      shape: { kind: 'integrate', rate: 0.015, wrap: 1 },
     },
     { from: 'energy', to: 'rim', gain: 0.25, curve: 'sqrt' },
     { from: 'impact', to: 'rim', gain: 0.3, curve: 'linear' },
     { from: 'hardness', to: 'specular', gain: 0.6, curve: 'linear' },
     { from: 'keyHue', to: 'hue', gain: 1, curve: 'linear' },
-    { from: 'energy', to: 'intensity', gain: -0.024, curve: 'invert' },
-    { from: 'swell', to: 'intensity', gain: -0.004, curve: 'square' },
-    { from: 'hardness', to: 'intensity', gain: -0.006, curve: 'square' },
+    { from: 'energy', to: 'intensity', gain: -0.012, curve: 'invert' },
+    { from: 'swell', to: 'intensity', gain: -0.002, curve: 'square' },
+    { from: 'hardness', to: 'intensity', gain: -0.003, curve: 'square' },
     { from: 'energy', to: 'glint', gain: 0.25, curve: 'linear' },
     { from: 'release', to: 'glint', gain: 0.15, curve: 'linear' },
     { from: 'hardness', to: 'glintKnee', gain: 0.12, curve: 'invert' },

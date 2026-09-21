@@ -88,9 +88,13 @@ describe('how the library shares the screen over twenty real tracks', () => {
     expect(found.get('ribbon')?.all ?? 0, tableOf(found)).toBeLessThanOrEqual(35)
   })
 
-  it('leaves no ink in more than 60 percent of casts', () => {
+  // Dust and caustics sit at about 40 and are expected to for now: they are the
+  // quiet end's inks, three of the six moments are quiet, and the quiet end of
+  // the library is thin. The soft studies still to come are what brings them
+  // down, and the bar is set above them until then and not at them.
+  it('leaves no ink in more than 45 percent of casts', () => {
     const crowded = inks
-      .filter((study) => (found.get(study.id)?.all ?? 0) > 60)
+      .filter((study) => (found.get(study.id)?.all ?? 0) > 45)
       .map((study) => study.id)
     expect(crowded, tableOf(found)).toEqual([])
   })

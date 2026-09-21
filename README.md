@@ -626,7 +626,7 @@ brightness = (1 - (det / BAND)^2), clamped at 0, ^ sharpness, less CUT
 
 #### The halo
 
-`impls/HaloInk.ts` with `shaders/halo.wgsl` and the numbers in `impls/halo.params.ts`. One glow about the middle of the canvas that breathes with the music: the ink the director can always fall back on, because it suits every moment and every character. That is exactly why it is modest everywhere. It is a companion to other inks and never the whole picture, and it is the one ink that sits where the canvas piles light up. It is one quad sized to the glow, six vertices, and a 12 float uniform made once, added into the shared target through `INK_BLEND` so presence scales the light.
+`impls/HaloInk.ts` with `shaders/halo.wgsl` and the numbers in `impls/halo.params.ts`. One glow about the middle of the canvas that breathes with the music. It was first written as the ink the director can always fall back on, with the middle of the character space, a reach of 1 and a fit of a half for every moment, and it was in 53 percent of the casts the twenty measured tracks can be given, for the reason the Ribbon was (see "Measured"). It now has a home at the soft, tonal, slower end (the ambient, downtempo, folk and orchestral tracks), a reach of 0.3, a full fit for intro, rest and outro, 0.4 for a groove or a build and 0.15 for a drop, where a glow at the middle is a smaller thing than the hit. It is modest everywhere. It is a companion to other inks and never the whole picture, and it is the one ink that sits where the canvas piles light up. It is one quad sized to the glow, six vertices, and a 12 float uniform made once, added into the shared target through `INK_BLEND` so presence scales the light.
 
 ```text
 d = distance from the middle in pixels / (radius x short side)      round on any canvas
@@ -986,34 +986,34 @@ type Study = {
 
 A mapping row reads what a preset's does, plus one field that is not in the packet. `tension` is the song winding up and is packet row 47, but the resolver still takes it as an argument, so the study bench can wind it by hand and the director can pass on the value it chose by. `presence` is what the director fades a study by, 0 to 1; a flow or an ink is handed it and decides for itself what fading in means. Two things are faded by the resolver instead. The ribbon is drawn by the post stack, which knows nothing of presence, so its intensity is scaled here. And looks are blended by presence, normalised, so one look alone is wholly itself and two at a half each land halfway. A stage only one of them has (grain, the split, the grade) fades by its strength knobs, `LOOK_STRENGTH_KNOBS`, so it thins to nothing before it switches off, while its other knobs are averaged only among the looks that have the stage. Each strength knob has a neutral value, `LOOK_NEUTRAL`, which the looks without the stage count as: 0 for all of them but `grade.saturation`, which rests at 1, so a look leaving with its colour drained heads back to untouched and never below what it had, where a fade to 0 would drain it toward grey on the way out and snap it back when the stage switched off.
 
-| Study             | Kind | Implementation | Moments | Cost   |
-| ----------------- | ---- | -------------- | ------- | ------ |
-| `lazy-fluid`      | flow | `fluid`        | I G R O | medium |
-| `turbulent-fluid` | flow | `fluid`        | G D     | medium |
-| `implode`         | flow | `analytic`     | B       | cheap  |
-| `radial-burst`    | flow | `analytic`     | D       | cheap  |
-| `curl-drift`      | flow | `analytic`     | I R O   | cheap  |
-| `beat-pump`       | flow | `analytic`     | G D     | cheap  |
-| `tunnel`          | flow | `analytic`     | G B     | cheap  |
-| `dye-plumes`      | ink  | `dye`          | I G R   | cheap  |
-| `ribbon`          | ink  | `ribbon`       | g B d   | cheap  |
-| `fractal-glints`  | ink  | `fractal`      | G D     | heavy  |
-| `riser-streaks`   | ink  | `streaks`      | B       | cheap  |
-| `shards`          | ink  | `shards`       | D       | cheap  |
-| `dust`            | ink  | `dust`         | I R O   | cheap  |
-| `caustics`        | ink  | `caustics`     | I R O   | cheap  |
-| `halo`            | ink  | `halo`         | any     | cheap  |
-| `beat-rings`      | ink  | `rings`        | G B     | cheap  |
-| `spectrum-ring`   | ink  | `spectrum`     | G       | cheap  |
-| `sparks`          | ink  | `sparks`       | G D     | cheap  |
-| `warm-soft`       | look | `look`         | I G R O | cheap  |
-| `clean-glass`     | look | `look`         | G b D   | cheap  |
-| `hard-clean`      | look | `look`         | G b D   | cheap  |
-| `squeeze`         | look | `look`         | B       | cheap  |
-| `impact-flash`    | look | `look`         | D       | cheap  |
-| `film`            | look | `look`         | I R O   | cheap  |
+| Study             | Kind | Implementation | Moments   | Cost   |
+| ----------------- | ---- | -------------- | --------- | ------ |
+| `lazy-fluid`      | flow | `fluid`        | I G R O   | medium |
+| `turbulent-fluid` | flow | `fluid`        | G D       | medium |
+| `implode`         | flow | `analytic`     | B         | cheap  |
+| `radial-burst`    | flow | `analytic`     | D         | cheap  |
+| `curl-drift`      | flow | `analytic`     | I R O     | cheap  |
+| `beat-pump`       | flow | `analytic`     | G D       | cheap  |
+| `tunnel`          | flow | `analytic`     | G B       | cheap  |
+| `dye-plumes`      | ink  | `dye`          | I G R     | cheap  |
+| `ribbon`          | ink  | `ribbon`       | g B d     | cheap  |
+| `fractal-glints`  | ink  | `fractal`      | G D       | heavy  |
+| `riser-streaks`   | ink  | `streaks`      | B         | cheap  |
+| `shards`          | ink  | `shards`       | D         | cheap  |
+| `dust`            | ink  | `dust`         | I R O     | cheap  |
+| `caustics`        | ink  | `caustics`     | I R O     | cheap  |
+| `halo`            | ink  | `halo`         | I g b R O | cheap  |
+| `beat-rings`      | ink  | `rings`        | G B       | cheap  |
+| `spectrum-ring`   | ink  | `spectrum`     | G         | cheap  |
+| `sparks`          | ink  | `sparks`       | G D       | cheap  |
+| `warm-soft`       | look | `look`         | I G R O   | cheap  |
+| `clean-glass`     | look | `look`         | G b D     | cheap  |
+| `hard-clean`      | look | `look`         | G b D     | cheap  |
+| `squeeze`         | look | `look`         | B         | cheap  |
+| `impact-flash`    | look | `look`         | D         | cheap  |
+| `film`            | look | `look`         | I R O     | cheap  |
 
-A capital is a strong fit and reads 1, a lower case one about a half, and a letter that is absent reads 0. `any` is every moment at a half, which is the halo: a study written for a moment beats it there.
+A capital is a strong fit and reads 1, a lower case one about a half, and a letter that is absent reads 0. A fit that is none of these is rounded to the nearest for the table (the Ribbon's drop of 0.7 reads `d`, the halo's groove and build of 0.4 read `g b`); `registry.ts` has the number.
 
 **Film** is the look for the quiet end of a song, the one place the other looks have nothing to say: heavy grain, a resting vignette and a slight gate weave, for the intro, the rest and the outro of a soft, slow track. It enables bloom, tonemap, grain and grade, and costs what a look costs, which is nothing beyond the composite: no new pass, no new texture, and the weave is a shifted read of the picture the composite already samples.
 
@@ -1038,18 +1038,18 @@ The swing is about 2.5 percent of the scale at the rim at 128 BPM, 36 px at 2560
 
 **Tunnel** is the flow for the groove and the build of a steady track: `radial` at a small constant with `falloff` 0, so the speed is proportional to the radius and the picture streams out of the middle and off the edge. It rests at 0.04 field widths a second at the rim, 100 pixels a second at 2560 wide, loudness adds 0.04, and tension is the study: it adds 0.15, so at the top of a build the rim moves at 0.23, which is under half of implode's pull at the same point. It is not still at a silent packet, for curl drift's reason. A little swirl keeps it from being a dead straight zoom: 0.002 turns a second at rest, about 10 degrees at the rim, a chord change turns it further through `harmonicChange` (0.012), and tension winds it a little (0.008).
 **It goes outward, and the catalogue says inward.** The canvas keeps its history, so the light is drawn where the inks are, near the middle, and the history is what moves. Outward is light leaving where it was drawn and rushing past, which is what flying forward looks like; inward is light shrinking away from where it was drawn. Every cast the director builds already zooms outward at about 9 percent a second, so an inward tunnel would first cancel that and sit still at a radial of about -0.05 before it moved the picture the other way, where an outward one adds to it. Outward flow leaves through the rim and inward flow piles the history up in the middle, where the halo already piles light. And a build that speeds up outward runs straight into the radial burst, where implode is already the inward build. The direction is one sign on the radial rows if it looks wrong on the adapter.
-It takes the early part of a build on a steady track, because a build still carries a groove weight while tension climbs and the tunnel suits both: on the scripted song it is the flow of the build for all three characters. Implode keeps the build once it weighs about three quarters or more of the moment, on a lo-fi or a hardstyle track, and a house track, which is steady and sits at the middle of everything else, never has it. Its home is steady and nothing else, and its reach is 0.5. It cannot have the dye under it either. `tunnel.test.ts` holds the direction, the plain zoom, the silent packet, the tension row and the director's pick.
+It takes the early part of a build on a steady track, because a build still carries a groove weight while tension climbs and the tunnel suits both: on the scripted song it is the flow of the build for the house and hardstyle characters, and the lo-fi one has it for a second before implode takes over. Implode keeps the build once it weighs about three quarters or more of the moment on a lo-fi track, and a house track, which is steady and sits at the middle of everything else, never has it (nor did the hardstyle one on the scripted song). Its home is steady and nothing else, and its reach is 0.5. It cannot have the dye under it either. `tunnel.test.ts` holds the direction, the plain zoom, the silent packet, the tension row and the director's pick.
 
-**On the scripted song** (`director/song.fixture.ts`, the flow each part gets):
+**On the scripted song** (`director/song.fixture.ts`, the flow each part spends most of its time on; a cast lands a few seconds after its part begins, since the extractor confirms a section late, so the first seconds of a part still hold the last one's flow):
 
 | Part         | Lo-fi      | House      | Hardstyle  |
 | ------------ | ---------- | ---------- | ---------- |
 | intro        | lazy fluid | lazy fluid | lazy fluid |
-| groove       | lazy fluid | tunnel     | beat pump  |
-| build        | tunnel     | tunnel     | tunnel     |
+| groove       | lazy fluid | beat pump  | beat pump  |
+| build        | implode    | tunnel     | tunnel     |
 | drop         | turbulent  | beat pump  | beat pump  |
 | breakdown    | lazy fluid | lazy fluid | curl drift |
-| groove again | lazy fluid | tunnel     | beat pump  |
+| groove again | lazy fluid | beat pump  | beat pump  |
 | outro        | lazy fluid | lazy fluid | beat pump  |
 
 Before the two, house had lazy fluid for both grooves and hardstyle turbulent fluid; every build was implode and every drop turbulent. A hardstyle groove is the pump's and a lo-fi one never is: `beatPump.test.ts` plays the song at three characters and counts the frames.
@@ -1099,7 +1099,7 @@ The rules, each with a test in `director.test.ts` (the two about intro and outro
 - **A build beginning is a signal.** A build has no boundary of its own until it is six seconds old, and a riser creeps in with no novelty spike; on the first real track the build's own section was confirmed after the drop it led to. So `tension` rising through 0.6 re-casts the way a novelty spike does, once per build, and is heard even while a drop's cast is held, since a build starting is the drop's section over. It sits at 0.6 because that is where the build already outweighs the groove; tried at 0.4 it fired while the sitting cast still won, and was spent.
 - **A drop that fired is a whole drop.** The packet's `tension` and `release` read 1 when a build or a drop is wholly there, which is the estimator's doing; see "What is published" under the moment rows. It matters here because read as raw evidence a real drop was four tenths drop and six tenths groove, so a study written for drops alone scored 0.4 against about 1 for one that suits groove and drop both, and was never cast, on a real track or on the scripted song. A drop that has fired also ends the build: tension is slow to let go and is still high on the frame of the impact, so the build's weight is cut by the drop's.
 - **The chosen cast's canvas carries.** A pinned cast brings its own canvas. A cast the director builds has no file to read one from, and used to get the post stack's defaults, where `feedback.carry` is 0: no flow moved the picture at all, the fluid showed only through its dye, and a flow that draws nothing, as implode and radial burst do, did nothing. It now draws on `carriedCanvas()`, Drift's numbers, which were tuned by eye for a dye ink and the ribbon, plus one row that shortens the trails as tension rises. The study bench draws on the same one.
-- **The first thirty seconds.** Until the character has settled, every study is placed the same (`UNHEARD_PLACE`, 1, the best a closeness can be), so the moment fit and the tie-break decide the opening cast and the track drifts into its own family as the reading settles. Half settled is half of each. The score used to read a study's `reach` here, which handed the opening of every track to whichever study had the widest welcome, and a sitting member then kept the seat on its margin: the Ribbon, and the halo and the spectrum ring beside it, opened nearly every track. A wide reach says a study can sit anywhere, not that it is wanted there. On a silent or neutral start the moment reads half intro and half groove, and the opening cast is lazy fluid, dye plumes, caustics, beat rings and warm soft, where it was lazy fluid, dye plumes, halo, the spectrum ring and warm soft. The beat rings draw nothing until a beat is believed, so what shows is the dye and the caustics; it is there because it ties the dust on the moment and sorts first. On the scripted song the first twenty seconds are lazy fluid, dye plumes, dust, caustics and warm soft for all three characters, where they were curl drift, halo, dust, caustics and warm soft: the flow has a groove half to play with as well as an intro, and curl drift has none.
+- **The first thirty seconds.** Until the character has settled, every study is placed the same (`UNHEARD_PLACE`, 1, the best a closeness can be), so the moment fit and the tie-break decide the opening cast and the track drifts into its own family as the reading settles. Half settled is half of each. The score used to read a study's `reach` here, which handed the opening of every track to whichever study had the widest welcome, and a sitting member then kept the seat on its margin: the Ribbon, and the halo and the spectrum ring beside it, opened nearly every track. A wide reach says a study can sit anywhere, not that it is wanted there. On a silent or neutral start the moment reads half intro and half groove, and the opening cast is lazy fluid, dye plumes, halo, beat rings and warm soft, where it was lazy fluid, dye plumes, halo, the spectrum ring and warm soft. The beat rings draw nothing until a beat is believed, so what shows is the dye and the halo; it is there because it ties the caustics and the dust on the moment and sorts first. On the scripted song the first twenty seconds are lazy fluid, dye plumes, halo, caustics and warm soft for all three characters, where they were curl drift, halo, caustics, dust and warm soft: the flow has a groove half to play with as well as an intro, and curl drift has none.
 - **A study at presence 0 is not in the output at all**, so the renderer never touches one that is off.
 - **A pinned cast turns the director off.** Given one it returns that cast at presence 1 and nothing else, and still passes tension through. It still reads the character and the moment, since a host saves the character for the next play of the track and the overlay shows both. The stage pins at its own level rather than through this option, because a host builds a fresh cast object for every knob it changes and rebuilding the director around each of those would restart the reading every time a slider moved.
 - **An intro is where the track is, not how quiet it is.** It used to be a quiet passage early on, so a track that opens at full energy, which is most heavy music, had no intro and its opening read as groove. Now it is read off how much has been heard and how many sections have been confirmed, and it is taken out of groove as well as rest: all of the quiet and half of the room groove would have had (`INTRO_LOUD_SHARE`), held for the first 8 seconds and gone by 30, since intros run from about 8 seconds to about 30 and the clock has to end one that never confirms a change. The sections end it sooner: the first confirmed change is the sign the track has started, and a passage that comes back is a certain one and cuts it off outright. Both are eased and not stepped, so nothing jumps as a boundary is confirmed. Only half of a loud opening, because every study made for an intro was made for a quiet one and dims as the music gets loud: read as all intro, a riff at full energy was cast as curl drift and dust for its first half minute, an empty picture under the loudest part of the track. At a half, a quiet opening is still curl drift and a loud one gets a full picture until its first section brings the track's own cast. Build and drop are never cut by it, so a track that opens on a build or fires an impact in its first seconds still reads one. It counts sound only, so silence before the first note is not intro time used up. With a playhead and a duration, the spans scale by the track's length against a typical three minutes, down to a quarter, so a one minute track has a count-in and not thirty seconds of intro; and the clock is then the later of the seconds heard and the position, so a seek into the middle of a track is not read as its opening.
@@ -1131,7 +1131,7 @@ node scripts/character-table-browser.mjs         # the same table off a real Ana
 
 The list is an argument or `scripts/tracks.local.txt`, which is git-ignored, so nobody's library ends up in the repository. `character-table-browser.mjs` is the slow path that keeps the fast one honest: it drives the demo in headless Edge and reads `window.visimo.features()` while the track plays. Over four tracks the two agree on `pace`, `weight` and `hardness` to within 0.03 on three of them, and disagree by 0.2 on `weight` for one, which is the one reading to take from the browser and not from Node.
 
-The twenty characters that came out of it are in `src/director/tracks.fixture.ts`, and `director.test.ts` holds the library to them: every study has to win a seat for at least one of the twenty at one of the six moments, and a groove has to cast at least eight of the twenty differently. Before this, a groove cast three of them differently and metal, folk and ambient all got the same picture. `fairness.test.ts` holds how often each study is cast over the same twenty, at every moment and both stages of the reading: the Ribbon at most 35 percent, no ink over 60, every ink cast at least once for a known track. The share table is under "Measured".
+The twenty characters that came out of it are in `src/director/tracks.fixture.ts`, and `director.test.ts` holds the library to them: every study has to win a seat for at least one of the twenty at one of the six moments, and a groove has to cast at least eight of the twenty differently. Before this, a groove cast three of them differently and metal, folk and ambient all got the same picture. `fairness.test.ts` holds how often each study is cast over the same twenty, at every moment and both stages of the reading: the Ribbon at most 35 percent, no ink over 45, every ink cast at least once for a known track. The share table is under "Measured".
 
 The options, all of them on the constructor:
 
@@ -1340,7 +1340,7 @@ The two-step is the hard case because nothing in it plays on every beat: the kic
 
 The analytic flow was measured separately, on Windows in headless Edge against a real NVIDIA Blackwell WebGPU adapter (RTX 5080), at 2560 by 1440, playing the demo's own track under Auto for three minutes: 720 half-second samples of `data-frame-ms`. The 239 samples on which the cast held Implode read 6.670 ms on average and the 481 without it read 6.673, both sitting at the animation loop's own cap of about 6.67 ms, so nothing left the cap and the flow cost nothing measurable. `data-detail` read `512 fluid + 128 analytic` through the change, which is the mismatched-size blend running, and the console carried no WGSL or validation message on any frame. What that run also says is that the moment rows are still calibrated for synthetic structure: over the whole three minutes `tension` never passed 0.49 and `release` never passed 0.41, so Implode reaches about half the pull its numbers describe and Radial burst is never cast at all, since a flow whose only moment is the drop cannot outscore one that also suits the groove while `drop` and `groove` are complements. Neither is a property of the studies; both are the estimator's, and the handoff says those rows have not been tried on real tracks.
 
-**How the library shares the screen.** The director was measured against the twenty tracks in `src/director/tracks.fixture.ts`, each of the six moments as pure weights, once as a track that is known and once as the opening guess: 240 casts. The table is the percent of those casts each study is in, before and after the Ribbon was given a home and the opening stopped favouring a wide reach. It counts the library and not a listening session, so it says which studies take the screen in preference to which, not how long any of them is up. `src/director/fairness.test.ts` holds it: the Ribbon in at most 35 percent of casts, no ink in more than 60, every ink cast at least once for a known track, and it prints this table when one fails.
+**How the library shares the screen.** The director was measured against the twenty tracks in `src/director/tracks.fixture.ts`, each of the six moments as pure weights, once as a track that is known and once as the opening guess: 240 casts. The table is the percent of those casts each study is in, before and after the Ribbon and the halo were given homes and the opening stopped favouring a wide reach. It counts the library and not a listening session, so it says which studies take the screen in preference to which, not how long any of them is up. `src/director/fairness.test.ts` holds it: the Ribbon in at most 35 percent of casts, no ink in more than 45, every ink cast at least once for a known track, and it prints this table when one fails.
 
 | Study             | Kind | Before, percent | After, percent |
 | ----------------- | ---- | --------------- | -------------- |

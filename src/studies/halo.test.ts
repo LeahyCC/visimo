@@ -1,6 +1,6 @@
 /**
- * The halo as a study: that it is the ink for anywhere and holds every moment
- * at a middling fit, that a silent packet through its whole path draws nothing
+ * The halo as a study: that it sits at the soft, tonal, slower end and suits
+ * the quiet moments best, that a silent packet through its whole path draws nothing
  * while a quiet one does, what the music and tension do to it, and the point
  * of it, that it cannot wash the canvas out. It sits where the canvas piles
  * light up, so the sum is done here, frame by frame, at a full packet and at
@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { closeness, momentFit } from '../director/score'
-import { HARDSTYLE, HOUSE, LOFI } from '../director/song.fixture'
+import { HARDSTYLE } from '../director/song.fixture'
+import { TRACKS } from '../director/tracks.fixture'
 import {
   CANVAS_FLOOR,
   CEILING_AT_FULL_PACKET,
@@ -32,7 +33,6 @@ import { carriedCanvas } from './cast'
 import { HALO_KNOBS } from './impls'
 import { findStudy, sceneOf } from './registry'
 import { castFrame, resolveLive, resolveStudy } from './resolve'
-import { MOMENTS } from './types'
 import type { Moment } from './types'
 
 const study = findStudy('halo')
@@ -59,12 +59,18 @@ const filled = (level: number) => {
 }
 
 describe('the halo study', () => {
-  it('is the ink for anywhere: every moment at a middling fit, any character, the widest reach', () => {
+  // It was once the ink for anywhere, at the middle of the space with the
+  // widest reach and 0.5 for every moment, and was in about half of all casts.
+  // `director/fairness.test.ts` holds how often it is cast now; this holds
+  // where it sits.
+  it('is the ink for the soft, tonal, slower end, with a reach like the other inks', () => {
     expect(study.kind).toBe('ink')
     expect(study.impl).toBe('halo')
-    expect(study.reach).toBe(1)
-    for (const moment of MOMENTS) expect(study.moments[moment], moment).toBe(0.5)
-    for (const axis of Object.values(study.home)) expect(axis).toBe(0.5)
+    expect(study.reach).toBeGreaterThanOrEqual(0.3)
+    expect(study.reach).toBeLessThanOrEqual(0.5)
+    expect(study.home.hardness).toBeLessThan(0.2)
+    expect(study.home.tonality).toBeGreaterThan(0.6)
+    expect(study.home.drive).toBeLessThan(0.4)
     // One quad and a uniform, at a cost well inside the frame.
     expect(study.cost).toBe('cheap')
   })
@@ -77,16 +83,21 @@ describe('the halo study', () => {
     expect(sceneOf(['halo'])).toBe('halo')
   })
 
-  // The director's fallback: it has to be a fair pick anywhere and a poor one
-  // where a study written for the moment is on offer.
-  it('is at home with a lo-fi, a house and a hardstyle track alike', () => {
-    for (const song of [LOFI, HOUSE, HARDSTYLE])
-      expect(closeness(study, song)).toBeGreaterThan(0.85)
+  // Measured tracks, so the home is held to the music it was written for and
+  // not to a made-up character.
+  it('is at home with the ambient, folk and orchestral tracks and far from the hard ones', () => {
+    const closeTo = (start: string) =>
+      closeness(study, TRACKS.find((track) => track.name.startsWith(start))!.character)
+    for (const soft of ['Christian Loffler', 'Wilco', 'Daft Punk'])
+      expect(closeTo(soft), soft).toBeGreaterThan(0.6)
+    for (const hard of ['August Burns Red', 'Subtronics', 'Ecstasy Of Soul'])
+      expect(closeTo(hard), hard).toBeLessThan(0.15)
+    expect(closeness(study, HARDSTYLE)).toBeLessThan(0.15)
   })
 
-  it('scores about a half in any single moment, so a study written for the moment beats it there', () => {
-    for (const moment of MOMENTS) {
-      const weights: Record<Moment, number> = {
+  it('suits a quiet moment best, a groove less, and a drop least', () => {
+    const fit = (moment: Moment) =>
+      momentFit(study.moments, {
         intro: 0,
         groove: 0,
         build: 0,
@@ -94,9 +105,12 @@ describe('the halo study', () => {
         rest: 0,
         outro: 0,
         [moment]: 1,
-      }
-      expect(momentFit(study.moments, weights), moment).toBe(0.5)
-    }
+      })
+    for (const quiet of ['intro', 'rest', 'outro'] as const)
+      expect(fit(quiet), quiet).toBeGreaterThanOrEqual(0.9)
+    expect(fit('groove')).toBeLessThanOrEqual(0.5)
+    expect(fit('drop')).toBeLessThanOrEqual(0.2)
+    expect(fit('drop')).toBeLessThan(fit('groove'))
   })
 })
 

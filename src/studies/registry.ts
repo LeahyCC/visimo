@@ -800,13 +800,21 @@ const CAUSTICS: InkStudy = {
 }
 
 /**
- * One central glow that breathes with the music: the ink the director can
- * always fall back on. It suits every moment and every character, and that is
- * exactly why it has to be modest everywhere: it is a companion to other inks
- * and never the whole picture. Its fit is a middling 0.5 in every moment, so a
- * study written for a moment beats it there and it wins only where nothing
- * else has a claim, and its home is the middle of the space with the widest
- * reach.
+ * One central glow that breathes with the music. It is modest everywhere: a
+ * companion to other inks and never the whole picture.
+ *
+ * It was first written as the ink the director can always fall back on, with
+ * a fit of 0.5 in every moment, the middle of the space and the whole of it
+ * for a reach. That is the ribbon's mistake (see there): a study that is a
+ * fair fit for every track and every moment is in most casts, and it was
+ * still taking the last slot where studies written for the moment had a
+ * claim, at 53 percent of the casts the twenty measured tracks can be given.
+ * One glow at the middle is at its best under music that leaves it room, soft,
+ * tonal and slower (the ambient, downtempo, folk and orchestral end of
+ * `tracks.fixture.ts`), where a single breathing shape anchors the picture
+ * and does not sit on top of a busy one. So it has a home there, a reach of
+ * 0.45, a full fit for intro, rest and outro, less for a groove, and little
+ * for a drop, where a glow at the middle is a smaller thing than the hit.
  *
  * It breathes, and it is written so that silence draws nothing. `energy` sets
  * the radius, through a square root, so the first sound lets a small glow in
@@ -864,9 +872,9 @@ const HALO: InkStudy = {
   kind: 'ink',
   name: 'Halo',
   impl: 'halo',
-  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.5 },
-  reach: 1,
-  moments: { intro: 0.5, groove: 0.5, build: 0.5, drop: 0.5, rest: 0.5, outro: 0.5 },
+  home: { drive: 0.25, weight: 0.75, tonality: 0.7, steadiness: 0.35, hardness: 0.05 },
+  reach: 0.3,
+  moments: { intro: 1, groove: 0.4, build: 0.4, drop: 0.15, rest: 1, outro: 1 },
   knobs: {
     radius: 0,
     hollow: 0.15,

@@ -1052,7 +1052,7 @@ A mapping row reads what a preset's does, plus one field that is not in the pack
 | `impact-flash`    | look | `look`         | D         | cheap  |
 | `film`            | look | `look`         | I R O     | cheap  |
 
-A capital is a strong fit and reads 1, a lower case one about a half, and a letter that is absent reads 0. A fit that is none of these is rounded to the nearest for the table (the Ribbon's drop of 0.7 reads `d`, the halo's groove and build of 0.4 read `g b`); `registry.ts` has the number.
+A capital is a strong fit and reads 1, a lower case one about a half, and a letter that is absent reads 0. A fit that is none of these is rounded to the nearest for the table (the Ribbon's drop of 0.7 reads `d`, the halo's groove and build of 0.4 read `g b`); the study's file in `src/studies/defs/` has the number.
 
 **Film** is the look for the quiet end of a song, the one place the other looks have nothing to say: heavy grain, a resting vignette and a slight gate weave, for the intro, the rest and the outro of a soft, slow track. It enables bloom, tonemap, grain and grade, and costs what a look costs, which is nothing beyond the composite: no new pass, no new texture, and the weave is a shifted read of the picture the composite already samples.
 
@@ -1318,7 +1318,7 @@ The renderer's side of it is one method, `renderer.setBench(bench | null)`, sepa
 
 ## Adding a study
 
-1. Its entry in `STUDIES` (`src/studies/registry.ts`): an id, a kind, the implementation that draws it, where it sits in the character space, how it suits each moment, its resting knobs, its mapping and its cost. `registry.test.ts` then holds it to the bar in `docs/studies-handoff.md` without anyone adding a line.
+1. Its own file, `src/studies/defs/<id>.ts`, exporting the study by name (`FRACTAL_GLINTS` in `fractal-glints.ts`): an id, a kind, the implementation that draws it, where it sits in the character space, how it suits each moment, its resting knobs, its mapping and its cost. Then one import and one row in `STUDIES` (`src/studies/registry.ts`). Anything several studies use goes in `src/studies/defs/shared.ts`. `registry.test.ts` then holds it to the bar in `docs/studies-handoff.md` without anyone adding a line.
 2. If it needs an implementation that does not exist: an id in `IMPL_IDS` and its knob list in `IMPL_KNOBS` (`src/studies/impls.ts`), a `FlowImpl` or `InkImpl` under `src/impls/` or `src/scenes/`, shaders under `src/shaders/`, and a branch in the renderer's `buildFlow` or `buildInk`. A flow that is a velocity you can write down needs none of that: it is a term on the analytic flow, which is a coefficient and a few lines, under The analytic flow above.
 3. A `*.params.ts` holding the pure numbers, with a `*.params.test.ts` beside it. Keep the GPU objects out of it, the way `fluid.params.ts` and `post/params.ts` do; that file is where the implementation's decisions are testable.
 4. A row in the study table above.

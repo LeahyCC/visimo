@@ -40,9 +40,9 @@ A study owns these files and nothing else:
 | `README.md` study table             | ONE appended row                      |
 | director, score, post stack, packet | nobody. Ask the lead                  |
 
-Two things make this hold, and both are cards that land before any study card starts:
+Two things make this hold:
 
-- **Split the registry.** Today all 24 studies are literals in `src/studies/registry.ts`, so every new study edits the same 1,500 line file. Move each to `src/studies/defs/<id>.ts` and leave the registry as a list of imports. A new study then adds one line, and one-line appends merge cleanly.
+- **The registry is split.** Each study is its own file, `src/studies/defs/<id>.ts`, and `src/studies/registry.ts` is a list of imports. A new study adds one import and one row, and one-line appends merge cleanly. Anything several studies share goes in `src/studies/defs/shared.ts`.
 - **Shared helpers first.** Several rows need the same building block (see "Shared pieces" below). Each is built once, by its own card, before the studies that use it. A study card never writes a shared helper on the side.
 
 If a study needs something the contract cannot do (a new packet row, a new blend mode, a new input texture), it stops and raises it. It does not add it.
@@ -216,7 +216,7 @@ The "mid, groovy, tonal" row is why so much music lands in the kaleidoscope: `fr
 ## Build order
 
 ```text
-Wave 0   registry split, then the six shared pieces           (no study starts before these)
+Wave 0   the six shared pieces                                 (no study starts before these)
 Wave 1   S tier, cheap:   cymatics, chord-petals, mirror-fold, grid-3d, lasers, lightning, mandala
 Wave 2   S tier, medium:  murmuration, reaction, ridgeline, ocean, aurora, oil-slick, echo-shapes, god-rays, void-tendrils, black-hole
 Wave 3   S tier, heavy:   wormhole, nebula, shape-morph, liquid-chrome      + looks: neon, spectral-split

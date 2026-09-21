@@ -9,7 +9,7 @@
  * against this, and neither should have to read an implementation to know
  * where a study belongs, what it costs or what the music does to it. Nothing
  * here touches the GPU. `impls.ts` names the implementations and the knobs
- * each of them accepts; `registry.ts` holds the studies themselves.
+ * each of them accepts; `defs/` holds the studies themselves and `registry.ts` lists them.
  */
 import { AUDIO_FIELDS } from '../presets/knobs'
 import type { AudioField, Curve } from '../presets/knobs'

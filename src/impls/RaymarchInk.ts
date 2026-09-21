@@ -114,7 +114,10 @@ export abstract class RaymarchInk implements InkImpl {
     const { device, format, software } = context
     this.software = software
     this.uniformData = new Float32Array(this.uniformFloats)
-    const module = device.createShaderModule({ label: this.label, code: common + this.code })
+    // The shared half in front of the ink's own, which is the one thing every
+    // ink on this kit has in common. `test/wgsl.test.ts` compiles the pair.
+    const code = this.code
+    const module = device.createShaderModule({ label: this.label, code: common + code })
     void module.getCompilationInfo().then((info) => {
       for (const message of info.messages)
         if (message.type === 'error')

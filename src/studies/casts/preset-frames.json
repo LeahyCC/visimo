@@ -5,730 +5,10 @@
     "level": 0,
     "swell": 0,
     "scene": {
-      "velocityDecay": 0.18,
-      "dyeDecay": 0.22,
-      "vorticity": 12,
-      "viscosity": 0.2,
-      "intensity": 1.15,
-      "saturation": 0.65,
-      "spread": 0.42,
-      "force": 0.45,
-      "dye": 1.6,
-      "hitForce": 0.3,
-      "hitDye": 1.1,
-      "radius": 0.012,
-      "colourShift": 0,
-      "colourDrift": 0,
-      "orbitSpeed": 0.19,
-      "emitters": 5,
-      "voice": 0.85,
-      "events": 24,
-      "eventLife": 0.8,
-      "eventForce": 0.5,
-      "eventDye": 2.5,
-      "eventRadius": 0.011
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.22,
-        "decay": 0.69,
-        "zoom": 1.014,
-        "rotate": 0.002,
-        "carry": 0,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.85,
-        "knee": 0.2,
-        "intensity": 0.35,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.0002,
-        "beat": 0.003
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 1,
-        "shoulder": 0.6
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.028
-      }
-    }
-  },
-  {
-    "preset": "plume",
-    "packet": "a full packet",
-    "level": 1,
-    "swell": 1,
-    "scene": {
-      "velocityDecay": 0.4,
-      "dyeDecay": 0.79,
-      "vorticity": 64,
-      "viscosity": 0.020000000000000018,
-      "intensity": 1.1300000000000001,
-      "saturation": 0.63,
-      "spread": 1,
-      "force": 1.65,
-      "dye": 5.2,
-      "hitForce": 1.4000000000000001,
-      "hitDye": 3.1,
-      "radius": 0.034,
-      "colourShift": 1,
-      "colourDrift": 0,
-      "orbitSpeed": 0.44,
-      "emitters": 5,
-      "voice": 0.85,
-      "events": 24,
-      "eventLife": 0.8,
-      "eventForce": 0.5,
-      "eventDye": 2.5,
-      "eventRadius": 0.011
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.22,
-        "decay": 0.75,
-        "zoom": 1.01,
-        "rotate": 0.004,
-        "carry": 0.4,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.73,
-        "knee": 0.2,
-        "intensity": 0.47,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.0014,
-        "beat": 0.003
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 0.8599999999999999,
-        "shoulder": 0.6
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.012
-      }
-    }
-  },
-  {
-    "preset": "plume",
-    "packet": "a quiet steady passage",
-    "level": 0.3,
-    "swell": 0.5,
-    "scene": {
-      "velocityDecay": 0.24600000262260435,
-      "dyeDecay": 0.3550000089406967,
-      "vorticity": 27.600000619888306,
-      "viscosity": 0.1459999978542328,
-      "intensity": 1.229200003314018,
-      "saturation": 0.6968000019311905,
-      "spread": 0.634000004529953,
-      "force": 0.8100000143051147,
-      "dye": 2.6800000429153443,
-      "hitForce": 0.6300000131130219,
-      "hitDye": 1.700000023841858,
-      "radius": 0.018600000262260438,
-      "colourShift": 0.30000001192092896,
-      "colourDrift": 0,
-      "orbitSpeed": 0.26500000298023224,
-      "emitters": 5,
-      "voice": 0.85,
-      "events": 24,
-      "eventLife": 0.8,
-      "eventForce": 0.5,
-      "eventDye": 2.5,
-      "eventRadius": 0.011
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.22,
-        "decay": 0.72,
-        "zoom": 1.0127999999523163,
-        "rotate": 0.002600000023841858,
-        "carry": 0.12000000476837158,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.8139999985694885,
-        "knee": 0.2,
-        "intensity": 0.38600000143051144,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.0005600000143051148,
-        "beat": 0.003
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 0.9793999993562699,
-        "shoulder": 0.6
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.023199999809265136
-      }
-    }
-  },
-  {
-    "preset": "plume",
-    "packet": "a loud lifting passage",
-    "level": 0.7,
-    "swell": 0.8,
-    "scene": {
-      "velocityDecay": 0.3339999973773956,
-      "dyeDecay": 0.600999988913536,
-      "vorticity": 48.399999380111694,
-      "viscosity": 0.07400000214576724,
-      "intensity": 1.2226999973535535,
-      "saturation": 0.6896999985456466,
-      "spread": 0.8459999978542327,
-      "force": 1.2899999856948852,
-      "dye": 4.119999957084656,
-      "hitForce": 1.0699999868869783,
-      "hitDye": 2.499999976158142,
-      "radius": 0.02739999973773956,
-      "colourShift": 0.699999988079071,
-      "colourDrift": 0,
-      "orbitSpeed": 0.36499999701976776,
-      "emitters": 5,
-      "voice": 0.85,
-      "events": 24,
-      "eventLife": 0.8,
-      "eventForce": 0.5,
-      "eventDye": 2.5,
-      "eventRadius": 0.011
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.22,
-        "decay": 0.7380000007152557,
-        "zoom": 1.0112000000476837,
-        "rotate": 0.003399999976158142,
-        "carry": 0.27999999523162844,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.7660000014305115,
-        "knee": 0.2,
-        "intensity": 0.4339999985694885,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.0010399999856948853,
-        "beat": 0.003
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 0.9239000005483627,
-        "shoulder": 0.6
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.016800000190734864
-      }
-    }
-  },
-  {
-    "preset": "plume",
-    "packet": "a middling passage dropping away",
-    "level": 0.55,
-    "swell": 0.2,
-    "scene": {
-      "velocityDecay": 0.30100000262260435,
-      "dyeDecay": 0.5965000084042549,
-      "vorticity": 40.600000619888306,
-      "viscosity": 0.1009999978542328,
-      "intensity": 1.3070750009298324,
-      "saturation": 0.7418250004529953,
-      "spread": 0.6690000051259994,
-      "force": 1.1100000143051147,
-      "dye": 3.5800000429153442,
-      "hitForce": 0.9050000131130218,
-      "hitDye": 2.200000023841858,
-      "radius": 0.02410000026226044,
-      "colourShift": 0.550000011920929,
-      "colourDrift": 0,
-      "orbitSpeed": 0.32750000298023224,
-      "emitters": 5,
-      "voice": 0.85,
-      "events": 24,
-      "eventLife": 0.8,
-      "eventForce": 0.5,
-      "eventDye": 2.5,
-      "eventRadius": 0.011
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.22,
-        "decay": 0.7020000001788139,
-        "zoom": 1.0117999999523164,
-        "rotate": 0.003100000023841858,
-        "carry": 0.2200000047683716,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.7839999985694885,
-        "knee": 0.2,
-        "intensity": 0.41600000143051147,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.0008600000143051147,
-        "beat": 0.003
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 0.9707749987602233,
-        "shoulder": 0.6
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.019199999809265136
-      }
-    }
-  },
-  {
-    "preset": "wash",
-    "packet": "silence",
-    "level": 0,
-    "swell": 0,
-    "scene": {
-      "velocityDecay": 0.1,
-      "dyeDecay": 0.3,
-      "vorticity": 26,
-      "viscosity": 0.06,
-      "intensity": 1,
-      "saturation": 1,
-      "spread": 0.5,
-      "force": 0.8,
-      "dye": 3,
-      "hitForce": 0.25,
-      "hitDye": 0.9,
-      "radius": 0.02,
-      "colourShift": 0.5,
-      "colourDrift": 0,
-      "orbitSpeed": 0.1,
-      "emitters": 3,
-      "voice": 0.7,
-      "events": 12,
-      "eventLife": 1.2,
-      "eventForce": 0.3,
-      "eventDye": 2,
-      "eventRadius": 0.014
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.3,
-        "decay": 0.68,
-        "zoom": 1.00525,
-        "rotate": 0.0006,
-        "carry": 0,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.9,
-        "knee": 0.2,
-        "intensity": 0.28,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.0001,
-        "beat": 0.0015
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 1,
-        "shoulder": 0.55
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.016
-      }
-    }
-  },
-  {
-    "preset": "wash",
-    "packet": "a full packet",
-    "level": 1,
-    "swell": 1,
-    "scene": {
-      "velocityDecay": 0.24000000000000002,
-      "dyeDecay": 0.6,
-      "vorticity": 50,
-      "viscosity": 0.019999999999999997,
-      "intensity": 0.9800000000000002,
-      "saturation": 0.7400000000000001,
-      "spread": 0.66,
-      "force": 0.8,
-      "dye": 6,
-      "hitForce": 1.65,
-      "hitDye": 2.1,
-      "radius": 0.01,
-      "colourShift": 1.75,
-      "colourDrift": 0,
-      "orbitSpeed": 0.1,
-      "emitters": 3,
-      "voice": 0.7,
-      "events": 12,
-      "eventLife": 1.2,
-      "eventForce": 0.3,
-      "eventDye": 2,
-      "eventRadius": 0.014
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.3,
-        "decay": 0.7200000000000001,
-        "zoom": 1.00275,
-        "rotate": 0.0015999999999999999,
-        "carry": 0.4,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.8,
-        "knee": 0.2,
-        "intensity": 0.48000000000000004,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.0007,
-        "beat": 0.0015
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 0.8599999999999999,
-        "shoulder": 0.55
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.008
-      }
-    }
-  },
-  {
-    "preset": "wash",
-    "packet": "a quiet steady passage",
-    "level": 0.3,
-    "swell": 0.5,
-    "scene": {
-      "velocityDecay": 0.14200000166893006,
-      "dyeDecay": 0.3900000035762787,
-      "vorticity": 33.200000286102295,
-      "viscosity": 0.04799999952316284,
-      "intensity": 1.0954000040054321,
-      "saturation": 0.9637999987125396,
-      "spread": 0.5480000019073487,
-      "force": 0.8,
-      "dye": 3.900000035762787,
-      "hitForce": 0.6700000166893005,
-      "hitDye": 1.2600000143051147,
-      "radius": 0.01699999988079071,
-      "colourShift": 0.8225000137090683,
-      "colourDrift": 0,
-      "orbitSpeed": 0.1,
-      "emitters": 3,
-      "voice": 0.7,
-      "events": 12,
-      "eventLife": 1.2,
-      "eventForce": 0.3,
-      "eventDye": 2,
-      "eventRadius": 0.014
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.3,
-        "decay": 0.7000000000000001,
-        "zoom": 1.0044999999701978,
-        "rotate": 0.0009000000119209288,
-        "carry": 0.12000000476837158,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.8699999988079071,
-        "knee": 0.2,
-        "intensity": 0.3400000023841858,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.0002800000071525574,
-        "beat": 0.0015
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 0.9793999993562699,
-        "shoulder": 0.55
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.013599999904632568
-      }
-    }
-  },
-  {
-    "preset": "wash",
-    "packet": "a loud lifting passage",
-    "level": 0.7,
-    "swell": 0.8,
-    "scene": {
-      "velocityDecay": 0.19799999833106996,
-      "dyeDecay": 0.5099999964237213,
-      "vorticity": 42.799999713897705,
-      "viscosity": 0.032000000476837154,
-      "intensity": 1.0891999967575072,
-      "saturation": 0.8606000014781952,
-      "spread": 0.6119999980926514,
-      "force": 0.8,
-      "dye": 5.099999964237213,
-      "hitForce": 1.2299999833106994,
-      "hitDye": 1.7399999856948853,
-      "radius": 0.01300000011920929,
-      "colourShift": 1.322499983906746,
-      "colourDrift": 0,
-      "orbitSpeed": 0.1,
-      "emitters": 3,
-      "voice": 0.7,
-      "events": 12,
-      "eventLife": 1.2,
-      "eventForce": 0.3,
-      "eventDye": 2,
-      "eventRadius": 0.014
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.3,
-        "decay": 0.7120000004768372,
-        "zoom": 1.0035000000298024,
-        "rotate": 0.0012999999880790709,
-        "carry": 0.27999999523162844,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.8300000011920929,
-        "knee": 0.2,
-        "intensity": 0.41999999761581425,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.0005199999928474427,
-        "beat": 0.0015
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 0.9239000005483627,
-        "shoulder": 0.55
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.010400000095367432
-      }
-    }
-  },
-  {
-    "preset": "wash",
-    "packet": "a middling passage dropping away",
-    "level": 0.55,
-    "swell": 0.2,
-    "scene": {
-      "velocityDecay": 0.17700000166893007,
-      "dyeDecay": 0.4650000035762787,
-      "vorticity": 39.200000286102295,
-      "viscosity": 0.03799999952316284,
-      "intensity": 1.1897000011682508,
-      "saturation": 0.9423499975442886,
-      "spread": 0.5880000019073486,
-      "force": 0.8,
-      "dye": 4.650000035762787,
-      "hitForce": 1.0200000166893006,
-      "hitDye": 1.5600000143051147,
-      "radius": 0.01449999988079071,
-      "colourShift": 1.1256250151991845,
-      "colourDrift": 0,
-      "orbitSpeed": 0.1,
-      "emitters": 3,
-      "voice": 0.7,
-      "events": 12,
-      "eventLife": 1.2,
-      "eventForce": 0.3,
-      "eventDye": 2,
-      "eventRadius": 0.014
-    },
-    "flow": null,
-    "post": {
-      "enabled": true,
-      "ribbon": {
-        "enabled": false,
-        "intensity": 0,
-        "width": 3,
-        "height": 0.25,
-        "shape": 0
-      },
-      "feedback": {
-        "enabled": true,
-        "amount": 0.3,
-        "decay": 0.6880000001192094,
-        "zoom": 1.0038749999701977,
-        "rotate": 0.001150000011920929,
-        "carry": 0.2200000047683716,
-        "floor": 0,
-        "ceiling": 16
-      },
-      "bloom": {
-        "enabled": true,
-        "threshold": 0.8449999988079071,
-        "knee": 0.2,
-        "intensity": 0.3900000023841858,
-        "weights": [0.5, 0.32, 0.18]
-      },
-      "chromatic": {
-        "enabled": true,
-        "amount": 0.00043000000715255734,
-        "beat": 0.0015
-      },
-      "tonemap": {
-        "enabled": true,
-        "exposure": 0.9707749987602233,
-        "shoulder": 0.55
-      },
-      "grain": {
-        "enabled": true,
-        "amount": 0.011599999904632568
-      }
-    }
-  },
-  {
-    "preset": "drift",
-    "packet": "silence",
-    "level": 0,
-    "swell": 0,
-    "scene": {
       "velocityDecay": 0.12,
       "dyeDecay": 0.45,
       "vorticity": 18,
-      "viscosity": 0.2,
+      "viscosity": 0.24,
       "intensity": 0.8,
       "saturation": 0.65,
       "spread": 0.42,
@@ -737,7 +17,7 @@
       "hitForce": 0.3,
       "hitDye": 0.55,
       "radius": 0.012,
-      "colourShift": 0,
+      "colourShift": 0.5,
       "colourDrift": 0,
       "orbitSpeed": 0.19,
       "emitters": 5,
@@ -752,16 +32,16 @@
     "post": {
       "enabled": true,
       "ribbon": {
-        "enabled": true,
-        "intensity": 0.15,
-        "width": 2.5,
-        "height": 0.2,
+        "enabled": false,
+        "intensity": 0,
+        "width": 3,
+        "height": 0.25,
         "shape": 0
       },
       "feedback": {
         "enabled": true,
         "amount": 1,
-        "decay": 0.93,
+        "decay": 0.9,
         "zoom": 1.0045,
         "rotate": 0,
         "carry": 1,
@@ -792,51 +72,51 @@
     }
   },
   {
-    "preset": "drift",
+    "preset": "plume",
     "packet": "a full packet",
     "level": 1,
     "swell": 1,
     "scene": {
       "velocityDecay": 0.27,
       "dyeDecay": 1.02,
-      "vorticity": 70,
-      "viscosity": 0.020000000000000018,
+      "vorticity": 78,
+      "viscosity": 0.03,
       "intensity": 0.7800000000000001,
-      "saturation": 0.63,
+      "saturation": 0.6299999999999999,
       "spread": 1,
       "force": 1.65,
-      "dye": 2.3,
+      "dye": 5.2,
       "hitForce": 1.4000000000000001,
-      "hitDye": 1.55,
+      "hitDye": 2.55,
       "radius": 0.034,
-      "colourShift": 1,
+      "colourShift": 1.75,
       "colourDrift": 0,
-      "orbitSpeed": 0.44,
+      "orbitSpeed": 0.36,
       "emitters": 5,
       "voice": 0.85,
       "events": 24,
       "eventLife": 0.8,
       "eventForce": 0.5,
-      "eventDye": 1.2,
+      "eventDye": 2.5,
       "eventRadius": 0.011
     },
     "flow": null,
     "post": {
       "enabled": true,
       "ribbon": {
-        "enabled": true,
-        "intensity": 0.44999999999999996,
-        "width": 4,
-        "height": 0.2,
+        "enabled": false,
+        "intensity": 0,
+        "width": 3,
+        "height": 0.25,
         "shape": 0
       },
       "feedback": {
         "enabled": true,
-        "amount": 1,
-        "decay": 0.9700000000000001,
-        "zoom": 1.0015,
-        "rotate": 0.0015,
-        "carry": 1.4,
+        "amount": 0.30000000000000004,
+        "decay": 0.6900000000000001,
+        "zoom": 1.0028000000000001,
+        "rotate": 0.002,
+        "carry": 0.4,
         "floor": 0.02,
         "ceiling": 1.2500000000000002
       },
@@ -844,12 +124,12 @@
         "enabled": true,
         "threshold": 0.73,
         "knee": 0.2,
-        "intensity": 0.44999999999999996,
+        "intensity": 0.47,
         "weights": [0.5, 0.32, 0.18]
       },
       "chromatic": {
         "enabled": true,
-        "amount": 0.0014,
+        "amount": 0.0013999999999999998,
         "beat": 0.003
       },
       "tonemap": {
@@ -864,51 +144,51 @@
     }
   },
   {
-    "preset": "drift",
+    "preset": "plume",
     "packet": "a quiet steady passage",
     "level": 0.3,
     "swell": 0.5,
     "scene": {
       "velocityDecay": 0.16500000178813934,
       "dyeDecay": 0.5850000089406967,
-      "vorticity": 33.600000619888306,
-      "viscosity": 0.1459999978542328,
+      "vorticity": 36.00000071525574,
+      "viscosity": 0.1769999974966049,
       "intensity": 0.8468000019311905,
       "saturation": 0.6968000019311905,
       "spread": 0.634000004529953,
       "force": 0.8100000143051147,
-      "dye": 1.2500000178813935,
+      "dye": 2.1200000524520872,
       "hitForce": 0.6300000131130219,
-      "hitDye": 0.850000011920929,
+      "hitDye": 1.150000023841858,
       "radius": 0.018600000262260438,
-      "colourShift": 0.30000001192092896,
+      "colourShift": 0.8225000137090683,
       "colourDrift": 0,
-      "orbitSpeed": 0.26500000298023224,
+      "orbitSpeed": 0.2410000020265579,
       "emitters": 5,
       "voice": 0.85,
       "events": 24,
       "eventLife": 0.8,
       "eventForce": 0.5,
-      "eventDye": 1.2,
+      "eventDye": 1.5900000154972076,
       "eventRadius": 0.011
     },
     "flow": null,
     "post": {
       "enabled": true,
       "ribbon": {
-        "enabled": true,
-        "intensity": 0.24000000357627868,
-        "width": 2.9500000178813934,
-        "height": 0.2,
+        "enabled": false,
+        "intensity": 0,
+        "width": 3,
+        "height": 0.25,
         "shape": 0
       },
       "feedback": {
         "enabled": true,
-        "amount": 1,
-        "decay": 0.9460000002384187,
-        "zoom": 1.0035999999642373,
-        "rotate": 0.00045000001788139346,
-        "carry": 1.1200000047683716,
+        "amount": 0.7899999916553497,
+        "decay": 0.8409999972581864,
+        "zoom": 1.0039899999797346,
+        "rotate": 0.0006000000238418579,
+        "carry": 0.8199999928474426,
         "floor": 0.018800000011920927,
         "ceiling": 1.726499997138977
       },
@@ -916,7 +196,7 @@
         "enabled": true,
         "threshold": 0.8139999985694885,
         "knee": 0.2,
-        "intensity": 0.3800000011920929,
+        "intensity": 0.38600000143051144,
         "weights": [0.5, 0.32, 0.18]
       },
       "chromatic": {
@@ -936,51 +216,51 @@
     }
   },
   {
-    "preset": "drift",
+    "preset": "plume",
     "packet": "a loud lifting passage",
     "level": 0.7,
     "swell": 0.8,
     "scene": {
       "velocityDecay": 0.22499999821186065,
-      "dyeDecay": 0.8309999889135361,
-      "vorticity": 54.399999380111694,
-      "viscosity": 0.07400000214576724,
+      "dyeDecay": 0.830999988913536,
+      "vorticity": 59.99999928474426,
+      "viscosity": 0.09300000250339509,
       "intensity": 0.8396999985456467,
-      "saturation": 0.6896999985456466,
+      "saturation": 0.6896999985456467,
       "spread": 0.8459999978542327,
       "force": 1.2899999856948852,
-      "dye": 1.8499999821186066,
+      "dye": 3.8799999475479128,
       "hitForce": 1.0699999868869783,
-      "hitDye": 1.249999988079071,
+      "hitDye": 1.9499999761581421,
       "radius": 0.02739999973773956,
-      "colourShift": 0.699999988079071,
+      "colourShift": 1.322499983906746,
       "colourDrift": 0,
-      "orbitSpeed": 0.36499999701976776,
+      "orbitSpeed": 0.3089999979734421,
       "emitters": 5,
       "voice": 0.85,
       "events": 24,
       "eventLife": 0.8,
       "eventForce": 0.5,
-      "eventDye": 1.2,
+      "eventDye": 2.1099999845027924,
       "eventRadius": 0.011
     },
     "flow": null,
     "post": {
       "enabled": true,
       "ribbon": {
-        "enabled": true,
-        "intensity": 0.35999999642372127,
-        "width": 3.5499999821186066,
-        "height": 0.2,
+        "enabled": false,
+        "intensity": 0,
+        "width": 3,
+        "height": 0.25,
         "shape": 0
       },
       "feedback": {
         "enabled": true,
-        "amount": 1,
-        "decay": 0.9600000000000001,
-        "zoom": 1.002400000035763,
-        "rotate": 0.0010499999821186065,
-        "carry": 1.2799999952316283,
+        "amount": 0.5100000083446503,
+        "decay": 0.7550000029802323,
+        "zoom": 1.0033100000202657,
+        "rotate": 0.001399999976158142,
+        "carry": 0.5800000071525574,
         "floor": 0.019499999999999997,
         "ceiling": 1.5080000038146972
       },
@@ -988,7 +268,7 @@
         "enabled": true,
         "threshold": 0.7660000014305115,
         "knee": 0.2,
-        "intensity": 0.41999999880790706,
+        "intensity": 0.43399999856948845,
         "weights": [0.5, 0.32, 0.18]
       },
       "chromatic": {
@@ -1008,59 +288,59 @@
     }
   },
   {
-    "preset": "drift",
+    "preset": "plume",
     "packet": "a middling passage dropping away",
     "level": 0.55,
     "swell": 0.2,
     "scene": {
       "velocityDecay": 0.20250000178813932,
-      "dyeDecay": 0.8265000084042549,
-      "vorticity": 46.600000619888306,
-      "viscosity": 0.1009999978542328,
+      "dyeDecay": 0.826500008404255,
+      "vorticity": 51.00000071525574,
+      "viscosity": 0.12449999749660491,
       "intensity": 0.8918250004529953,
-      "saturation": 0.7418250004529953,
+      "saturation": 0.7418250004529952,
       "spread": 0.6690000051259994,
       "force": 1.1100000143051147,
-      "dye": 1.6250000178813935,
+      "dye": 3.2200000524520873,
       "hitForce": 0.9050000131130218,
-      "hitDye": 1.100000011920929,
+      "hitDye": 1.650000023841858,
       "radius": 0.02410000026226044,
-      "colourShift": 0.550000011920929,
+      "colourShift": 1.1256250151991845,
       "colourDrift": 0,
-      "orbitSpeed": 0.32750000298023224,
+      "orbitSpeed": 0.2835000020265579,
       "emitters": 5,
       "voice": 0.85,
       "events": 24,
       "eventLife": 0.8,
       "eventForce": 0.5,
-      "eventDye": 1.2,
+      "eventDye": 1.9150000154972076,
       "eventRadius": 0.011
     },
     "flow": null,
     "post": {
       "enabled": true,
       "ribbon": {
-        "enabled": true,
-        "intensity": 0.31500000357627866,
-        "width": 3.3250000178813934,
-        "height": 0.2,
+        "enabled": false,
+        "intensity": 0,
+        "width": 3,
+        "height": 0.25,
         "shape": 0
       },
       "feedback": {
         "enabled": true,
-        "amount": 1,
-        "decay": 0.9450000002980233,
-        "zoom": 1.0028499999642373,
-        "rotate": 0.0008250000178813934,
-        "carry": 1.2200000047683717,
+        "amount": 0.6149999916553497,
+        "decay": 0.7774999973177911,
+        "zoom": 1.0035649999797345,
+        "rotate": 0.001100000023841858,
+        "carry": 0.6699999928474427,
         "floor": 0.01875000001490116,
         "ceiling": 1.6729999945759775
       },
       "bloom": {
         "enabled": true,
-        "threshold": 0.7839999985694885,
+        "threshold": 0.7839999985694884,
         "knee": 0.2,
-        "intensity": 0.4050000011920929,
+        "intensity": 0.41600000143051147,
         "weights": [0.5, 0.32, 0.18]
       },
       "chromatic": {

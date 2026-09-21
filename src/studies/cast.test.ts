@@ -1,13 +1,17 @@
 /**
- * The five pinned casts against the five presets they came from. This is the
- * whole point of the port: a cast is a different shape, resolved by different
- * code, and it must land on the same numbers. Anything else is a preset
- * quietly changing on the way through.
+ * The pinned casts against the presets they came from. This is the whole point
+ * of the port: a cast is a different shape, resolved by different code, and it
+ * must land on the same numbers. Anything else is a preset quietly changing on
+ * the way through.
  *
  * The presets themselves are gone, so what they resolved to was captured
  * first: `preset-frames.json` beside the casts is the old path's own output,
  * written by running it over the same five packets these tests use. It is a
- * record of what shipped in 0.1 and nothing regenerates it.
+ * record of what shipped in 0.1 and nothing regenerates it, with one
+ * exception: Plume, Wash and Drift were folded into one cast on 2026-09-20,
+ * so the Plume frames are what the new cast resolves to at those packets, and
+ * the Wash and Drift frames are gone. Prism's and Melt's are still the 0.1
+ * ones.
  *
  * Tension is zero throughout, which is what every preset saw when the frames
  * were recorded, and every study's tension row is written so that zero adds
@@ -16,16 +20,25 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { defaultPostParams, POST_KNOBS, POST_LANES, POST_STAGES, postSummary } from '../post/params'
+import {
+  defaultPostParams,
+  feedbackStep,
+  POST_KNOBS,
+  POST_LANES,
+  POST_STAGES,
+  postSummary,
+} from '../post/params'
 import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
+import type { AudioField } from '../presets/knobs'
 import { glintLevel, kaleidoscopeParams } from '../scenes/kaleidoscope.params'
-import { parseCast } from './cast'
+import { CANVAS_KNOBS, castStudyIds, parseCast } from './cast'
 import { castOrDefault, CASTS, DEFAULT_CAST_ID, findCast, stepCast } from './casts/index'
 import melt from './casts/melt.json'
 import plume from './casts/plume.json'
 import frames from './casts/preset-frames.json'
 import prism from './casts/prism.json'
+import { findStudy } from './registry'
 import { castFrame, resolveCast } from './resolve'
 
 /**
@@ -50,17 +63,26 @@ const FRAMES = frames as unknown as readonly PresetFrame[]
  * What the preset path resolved to, as a whole stack. A stage that arrived
  * after the capture is at the stack's own default, which is off and neutral:
  * the preset path had no such stage, so that is what it did, and it is what
- * the five casts must still do.
+ * the shipped casts must still do.
  */
 const expectedPost = (golden: PresetFrame): PostParams => ({
   ...defaultPostParams(),
   ...golden.post,
 })
 
+/**
+ * The moment rows. The frames were captured before these existed, so a packet
+ * that is to land on them says the same, as `gpu/Renderer.test.ts` does.
+ * Plume's own frames are read with them at 0 as well, so the `rest` row its
+ * trails answer to is pinned by the tests of its own below and not by these.
+ */
+const MOMENT_FIELDS: readonly string[] = ['tension', 'release', 'rest', 'impact']
+
 /** Every field a mapping can read at one level; `lowEnd` is derived and follows. */
 const packetAt = (level: number, swell: number) => {
   const out = new Float32Array(PACKET_LENGTH)
-  for (const field of AUDIO_FIELDS) if (field !== 'lowEnd') out[F[field]] = level
+  for (const field of AUDIO_FIELDS)
+    if (field !== 'lowEnd' && !MOMENT_FIELDS.includes(field)) out[F[field]] = level
   out[F.swell] = swell
   return out
 }
@@ -71,7 +93,7 @@ const framesOf = (id: string) => FRAMES.filter((entry) => entry.preset === id)
 const LOUD_BANDS = Float32Array.from({ length: 20 }, (_, slot) => (slot === 0 ? 1 : 0))
 
 describe('a pinned cast resolves to its preset', () => {
-  // The capture has to cover the five, or a cast could pass by being compared
+  // The capture has to cover every cast, or one could pass by being compared
   // against nothing at all.
   it('has a captured frame for every cast at five packets', () => {
     for (const cast of CASTS) expect(framesOf(cast.id).length, cast.name).toBe(5)
@@ -145,8 +167,16 @@ describe('a pinned cast resolves to its preset', () => {
     const prism = findCast('prism')
     const melt = findCast('melt')
     if (!prism || !melt) throw new Error('Expected Prism and Melt')
+    // These are about the moment rows, which the frames' packet leaves at 0,
+    // so `release` is put back: the glint rises with it.
+    const released = (level: number, swell: number) => {
+      const packet = packetAt(level, swell)
+      packet[F.release] = level
+      return packet
+    }
+
     for (const golden of framesOf('prism')) {
-      const packet = packetAt(golden.level, golden.swell)
+      const packet = released(golden.level, golden.swell)
       const knobs = resolveCast(prism, packet, 0, castFrame()).knobs.get('fractal-glints')
       const params = kaleidoscopeParams(knobs ?? {})
       expect(knobs?.glint, `Prism glint at ${golden.packet}`).toBeCloseTo(0, 12)
@@ -156,7 +186,7 @@ describe('a pinned cast resolves to its preset', () => {
     }
 
     for (const golden of framesOf('melt')) {
-      const packet = packetAt(golden.level, golden.swell)
+      const packet = released(golden.level, golden.swell)
       const knobs = resolveCast(melt, packet, 0, castFrame()).knobs.get('fractal-glints')
       expect(knobs?.glint, `Melt glint at ${golden.packet}`).toBeCloseTo(
         0.38 + 0.3 * golden.level + 0.25 * golden.level,
@@ -212,15 +242,221 @@ describe('the casts', () => {
 
   it('print the stages they always did unless they hold the ribbon', () => {
     expect(summaryOf('plume')).toBe('feedback bloom chroma tonemap grain')
-    expect(summaryOf('wash')).toBe('feedback bloom chroma tonemap grain')
     expect(summaryOf('prism')).toBe('bloom tonemap')
-    expect(summaryOf('drift')).toBe('ribbon feedback bloom chroma tonemap grain')
     expect(summaryOf('melt')).toBe('ribbon feedback bloom tonemap')
   })
 
-  it('hold the ribbon in Drift and Melt and nowhere else', () => {
+  it('hold the ribbon in Melt and nowhere else', () => {
     for (const cast of CASTS)
-      expect(cast.inks.includes('ribbon'), cast.name).toBe(['drift', 'melt'].includes(cast.id))
+      expect(cast.inks.includes('ribbon'), cast.name).toBe(cast.id === 'melt')
+  })
+})
+
+/**
+ * Plume is three casts folded into one (2026-09-20, at the owner's request):
+ * Plume's dye reactivity, Wash's colour, Drift's trails when the music is calm
+ * and Wash's short ones when it is loud. These pin the choices the numbers in
+ * `plume.json` were made from, so a later tune moves them on purpose.
+ */
+describe('Plume, the three fluid casts folded into one', () => {
+  const plume = findCast('plume')
+  if (!plume) throw new Error('Expected the Plume cast')
+
+  type Fields = Partial<Record<AudioField, number>>
+
+  // Only the named fields set, the rest silent. `lowEnd` is the louder of two
+  // bands, so it goes in as the bass.
+  const packetOf = (fields: Fields) => {
+    const out = new Float32Array(PACKET_LENGTH)
+    for (const field of AUDIO_FIELDS) {
+      const value = fields[field]
+      if (value !== undefined) out[field === 'lowEnd' ? F.bass : F[field]] = value
+    }
+
+    return out
+  }
+
+  const at = (fields: Fields, tension = 0) =>
+    resolveCast(plume, packetOf(fields), tension, castFrame())
+  const dyeAt = (fields: Fields, tension = 0) => at(fields, tension).knobs.get('dye-plumes') ?? {}
+  const FULL: Fields = Object.fromEntries(AUDIO_FIELDS.map((field) => [field, 1]))
+
+  // A passage with the floor dropped away, and one at the track's own peak.
+  // Everything else is silent, so what moves is what `energy` and `rest` move.
+  const CALM: Fields = { energy: 0, rest: 1, swell: 0.5 }
+  const LOUD: Fields = { energy: 1, rest: 0, swell: 0.5 }
+
+  it('is listed once, and the ids it absorbed still find it', () => {
+    expect(CASTS.map((cast) => cast.id)).toEqual(['plume', 'prism', 'melt'])
+    for (const id of ['wash', 'drift']) {
+      expect(
+        CASTS.some((cast) => cast.id === id),
+        id,
+      ).toBe(false)
+      expect(findCast(id), id).toBe(plume)
+      // What `data-preset` prints is the cast's own id, never the one asked for.
+      expect(castOrDefault(id).id, id).toBe('plume')
+    }
+
+    expect(findCast('gone')).toBeUndefined()
+    // A host that stored one of them steps on from Plume's place in the list.
+    expect(stepCast('drift', 1).id).toBe('prism')
+    expect(stepCast('wash', -1).id).toBe('melt')
+  })
+
+  // A cast has one flow and no way to give a member a presence of its own, so
+  // the two fluids cannot both be in it: the lazy one moves toward the
+  // turbulent tuning by its own knobs instead.
+  it('holds the lazy fluid alone and no ribbon', () => {
+    expect(plume.flow).toBe('lazy-fluid')
+    expect(plume.inks).toEqual(['dye-plumes'])
+    expect(castStudyIds(plume)).not.toContain('turbulent-fluid')
+  })
+
+  it('moves the lazy fluid toward the turbulent tuning as the track gets loud', () => {
+    const calm = at(CALM).knobs.get('lazy-fluid') ?? {}
+    const loud = at(LOUD).knobs.get('lazy-fluid') ?? {}
+    // Turbulent fluid rests at a vorticity of 26 and an orbit of 0.1, and the
+    // lazy one starts from Drift's 18 and 0.19.
+    expect(calm.vorticity).toBe(18)
+    expect(loud.vorticity).toBeCloseTo(26, 10)
+    expect(loud.orbitSpeed ?? 0).toBeLessThan(calm.orbitSpeed ?? 0)
+    expect(loud.velocityDecay ?? 0).toBeGreaterThan(calm.velocityDecay ?? 0)
+    // The treble already takes 0.18 of the viscosity, so a full packet has to
+    // leave some or the solver has nothing to solve (the trap Melt's cast
+    // names): thinner when loud, never below nothing.
+    expect(loud.viscosity ?? 0).toBeLessThan(calm.viscosity ?? 0)
+    expect(at({ ...LOUD, treble: 1 }).knobs.get('lazy-fluid')?.viscosity ?? 0).toBeGreaterThan(0)
+  })
+
+  it('rests the palette half a turn from the key and lets the low end shove it', () => {
+    expect(dyeAt({}).colourShift).toBeCloseTo(0.5, 10)
+    // The packet is single precision, so the key hue comes back a hair off.
+    expect(dyeAt({ keyHue: 0.2 }).colourShift).toBeCloseTo(0.7, 6)
+    expect(dyeAt({ lowEnd: 1 }).colourShift).toBeCloseTo(0.75, 10)
+    // A square row: a soft low end barely moves it, a kick does.
+    expect(dyeAt({ lowEnd: 0.5 }).colourShift).toBeCloseTo(0.5 + 0.25 * 0.25, 10)
+  })
+
+  // Wash's treble hit row is left out on purpose. At a full packet the hit
+  // dye is a rest of 0.55 plus one each from the low end and novelty, 2.55;
+  // the row's 1.2 would make 3.75, past the 3.1 the old Plume reached and
+  // near double Wash's 2.1, so it does push the frame past what either cast
+  // drew at the same packet.
+  it('reacts to harmony, bass and novelty, and not to the treble', () => {
+    const rest = dyeAt({})
+    expect((dyeAt({ harmonicChange: 1 }).dye ?? 0) - (rest.dye ?? 0)).toBeCloseTo(2, 10)
+    expect((dyeAt({ lowEnd: 1 }).hitDye ?? 0) - (rest.hitDye ?? 0)).toBeCloseTo(1, 10)
+    expect((dyeAt({ novelty: 1 }).hitDye ?? 0) - (rest.hitDye ?? 0)).toBeCloseTo(1, 10)
+    expect(dyeAt({ treble: 1 }).hitDye).toBe(rest.hitDye)
+    expect(dyeAt(FULL).hitDye ?? 0).toBeLessThanOrEqual(3.1)
+  })
+
+  it('keeps the trails long when calm and short when loud, and falls smoothly between', () => {
+    const calm = at(CALM).post.feedback
+    const loud = at(LOUD).post.feedback
+    // Drift's 0.93 at least, and Wash's 0.68 at the top.
+    expect(calm.decay).toBeGreaterThanOrEqual(0.93)
+    expect(loud.decay).toBeCloseTo(0.68, 10)
+    // The decay alone would leave a loud trail at 0.68 of itself a frame, more
+    // than three times Wash's 0.2: the amount is what takes it down to 0.3.
+    expect(calm.amount).toBe(1)
+    expect(loud.amount).toBeCloseTo(0.3, 10)
+    expect(loud.carry).toBeLessThan(calm.carry)
+
+    let last = at({ energy: 0, rest: 0, swell: 0.5 }).post.feedback
+    for (let step = 1; step <= 10; step += 1) {
+      const now = at({ energy: step / 10, rest: 0, swell: 0.5 }).post.feedback
+      expect(now.decay).toBeLessThanOrEqual(last.decay)
+      expect(now.amount).toBeLessThanOrEqual(last.amount)
+      last = now
+    }
+
+    // A breakdown reads as calm to the trails even when the level is middling.
+    expect(at({ energy: 0.5, rest: 1 }).post.feedback.decay).toBeGreaterThan(
+      at({ energy: 0.5, rest: 0 }).post.feedback.decay,
+    )
+  })
+
+  it('keeps Drift’s floor and ceiling rows', () => {
+    const rest = at({}).post.feedback
+    expect(rest.floor).toBe(0.018)
+    expect(rest.ceiling).toBe(1.8)
+    expect(at({ energy: 1 }).post.feedback.ceiling).toBeCloseTo(1.8 - 0.25, 10)
+    expect(at({ swell: 1 }).post.feedback.ceiling).toBeCloseTo(1.8 - 0.15, 10)
+    expect(at({ hardness: 1 }).post.feedback.ceiling).toBeCloseTo(1.8 - 0.15, 10)
+    expect(at({ energy: 1 }).post.feedback.floor).toBeGreaterThan(rest.floor)
+  })
+
+  // Per second and not per frame, and the trap is that the decay alone is not
+  // enough: the fresh frame's weight has to match as well, or a faster display
+  // settles a still picture brighter. Both the trail and the settled level are
+  // held across the two rates at both ends of the cast, since the trail knobs
+  // are the ones the music moves.
+  it('leaves the same trail a second at 60 and at 144 frames a second', () => {
+    for (const fields of [CALM, LOUD]) {
+      const { feedback } = at(fields).post
+      const at60 = feedbackStep(feedback, 1 / 60)
+      const at144 = feedbackStep(feedback, 1 / 144)
+      const kept = (step: typeof at60, fps: number) => (step.amount * step.decay) ** fps
+      expect(kept(at144, 144)).toBeCloseTo(kept(at60, 60), 9)
+      const settled = (step: typeof at60) => step.fresh / (1 - step.amount * step.decay)
+      expect(settled(at144)).toBeCloseTo(settled(at60), 6)
+      expect(at144.zoom ** 144).toBeCloseTo(at60.zoom ** 60, 9)
+      expect(at144.rotate * 144).toBeCloseTo(at60.rotate * 60, 9)
+      expect(at144.floor * 144).toBeCloseTo(at60.floor * 60, 9)
+    }
+  })
+
+  it('sets no knob that nothing drives', () => {
+    for (const id of castStudyIds(plume)) {
+      const study = findStudy(id)
+      if (!study) throw new Error(`Expected ${id}`)
+      const rows = [...study.mapping, ...(plume.overrides[id]?.mapping ?? [])]
+      for (const knob of Object.keys(plume.overrides[id]?.knobs ?? {}))
+        expect(
+          rows.some((row) => row.to === knob),
+          `${id} sets ${knob} and no row moves it`,
+        ).toBe(true)
+    }
+
+    for (const knob of CANVAS_KNOBS)
+      expect(
+        plume.canvas.mapping.some((row) => row.to === knob),
+        `the canvas sets ${knob} and no row moves it`,
+      ).toBe(true)
+  })
+
+  // The light knobs sit at their resting values at a silent packet, and no row
+  // takes them anywhere else: nothing is added that a silent song did not ask
+  // for. What is left is the fluid's own quiet trickle, at Drift's rest of the
+  // dye, which is the level the canvas floor was tuned to hold near black.
+  it('adds no light at a silent packet', () => {
+    const silent = at({})
+    for (const id of ['lazy-fluid', 'dye-plumes']) {
+      const study = findStudy(id)
+      if (!study) throw new Error(`Expected ${id}`)
+      const rest: Record<string, number> = { ...study.knobs, ...plume.overrides[id]?.knobs }
+      const knobs = silent.knobs.get(id) ?? {}
+      for (const knob of ['dye', 'hitDye', 'eventDye', 'intensity', 'force', 'hitForce'])
+        if (knob in rest) expect(knobs[knob], `${id} ${knob}`).toBe(rest[knob])
+    }
+  })
+
+  it('is no brighter and no more saturated than rest at a full packet', () => {
+    const study = findStudy('dye-plumes')
+    if (!study) throw new Error('Expected the dye plumes')
+    const rest: Record<string, number> = { ...study.knobs, ...plume.overrides['dye-plumes']?.knobs }
+    for (const tension of [0, 1]) {
+      const knobs = dyeAt(FULL, tension)
+      expect(knobs.intensity ?? 0, `intensity at tension ${tension}`).toBeLessThanOrEqual(
+        (rest.intensity ?? 0) + 1e-9,
+      )
+
+      expect(knobs.saturation ?? 0, `saturation at tension ${tension}`).toBeLessThanOrEqual(
+        (rest.saturation ?? 0) + 1e-9,
+      )
+    }
   })
 })
 
@@ -228,8 +464,8 @@ describe('parseCast', () => {
   it('resolves the canvas over the stack’s own feedback defaults', () => {
     const cast = parseCast(plume, 'plume.json')
     expect(cast.canvas.enabled).toBe(true)
-    expect(cast.canvas.knobs['feedback.decay']).toBe(0.69)
-    expect(cast.canvas.knobs['feedback.amount']).toBe(0.22)
+    expect(cast.canvas.knobs['feedback.decay']).toBe(0.9)
+    expect(cast.canvas.knobs['feedback.amount']).toBe(1)
   })
 
   it('reads a cast with no flow at all', () => {

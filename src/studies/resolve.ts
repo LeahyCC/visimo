@@ -24,6 +24,8 @@
  * Everything writes into an object the caller owns and keeps, because this
  * runs on every animation frame and there is nothing here worth allocating.
  */
+import { PALETTE_IDS } from '../palettes/palette'
+import type { PaletteChoice, PaletteId } from '../palettes/palette'
 import {
   DEFAULT_POST_PARAMS,
   defaultPostParams,
@@ -34,7 +36,7 @@ import {
 import type { PostParams } from '../post/params'
 import { bend, feature } from '../presets/resolve'
 import { follow, integrate, stepSpring, wrapped } from '../presets/shapes'
-import { CANVAS_KNOBS, castStudyIds } from './cast'
+import { CANVAS_KNOBS, castStudyIds, PINNED_PALETTE } from './cast'
 import type { Cast, CastCanvas, CastOverride } from './cast'
 import {
   COUNT_KNOBS,
@@ -287,14 +289,25 @@ export type LiveCast = {
   studies: readonly LiveStudy[]
   canvas: CastCanvas
   tension: number
+  /**
+   * A palette held over whatever the looks name. A pinned cast sets it, since
+   * it is a fixed picture; the director leaves it out and the palette follows
+   * the look it chose.
+   */
+  palette?: PaletteId | undefined
 }
 
 /**
- * A cast resolved: every live study's knobs by id, and the whole post stack.
+ * A cast resolved: every live study's knobs by id, the whole post stack, and
+ * the palettes the picture is coloured in.
+ *
  * The looks are in `knobs` as well as blended into `post`, so that anything
  * wanting the numbers a study was drawn with this frame finds them by its id:
  * the bench's readout does, and the shape state below is keyed the same way.
  * Nothing draws from this map, so a look sitting in it draws nothing.
+ *
+ * `palette` is the choice the looks make between them, written by
+ * `blendPalette` from the same presences the looks are blended by.
  *
  * `shapes` is what the shaped rows remember, by study id. It is on the frame
  * and not in a module of its own so that two renderers, or a test and a
@@ -303,12 +316,14 @@ export type LiveCast = {
 export type CastFrame = {
   knobs: Map<string, Record<string, number>>
   post: PostParams
+  palette: PaletteChoice
   shapes: Map<string, RowState[]>
 }
 
 export const castFrame = (): CastFrame => ({
   knobs: new Map(),
   post: defaultPostParams(),
+  palette: { from: PINNED_PALETTE, to: PINNED_PALETTE, mix: 0 },
   shapes: new Map(),
 })
 
@@ -466,6 +481,63 @@ function blendLooks(count: number, out: PostParams) {
   }
 }
 
+// The presence each palette has among the looks live this frame, by its place
+// in `PALETTE_IDS`. Kept and zeroed rather than built, like the lists above.
+const paletteShare = new Float64Array(PALETTE_IDS.length)
+
+/**
+ * The palettes the looks live this frame ask for, as one choice. Each look
+ * names a palette and brings its presence with it, so a look fading in
+ * brings its colour in at the same rate: the palettes cross-fade in OKLCH by
+ * the same shares the looks are blended by.
+ *
+ * A choice is two palettes and a mix, so with three looks live the weakest
+ * palette is dropped. The director fades one look into another, which is two
+ * at a time; a third would need a change landing mid-glide, and a list with
+ * three is drawn by its two strongest rather than refused.
+ *
+ * The pair is kept in the order of `PALETTE_IDS`, `from` the earlier, so it
+ * does not swap ends when one palette overtakes the other halfway through a
+ * fade: the mix runs 0 to 1 once, and the colour at half is the same from
+ * either side.
+ *
+ * Two looks that name one palette are one palette, whatever their fades.
+ */
+function blendPalette(count: number, out: PaletteChoice) {
+  paletteShare.fill(0)
+  for (let at = 0; at < count; at += 1) {
+    const id = heldLooks[at]?.palette
+    const place = id ? PALETTE_IDS.indexOf(id) : -1
+    if (place >= 0) paletteShare[place] = (paletteShare[place] ?? 0) + (heldShare[at] ?? 0)
+  }
+
+  let first = -1
+  let second = -1
+  for (let index = 0; index < paletteShare.length; index += 1) {
+    const share = paletteShare[index] ?? 0
+    if (share <= 0) continue
+    if (first < 0 || share > (paletteShare[first] ?? 0)) {
+      second = first
+      first = index
+    } else if (second < 0 || share > (paletteShare[second] ?? 0)) second = index
+  }
+
+  if (first < 0) return choosePalette(out, PINNED_PALETTE)
+  if (second < 0) return choosePalette(out, PALETTE_IDS[first] ?? PINNED_PALETTE)
+  const [low, high] = first < second ? [first, second] : [second, first]
+  const lowShare = paletteShare[low] ?? 0
+  const highShare = paletteShare[high] ?? 0
+  out.from = PALETTE_IDS[low] ?? PINNED_PALETTE
+  out.to = PALETTE_IDS[high] ?? PINNED_PALETTE
+  out.mix = highShare / (lowShare + highShare)
+}
+
+function choosePalette(out: PaletteChoice, id: PaletteId) {
+  out.from = id
+  out.to = id
+  out.mix = 0
+}
+
 /** One study's own record in the frame, made the first time it is live. */
 function knobsFor(out: CastFrame, id: string): Record<string, number> {
   let knobs = out.knobs.get(id)
@@ -495,15 +567,18 @@ function statesFor(out: CastFrame, id: string): RowState[] {
 
 /**
  * Whatever is live, resolved for this frame: each live study's knobs by id,
- * and the whole post stack. This is the entry point the director feeds. A
- * study at presence 0 is not resolved and is not in the output, so the
- * renderer never touches it and whatever its shapes remembered goes with it:
- * a study that comes back arrives at rest rather than where it left off half
- * a song ago.
+ * the whole post stack and the palette. This is the entry point the director
+ * feeds. A study at presence 0 is not resolved and is not in the output, so
+ * the renderer never touches it and whatever its shapes remembered goes with
+ * it: a study that comes back arrives at rest rather than where it left off
+ * half a song ago.
  *
  * `dt` is the real seconds since the last call, and only the shaped rows read
  * it. A caller that passes none holds every shape where it is, which is what
  * a single reading of a frame wants.
+ *
+ * `palette` is a pinned cast's own, held over the looks'. Without it the
+ * palette is the one the looks name.
  */
 export function resolveLive(
   live: readonly LiveStudy[],
@@ -512,6 +587,7 @@ export function resolveLive(
   tension: number,
   out: CastFrame,
   dt = 0,
+  palette?: PaletteId,
 ): CastFrame {
   // Deleting from a Map while walking its keys is safe, and spares the copy.
   for (const id of out.knobs.keys()) {
@@ -556,6 +632,8 @@ export function resolveLive(
   }
 
   blendLooks(looks, out.post)
+  if (palette) choosePalette(out.palette, palette)
+  else blendPalette(looks, out.palette)
   return out
 }
 
@@ -584,7 +662,7 @@ export function resolveCast(
   }
 
   for (const entry of live) entry.presence = presences?.get(entry.id) ?? 1
-  return resolveLive(live, cast.canvas, features, tension, out, dt)
+  return resolveLive(live, cast.canvas, features, tension, out, dt, cast.palette ?? PINNED_PALETTE)
 }
 
 /**
@@ -596,4 +674,5 @@ export const liveCast = (cast: Cast): LiveCast => ({
   studies: castStudyIds(cast).map((id) => ({ id, presence: 1, override: cast.overrides[id] })),
   canvas: cast.canvas,
   tension: 0,
+  palette: cast.palette ?? PINNED_PALETTE,
 })

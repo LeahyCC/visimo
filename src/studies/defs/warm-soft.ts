@@ -44,4 +44,7 @@ export const WARM_SOFT: LookStudy = {
   ],
   cost: 'cheap',
   stages: ['bloom', 'chromatic', 'tonemap', 'grain'],
+  // Warm and soft asks for colour to match: the low-chroma pastel, which is
+  // the quiet end of the catalogue's colour as this is its quiet look.
+  palette: 'dusk',
 }

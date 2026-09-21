@@ -9,7 +9,7 @@
  */
 import { F } from '../audio/FeatureExtractor'
 import { resampleWaveform } from '../audio/waveform'
-import { paletteAt } from '../scenes/fluid.params'
+import { paletteAt } from '../palettes/active'
 
 /**
  * The sound drawn as a line, added to the scene's own picture before the
@@ -574,11 +574,12 @@ export const ribbonRuns = (params: PostParams) =>
   stageEnabled(params, 'ribbon') && params.ribbon.intensity > 0 && params.ribbon.width > 0
 
 /**
- * The colour of the line: the fluid's own palette at the song's key, scaled so
- * its brightest channel is 1. The palette's dimmest stop peaks at 0.34 and its
- * brightest at 0.94, so left as they are the line would be about a third as
- * bright in one key as in another and `intensity` would mean a different
- * thing in each. Scaled, it is the peak brightness whatever the key.
+ * The colour of the line: the palette showing, at the song's key, scaled so its
+ * brightest channel is 1. Classic's dimmest stop peaks at 0.34 and its
+ * brightest at 0.94, and the designed palettes differ from one another too, so
+ * left as they are the line would be about a third as bright in one key or one
+ * palette as in another and `intensity` would mean a different thing in each.
+ * Scaled, it is the peak brightness whatever the key.
  *
  * `offset` moves along the palette from the ribbon's own place in it, so the
  * streaks can scatter their hues around the ribbon's without a palette of
@@ -589,7 +590,7 @@ export function ribbonColour(features: Float32Array, offset = 0): [number, numbe
 }
 
 /**
- * The fluid's palette at one coordinate, scaled so its brightest channel is 1.
+ * The palette showing at one coordinate, scaled so its brightest channel is 1.
  * Split out of `ribbonColour` so an ink that spreads its colour around the
  * key, the shards, draws from the same palette at the same peak brightness
  * and does not keep a second one.

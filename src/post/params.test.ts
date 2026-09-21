@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { paletteAt } from '../palettes/active'
 import { AUDIO_FIELDS } from '../presets/knobs'
-import { paletteAt, visibleExtent } from '../scenes/fluid.params'
+import { visibleExtent } from '../scenes/fluid.params'
 import { carriedCanvas } from '../studies/cast'
 import { CASTS } from '../studies/casts/index'
 import { castFrame, resolveCast, resolveLive } from '../studies/resolve'

@@ -42,4 +42,7 @@ export const CLEAN_GLASS: LookStudy = {
   ],
   cost: 'cheap',
   stages: ['bloom', 'tonemap'],
+  // Its home is the tonal end of the space (0.8), where the harmony is clear
+  // and the picture wants a cool, clear pair of hues rather than a warm one.
+  palette: 'aurora',
 }

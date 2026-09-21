@@ -29,10 +29,6 @@ import {
   MAX_BED_EMITTERS,
   MAX_EMITTERS,
   MAX_EVENTS,
-  PALETTE_SIZE,
-  PALETTE_STOPS,
-  paletteAt,
-  paletteLut,
   SIM_UNIFORM_FLOATS,
   simSize,
   STILL_LAYOUT,
@@ -283,65 +279,6 @@ describe('layouts', () => {
         for (const splat of built.splats) expect(Math.hypot(splat.dx, splat.dy)).toBeCloseTo(1, 6)
       }
     })
-  })
-})
-
-describe('palette', () => {
-  it('is one opaque row of the requested length', () => {
-    const lut = paletteLut()
-    expect(lut).toHaveLength(PALETTE_SIZE * 4)
-    for (let index = 3; index < lut.length; index += 4) expect(lut[index]).toBe(255)
-  })
-
-  it('starts and ends on the same colour, so the coordinate wraps with no seam', () => {
-    const lut = paletteLut()
-    const last = (PALETTE_SIZE - 1) * 4
-    for (let part = 0; part < 3; part++) expect(lut[last + part]).toBe(lut[part])
-  })
-
-  it('lands on each stop and moves between them', () => {
-    const lut = paletteLut(PALETTE_SIZE)
-    const stop = PALETTE_STOPS[3]
-    expect(stop).toBeDefined()
-    const at = Math.round((stop?.at ?? 0) * (PALETTE_SIZE - 1)) * 4
-    expect(lut[at]).toBeCloseTo(Math.round((stop?.colour[0] ?? 0) * 255), -1)
-    // Not one flat colour: the middle differs from the ends.
-    expect(lut[PALETTE_SIZE * 2]).not.toBe(lut[0])
-  })
-
-  it('gives the colour at a coordinate as floats, landing on each stop', () => {
-    for (const stop of PALETTE_STOPS.slice(0, -1)) {
-      const [red, green, blue] = paletteAt(stop.at)
-      expect(red).toBeCloseTo(stop.colour[0], 9)
-      expect(green).toBeCloseTo(stop.colour[1], 9)
-      expect(blue).toBeCloseTo(stop.colour[2], 9)
-    }
-
-    // Halfway between two stops is halfway between their colours.
-    const [from, to] = [PALETTE_STOPS[2], PALETTE_STOPS[3]]
-    const middle = paletteAt(((from?.at ?? 0) + (to?.at ?? 0)) / 2)
-    expect(middle[0]).toBeCloseTo(((from?.colour[0] ?? 0) + (to?.colour[0] ?? 0)) / 2, 9)
-  })
-
-  it('wraps its coordinate, so the key and a drift can push it round any number of times', () => {
-    for (const at of [0, 0.13, 0.5, 0.87]) {
-      const wanted = paletteAt(at)
-      for (const turns of [-2, -1, 1, 3]) {
-        const got = paletteAt(at + turns)
-        got.forEach((value, index) => expect(value).toBeCloseTo(wanted[index] ?? 0, 9))
-      }
-    }
-
-    paletteAt(1).forEach((value, index) => expect(value).toBeCloseTo(paletteAt(0)[index] ?? 0, 9))
-  })
-
-  it('is the lookup table, texel for texel', () => {
-    const lut = paletteLut()
-    for (let index = 0; index < PALETTE_SIZE; index++) {
-      const colour = paletteAt(index / (PALETTE_SIZE - 1))
-      for (let part = 0; part < 3; part++)
-        expect(lut[index * 4 + part]).toBe(Math.round((colour[part] ?? 0) * 255))
-    }
   })
 })
 

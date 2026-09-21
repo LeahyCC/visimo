@@ -64,4 +64,6 @@ export const IMPACT_FLASH: LookStudy = {
   ],
   cost: 'cheap',
   stages: ['bloom', 'tonemap'],
+  // The drop lands as heat, against squeeze's cold build before it.
+  palette: 'ember',
 }

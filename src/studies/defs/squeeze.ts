@@ -62,4 +62,7 @@ export const SQUEEZE: LookStudy = {
   ],
   cost: 'cheap',
   stages: ['bloom', 'tonemap', 'grade'],
+  // The build holds its breath, and cold is what that looks like. Impact flash
+  // is ember, so the drop's turn to heat is also a turn of colour.
+  palette: 'abyss',
 }

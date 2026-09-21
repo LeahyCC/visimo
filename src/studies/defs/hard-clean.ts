@@ -43,4 +43,7 @@ export const HARD_CLEAN: LookStudy = {
   ],
   cost: 'cheap',
   stages: ['bloom', 'chromatic', 'tonemap'],
+  // The hard end of the catalogue: full chroma, so nothing about the colour
+  // softens what the look has sharpened.
+  palette: 'neon',
 }

@@ -75,6 +75,7 @@ const look = (id: string, fit: Moments, made: Made = {}): LookStudy => ({
   mapping: [],
   cost: made.cost ?? 'cheap',
   stages: ['tonemap'],
+  palette: 'classic',
 })
 
 /**

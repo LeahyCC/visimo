@@ -46,6 +46,7 @@ import { ShardsInk } from '../impls/ShardsInk'
 import { SparksInk } from '../impls/SparksInk'
 import { SpectrumInk } from '../impls/SpectrumInk'
 import { StreaksInk } from '../impls/StreaksInk'
+import { setPalette } from '../palettes/active'
 import { mergePostPatch, patchPostParams, postSummary } from '../post/params'
 import type { PostParams, PostPatch } from '../post/params'
 import { PostStack, SCENE_FORMAT } from '../post/PostStack'
@@ -960,7 +961,10 @@ class Renderer {
     // build unless a director was choosing.
     const live = this.live
     const tension = this.packet[F.tension] ?? 0
-    resolveLive(live.studies, live.canvas, this.packet, tension, this.resolved, dt)
+    resolveLive(live.studies, live.canvas, this.packet, tension, this.resolved, dt, live.palette)
+    // Before any flow or ink updates, since they read the shared palette: the
+    // fluid to write its lookup table and the inks for their colours.
+    setPalette(this.resolved.palette, this.packet[F.keyHue] ?? 0)
     if (this.postPatch) patchPostParams(this.resolved.post, this.postPatch)
     const flows = this.liveFlowStudies
 

@@ -10,6 +10,8 @@
  * cast files are compiled in rather than fetched, so a failure is a mistake
  * in the repository, and every message names the file and the path inside it.
  */
+import { isPaletteId, PALETTE_IDS } from '../palettes/palette'
+import type { PaletteId } from '../palettes/palette'
 import { DEFAULT_POST_PARAMS } from '../post/params'
 import type { PostKnob } from '../post/params'
 import type { Curve, HoldPeriod, Shape, ShapeKind } from '../presets/knobs'
@@ -90,7 +92,16 @@ export type Cast = {
   canvas: CastCanvas
   /** By study id, and only for studies this cast holds. */
   overrides: Readonly<Record<string, CastOverride>>
+  /**
+   * The palette a pinned cast draws in, over the look's own. Left out it is
+   * classic, not the look's: a cast is pinned to have one fixed picture, and
+   * the pinned casts were drawn before looks named a palette.
+   */
+  palette?: PaletteId
 }
+
+/** What a pinned cast is coloured in when its file does not say. */
+export const PINNED_PALETTE: PaletteId = 'classic'
 
 export type PinnedCast = Cast & { id: string; name: string }
 
@@ -104,7 +115,7 @@ export const castStudyIds = (cast: Cast): readonly string[] =>
  */
 export const MAX_INKS = 3
 
-const KEYS = ['id', 'name', 'flow', 'inks', 'look', 'canvas', 'overrides']
+const KEYS = ['id', 'name', 'flow', 'inks', 'look', 'canvas', 'overrides', 'palette']
 const ROW_KEYS = ['from', 'to', 'gain', 'curve', 'scale', 'shape']
 const CANVAS_ROW_KEYS = ['from', 'to', 'gain', 'curve']
 const SCALE_KEYS = ['from', 'curve']
@@ -534,5 +545,13 @@ export function parseCast(value: unknown, source: string): PinnedCast {
     look: look.id,
     canvas: readCanvas(value.canvas, source, 'canvas'),
     overrides,
+    palette: readPalette(value.palette, source, 'palette'),
   }
+}
+
+function readPalette(value: unknown, source: string, path: string): PaletteId {
+  if (value === undefined) return PINNED_PALETTE
+  const id = readString(value, source, path)
+  if (!isPaletteId(id)) fail(source, path, `is not a palette; they are ${list(PALETTE_IDS)}`)
+  return id
 }

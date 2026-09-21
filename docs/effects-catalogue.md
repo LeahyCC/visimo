@@ -9,12 +9,19 @@ The aim: whatever the song is, something in this list was made for it. A study i
 One row is one card is one branch is one PR. Nobody builds a row that is not theirs.
 
 ```text
-1. Pick a row whose status is `open`.
-2. Change status to `claimed: feature/study-<id>` in a one-line commit on main. That is the lock.
-3. Build it on that branch. Touch only your own files (below).
-4. PR. The lead reviews it in the bench at a quiet passage, a build and a drop.
-5. On merge the lead sets status to `built`.
+1. git fetch. Read this file on origin/main and run `gh pr list`. A row is free only if its
+   status is `open` AND no open PR is named for it.
+2. BEFORE any code: branch `feature/study-<id>` off origin/main, change the row's status to
+   `claimed: feature/study-<id>`, commit only that, push, and open a DRAFT PR titled
+   "Add the <id> study". The draft PR is the lock, and everyone can see it.
+3. Build on that branch. Touch only your own files (below).
+4. Keep the docs current as you go, not at the end: your row here, docs/studies/<id>.md, and
+   the README row. If the plan for the study changes, the row changes in the same push.
+5. Mark the PR ready. The lead reviews it in the bench at a quiet passage, a build and a drop.
+6. The last commit on the branch sets status to `built`, so it lands with the merge.
 ```
+
+Several builders work from this list at once, board cards and hand-started runs alike. They all follow the same steps, so the draft PR list is the one place to see what is taken.
 
 If a row is wrong (bad idea, wrong kind, should merge with another), say so in the PR or to the lead. Do not quietly build something else.
 

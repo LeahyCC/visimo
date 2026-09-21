@@ -92,9 +92,9 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
       let across = abs((frag.x - origin.x) * dir.y - (frag.y - origin.y) * dir.x);
       // The rings' line shape: full across the core, a smoothstep down across
       // the glow, exactly zero past it.
-      let from = max(params.beam.x - params.beam.y, 0.0);
-      let to = params.beam.x + params.beam.y;
-      let at = clamp((across - from) / (to - from), 0.0, 1.0);
+      let inner = max(params.beam.x - params.beam.y, 0.0);
+      let outer = params.beam.x + params.beam.y;
+      let at = clamp((across - inner) / (outer - inner), 0.0, 1.0);
       var add = 1.0 - at * at * (3.0 - 2.0 * at);
       if (b == flick_at) {
         add = add * (1.0 + params.beam.z * FLICK_GAIN);

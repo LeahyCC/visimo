@@ -406,5 +406,6 @@ export function writePetalsUniform(
     out[slot + 2] = petal.lit
     out[slot + 3] = petal.hue
   })
+
   return out
 }

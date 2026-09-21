@@ -65,6 +65,14 @@
  * second, so a row on it behaves like a row on `beatPulse` and fires once a
  * drop rather than once a beat. They are tuned on synthetic structure and
  * have not been tried on real tracks; the README says what that leaves.
+ *
+ * And the notes. `chroma0` to `chroma11` are the twelve pitch classes from C
+ * to B, each how strongly that note is sounding now: the strongest note of a
+ * clear chord reads near 1, the rest near 0, and silence and drums alone read
+ * 0 in all twelve. Quick to rise and slower to fall, and loudness independent.
+ * Where `keyHue` says what key the song is in, these say what is being
+ * played, so a study can light a chord. Twelve rows of the same kind, which a
+ * mapping reads one at a time by name.
  */
 export const AUDIO_FIELDS = [
   'sub',
@@ -99,6 +107,18 @@ export const AUDIO_FIELDS = [
   'rest',
   'impact',
   'barPhase',
+  'chroma0',
+  'chroma1',
+  'chroma2',
+  'chroma3',
+  'chroma4',
+  'chroma5',
+  'chroma6',
+  'chroma7',
+  'chroma8',
+  'chroma9',
+  'chroma10',
+  'chroma11',
 ] as const
 export type AudioField = (typeof AUDIO_FIELDS)[number]
 

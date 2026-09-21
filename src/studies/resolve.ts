@@ -344,8 +344,9 @@ const paletteShare = new Float64Array(PALETTE_IDS.length)
  * the same shares the looks are blended by.
  *
  * A choice is two palettes and a mix, so with three looks live the weakest
- * palette is dropped. The director never has more than two at once, and a
- * hand-built list that does is drawn by its two strongest rather than refused.
+ * palette is dropped. The director fades one look into another, which is two
+ * at a time; a third would need a change landing mid-glide, and a list with
+ * one is drawn by its two strongest rather than refused.
  * The pair is kept in the registry's order, `from` the earlier, so it does not
  * swap ends when one palette overtakes the other halfway through a fade: the
  * mix runs 0 to 1 once, and the colour at half is the same from either side.

@@ -203,6 +203,25 @@ describe('what the music does to it', () => {
   })
 })
 
+describe('the horizon', () => {
+  it('widens with the level and the kick, and it is the width and never the light', () => {
+    const quiet = at(packetOf({ energy: 0.1 }))
+    const loud = at(packetOf({ energy: 1 }))
+    expect(loud.horizon).toBeGreaterThan(quiet.horizon ?? 0)
+    expect(at(packetOf({ ...GROOVE, bassPulse: 1 })).horizon).toBeGreaterThan(
+      at(packetOf({ ...GROOVE, bassPulse: 0 })).horizon ?? 0,
+    )
+    // The light is the study's own gate and no row lifts it past rest.
+    expect(at(filled(1)).intensity).toBeCloseTo(study.knobs.intensity ?? 0, 9)
+  })
+
+  it('stays wide and dim: a reach a tenth of the frame at rest and under a fifth at the most', () => {
+    expect(study.knobs.horizon).toBeGreaterThan(0.05)
+    expect(study.knobs.horizon).toBeLessThan(0.12)
+    expect(at(filled(1)).horizon).toBeLessThan(0.25)
+  })
+})
+
 describe('what tension does', () => {
   it('rushes the grid toward you and narrows the valley', () => {
     const calm = at(packetOf({ ...GROOVE }), 0)
@@ -228,7 +247,7 @@ describe('how much it lights', () => {
     expect(Object.keys(study.knobs).sort()).toEqual([...GRID_KNOBS].sort())
   })
 
-  it('lights under a fifth of a 16:9 frame at the widest its own mapping reaches', () => {
+  it('lights under a seventh of a 16:9 frame at the widest its own mapping reaches', () => {
     // A full packet with the hardness at nothing and a kick landing: the
     // widest line and the widest glow the rows can add up to.
     const widest = packetOf({
@@ -240,12 +259,12 @@ describe('how much it lights', () => {
       tempoConfidence: 1,
     })
     const params = gridParams(at(widest, 0))
-    expect(params.width).toBeGreaterThan(1.5)
+    expect(params.width).toBeGreaterThan(1.1)
     for (const [width, height] of [
       [480, 270],
       [270, 270],
       [200, 360],
     ] as const)
-      expect(gridCoverage(params, width, height), `${width} by ${height}`).toBeLessThan(0.2)
+      expect(gridCoverage(params, width, height), `${width} by ${height}`).toBeLessThan(0.15)
   })
 })

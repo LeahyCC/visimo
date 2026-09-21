@@ -13,9 +13,13 @@ import {
   HEIGHT_COLUMNS,
   HEIGHT_DEPTH,
   HEIGHT_HALF_WIDTH,
+  HEIGHT_MAX_HEIGHT,
   HEIGHT_MAX_RELIEF,
+  HEIGHT_RIPPLE,
   HEIGHT_ROW_SPACING,
   HEIGHT_ROWS,
+  HEIGHT_SMOOTHING_FLOOR,
+  HEIGHT_SMOOTHING_HILLS,
   HEIGHT_TAPER,
   HEIGHT_VIEW_FLOATS,
   heightAt,
@@ -129,11 +133,24 @@ describe('the ring scrolls', () => {
     quick.advance(ROW, 1 / 60, bands(1))
     const slow = new HeightRing()
     slow.advance(ROW, 1, bands(1))
-    // The first row born goes in slot 0; column 3 is out toward the treble, where every band is 1.
-    const at = (ring: HeightRing) => ring.data[3] ?? 0
+    // The first row born goes in slot 0; the last column of the half is the one next to the centre line.
+    const at = (ring: HeightRing) => ring.data[HEIGHT_COLUMNS / 2 - 1] ?? 0
     expect(at(quick)).toBeGreaterThan(0.1)
     expect(at(quick)).toBeLessThan(0.5)
     expect(at(slow)).toBeGreaterThan(0.95)
+  })
+
+  it('lets the hills follow the music slowly and the floor quickly, so the sides read as landscape', () => {
+    const ring = new HeightRing()
+    ring.advance(ROW, 1 / 60, bands(1))
+    const floor = ring.data[HEIGHT_COLUMNS / 2 - 1] ?? 0
+    const hills = ring.data[0] ?? 0
+    expect(HEIGHT_SMOOTHING_HILLS).toBeGreaterThan(HEIGHT_SMOOTHING_FLOOR * 3)
+    expect(floor).toBeGreaterThan(hills * 2)
+    // Both are on the way to the same level: only how fast differs.
+    for (let row = 0; row < 400; row += 1) ring.advance(ROW, 1 / 60, bands(1))
+    expect(ring.data[0]).toBeGreaterThan(0.99)
+    expect(ring.data[HEIGHT_COLUMNS / 2 - 1]).toBeGreaterThan(0.99)
   })
 
   it('writes at most the whole ring for a jump longer than the field, and never for no travel', () => {
@@ -163,7 +180,8 @@ describe('the ring scrolls', () => {
   it('lets a fall in the music reach exactly nothing, so silence is a flat field', () => {
     const ring = flown(2, 8, 60, bands(0.8))
     expect(Math.max(...ring.data)).toBeGreaterThan(0.5)
-    for (let step = 0; step < 600; step += 1) ring.advance(8 / 60, 1 / 60, bands(0))
+    // The hills let go over a third of a second a row, so it takes a few hundred rows to be nothing.
+    for (let step = 0; step < 2400; step += 1) ring.advance(8 / 60, 1 / 60, bands(0))
     expect(Math.max(...ring.data)).toBe(0)
   })
 })
@@ -271,8 +289,18 @@ describe('the terrain', () => {
     const quiet = heightProfile(0, HEIGHT_HALF_WIDTH, PROFILE)
     const full = heightProfile(1, HEIGHT_HALF_WIDTH, PROFILE)
     expect(quiet).toBeGreaterThan(0)
-    expect(full).toBeCloseTo(HEIGHT_MAX_RELIEF, 9)
-    expect(quiet).toBeLessThan(full * 0.5)
+    expect(full).toBeCloseTo(HEIGHT_MAX_HEIGHT, 9)
+    expect(quiet).toBeLessThan(full * 0.6)
+  })
+
+  it('keeps the road nearly flat: what the bass does to the floor is a small share of what the mids and highs do to the hills', () => {
+    const floor = heightProfile(1, 0, PROFILE)
+    const hills = heightProfile(1, HEIGHT_HALF_WIDTH, PROFILE)
+    expect(HEIGHT_RIPPLE).toBeLessThan(0.1)
+    expect(floor).toBeLessThan(hills * 0.1)
+    // The middle third of the width is all floor at the valley the study rests at.
+    for (const x of [0, HEIGHT_HALF_WIDTH / 6, HEIGHT_HALF_WIDTH / 3])
+      expect(heightProfile(1, x, PROFILE), `x ${x}`).toBeLessThan(hills * 0.1)
   })
 
   it('narrows the valley live, for the whole field at once', () => {
@@ -408,13 +436,15 @@ describe('the view uniform', () => {
     )
 
     expect([...out.slice(0, 4)]).toEqual([1920, 1080, Math.fround(0.22), Math.fround(1.15)])
-    expect(out[4]).toBe(1)
+    expect(out[4]).toBe(HEIGHT_CAMERA.height)
     expect(out[5]).toBeCloseTo(HEIGHT_ROW_SPACING * 2.5, 6)
     expect(out[6]).toBeCloseTo(HEIGHT_ROW_SPACING, 6)
     expect(out[7]).toBe(HEIGHT_ROWS)
     expect(out[8]).toBe(HEIGHT_HALF_WIDTH)
     expect(out[9]).toBe(HEIGHT_COLUMNS)
-    expect(out[10]).toBeCloseTo(HEIGHT_MAX_RELIEF, 6)
+    // The tallest the ground reaches in world units, which is under the camera's own height.
+    expect(out[10]).toBeCloseTo(HEIGHT_MAX_HEIGHT, 6)
+    expect(out[10]).toBeLessThan(out[4] ?? 0)
     expect(out[11]).toBeCloseTo(HEIGHT_TAPER, 6)
     expect(out[12]).toBeCloseTo(0.4, 6)
     expect(out[13]).toBeCloseTo(0.7, 6)

@@ -6,7 +6,8 @@
  * `shaders/height.common.wgsl` reads it back; the maths here is the shader's
  * twin, and the tests measure this copy.
  *
- * The world is one unit of camera height tall. The camera flies down +z at
+ * The camera is `HEIGHT_CAMERA.height` units up, two, so a study whose cell is
+ * one unit gets a cell that is small against the view. The camera flies down +z at
  * the middle of the field, a little above the ground, looking at the horizon,
  * and the ground it flies over is a ring of rows. Each row is one strip across
  * the width, `HEIGHT_ROW_SPACING` of world apart, and holds the music at that
@@ -55,7 +56,7 @@ export const HEIGHT_ROW_SPACING = 0.4
 export const HEIGHT_DEPTH = HEIGHT_ROWS * HEIGHT_ROW_SPACING
 
 /** Where the columns end, either side of the centre line, in world units. Past it the outer column holds. */
-export const HEIGHT_HALF_WIDTH = 8
+export const HEIGHT_HALF_WIDTH = 14
 
 /**
  * The tallest the ground reaches, as a share of the camera's height. Under 1
@@ -69,21 +70,30 @@ export const HEIGHT_MAX_RELIEF = 0.85
 export const HEIGHT_TAPER = 0.75
 
 /** How much of the outer hills stand when the music has none: the sides are hills and not a flat. */
-export const HEIGHT_BASE = 0.35
+export const HEIGHT_BASE = 0.45
 
-/** How much the floor of the valley moves with the music, against the hills' whole range. */
-export const HEIGHT_RIPPLE = 0.18
+/**
+ * How much the floor of the valley moves with the music, against the hills'
+ * whole range. Small on purpose: the road you fly down is nearly flat and the
+ * bass is a swell in it, so the eye reads the sides as landscape and the middle
+ * as a road. At 0.18 the whole floor was wobble.
+ */
+export const HEIGHT_RIPPLE = 0.07
 
 /** How far a band's pulse lengthens what its level says, so a kick is a crest and not only a swell. */
 export const HEIGHT_KICK = 0.6
 
 /**
- * The time constant, in seconds, a new row follows the target with. Rows are
- * written a distance apart, so this is per second and not per row: a fast
- * flight writes rows close in time and smooths them, and a slow one writes
- * them far apart and takes each as it is.
+ * The time constant, in seconds, a new row follows the target with, on the
+ * centre line and at the outer edge. Rows are written a distance apart, so
+ * this is per second and not per row: a fast flight writes rows close in time
+ * and smooths them, and a slow one writes them far apart and takes each as it
+ * is. The floor is quick, so a kick is a crest, and the hills are slow, so the
+ * mids and highs move them as a landscape swells and not as a flicker; between
+ * the two it runs smoothly with the distance from the centre.
  */
-export const HEIGHT_SMOOTHING = 0.06
+export const HEIGHT_SMOOTHING_FLOOR = 0.06
+export const HEIGHT_SMOOTHING_HILLS = 0.35
 
 /** The longest step `advance` will travel in one go, in seconds. The renderer clamps to the same. */
 export const HEIGHT_MAX_STEP = 0.1
@@ -123,7 +133,15 @@ export type HeightCamera = {
 }
 
 /** A low camera looking down the road, the horizon a fifth of a screen above the middle. */
-export const HEIGHT_CAMERA: HeightCamera = { height: 1, horizon: 0.22, focal: 1.15 }
+export const HEIGHT_CAMERA: HeightCamera = { height: 2, horizon: 0.22, focal: 1.15 }
+
+/**
+ * The tallest the ground reaches in world units, which is what the shader is
+ * handed. The camera is two units up so that a grid cell, one unit, is small
+ * against the view: about thirty columns across the middle of the frame and
+ * cells that look square on the ground.
+ */
+export const HEIGHT_MAX_HEIGHT = HEIGHT_MAX_RELIEF * HEIGHT_CAMERA.height
 
 /** A point on the screen in half-heights from the middle, x to the right and y up. */
 export type Ndc = { x: number; y: number }
@@ -267,7 +285,7 @@ export class HeightRing {
    * than the whole field writes only the rows that could still be seen.
    *
    * `dt` is the seconds the distance took, and only sets how much each row
-   * follows the one before it (see `HEIGHT_SMOOTHING`), so several rows in one
+   * follows the one before it (see `HEIGHT_SMOOTHING_FLOOR`), so several rows in one
    * frame are smoothed as the frame's time divided among them. Nothing here is
    * allocated.
    */
@@ -282,10 +300,9 @@ export class HeightRing {
     // Rows a jump skipped over were never in view, so they are not written.
     this.nextRow = newest - due + 1
     const seconds = dt > 0 ? dt / due : Number.POSITIVE_INFINITY
-    const follow = 1 - Math.exp(-seconds / HEIGHT_SMOOTHING)
     for (let written = 0; written < due; written += 1) {
       const slot = this.nextRow % this.rows
-      this.fillRow(slot, (slot + this.rows - 1) % this.rows, features, follow)
+      this.fillRow(slot, (slot + this.rows - 1) % this.rows, features, seconds)
       this.newestSlot = slot
       this.nextRow += 1
     }
@@ -317,18 +334,24 @@ export class HeightRing {
 
   /**
    * Writes one row: the music across the width, followed toward from the row
-   * before, and mirrored so the two halves of the row are the same number for
-   * number. Each column is `across` from 0 on the centre line to 1 at the
-   * edge, and with an even count no column is on the line itself.
+   * before over `seconds`, and mirrored so the two halves of the row are the
+   * same number for number. Each column is `across` from 0 on the centre line
+   * to 1 at the edge, and with an even count no column is on the line itself.
+   * How quickly a column follows depends on where it is across: the floor
+   * quickly and the hills slowly (see `HEIGHT_SMOOTHING_HILLS`).
    */
-  private fillRow(slot: number, before: number, features: Float32Array, follow: number) {
+  private fillRow(slot: number, before: number, features: Float32Array, seconds: number) {
     const columns = this.columns
     const centre = (columns - 1) / 2
     const at = slot * columns
     const from = before * columns
     for (let column = 0; column < columns / 2; column += 1) {
-      const target = bandLevelAt(features, (centre - column) / centre)
+      const across = (centre - column) / centre
+      const target = bandLevelAt(features, across)
       const previous = this.data[from + column] ?? 0
+      const tau =
+        HEIGHT_SMOOTHING_FLOOR + (HEIGHT_SMOOTHING_HILLS - HEIGHT_SMOOTHING_FLOOR) * across
+      const follow = 1 - Math.exp(-seconds / tau)
       let value = previous + (target - previous) * follow
       // The tail of a fall is a number nothing can see and a float can hold for ever.
       if (value < 1e-4) value = 0
@@ -364,7 +387,7 @@ export function heightProfile(level: number, x: number, profile: HeightProfile):
   const wall = smoothstep(clamp(profile.valley, 0, MAX_VALLEY), 1, across)
   const hills = wall * (HEIGHT_BASE + (1 - HEIGHT_BASE) * level)
   const floor = (1 - wall) * HEIGHT_RIPPLE * level
-  return HEIGHT_MAX_RELIEF * clamp(profile.relief, 0, 1) * (hills + floor)
+  return HEIGHT_MAX_HEIGHT * clamp(profile.relief, 0, 1) * (hills + floor)
 }
 
 /**
@@ -442,7 +465,7 @@ export function writeHeightView(
   out[7] = ring.rows
   out[8] = HEIGHT_HALF_WIDTH
   out[9] = ring.columns
-  out[10] = HEIGHT_MAX_RELIEF
+  out[10] = HEIGHT_MAX_HEIGHT
   out[11] = HEIGHT_TAPER
   out[12] = heightValley(profile.valley)
   out[13] = clamp(profile.relief, 0, 1)

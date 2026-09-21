@@ -8,10 +8,15 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import {
+  acrossDetail,
   GRID_BASE_HUE,
   GRID_CELL,
+  GRID_HALO,
   GRID_HUE_GAP,
   GRID_LOD,
+  GRID_LOD_ACROSS,
+  GRID_MOTION,
+  GRID_MOVING_GLOW,
   GRID_RANGES,
   GRID_REACH,
   GRID_UNIFORM_FLOATS,
@@ -25,7 +30,7 @@ import {
   lineCrowding,
   lineDetail,
   lineLight,
-  lineNearness,
+  lineMotion,
   lineThinning,
   PULSE_FAR,
   PULSE_NEAR,
@@ -39,11 +44,12 @@ const REST = {
   speed: 1.2,
   height: 0.55,
   valley: 0.5,
-  width: 0.8,
-  glow: 3.2,
+  width: 0.55,
+  glow: 4,
   intensity: 1.6,
   pulse: 0,
   hue: 0,
+  horizon: 0.08,
 }
 
 describe('the knobs', () => {
@@ -174,7 +180,7 @@ describe('a line across itself', () => {
       previous = glow
     }
 
-    expect(lineLight(0, 0.8, 3).glow).toBe(0.5)
+    expect(lineLight(0, 0.8, 3).glow).toBe(GRID_HALO)
     expect(lineLight(60, 0.8, 3).glow).toBeLessThan(1e-9)
   })
 
@@ -190,13 +196,56 @@ describe('a line across itself', () => {
     }
   })
 
-  it('thins with distance, and leaves less of the crossing lines as they pack and of the nearest ones', () => {
+  it('thins with distance, and leaves less of the crossing lines as they pack', () => {
     expect(lineThinning(0)).toBe(1)
-    expect(lineThinning(GRID_REACH)).toBeCloseTo(0.4, 9)
+    expect(lineThinning(GRID_REACH)).toBeCloseTo(0.5, 9)
     expect(lineCrowding(0)).toBe(1)
     expect(lineCrowding(1)).toBeCloseTo(0.1, 9)
-    expect(lineNearness(0.5)).toBeCloseTo(0.3, 9)
-    expect(lineNearness(10)).toBe(1)
+  })
+
+  it('fades the lines that run into the distance sooner than the ones that cross them, and never adds any', () => {
+    expect(acrossDetail(0)).toBe(1)
+    expect(acrossDetail(GRID_LOD_ACROSS.start)).toBe(1)
+    expect(acrossDetail(GRID_LOD_ACROSS.end)).toBe(0)
+    // Sooner: where a crossing line is still whole, one that runs away has started to go.
+    expect(GRID_LOD_ACROSS.start).toBeLessThan(GRID_LOD.start)
+    expect(acrossDetail(0.1)).toBeLessThan(lineDetail(0.1))
+    let previous = 1
+    for (let footprint = 0; footprint < 0.3; footprint += 0.005) {
+      expect(acrossDetail(footprint)).toBeLessThanOrEqual(previous)
+      previous = acrossDetail(footprint)
+    }
+  })
+
+  it('draws a moving line with a small glow and a still one with the wide one', () => {
+    // What a moving line leaves in the canvas is in proportion to its body, so the body is kept small.
+    expect(GRID_MOVING_GLOW).toBeLessThan(0.5)
+    expect(GRID_HALO).toBeLessThan(0.5)
+  })
+})
+
+describe('a line that moves across the frame', () => {
+  it('is whole while it is slow, and at its floor once it is fast', () => {
+    expect(lineMotion(0, 1080)).toBe(1)
+    expect(lineMotion(GRID_MOTION.start, 1080)).toBe(1)
+    expect(lineMotion(GRID_MOTION.end, 1080)).toBeCloseTo(GRID_MOTION.floor, 9)
+    expect(lineMotion(1e6, 1080)).toBeCloseTo(GRID_MOTION.floor, 9)
+  })
+
+  it('only ever gets fainter the faster it goes', () => {
+    let previous = 1
+    for (let speed = 0; speed < 1500; speed += 25) {
+      const share = lineMotion(speed, 1080)
+      expect(share).toBeLessThanOrEqual(previous)
+      expect(share).toBeGreaterThanOrEqual(GRID_MOTION.floor)
+      previous = share
+    }
+  })
+
+  it('asks for the same crossing on a bigger canvas, since pixels are smaller', () => {
+    // Twice the height is twice the pixels for the same picture, so twice the speed.
+    expect(lineMotion(GRID_MOTION.end * 2, 2160)).toBeCloseTo(GRID_MOTION.floor, 9)
+    expect(lineMotion(GRID_MOTION.start * 2, 2160)).toBe(1)
   })
 })
 
@@ -215,18 +264,37 @@ describe('the uniform', () => {
     )
   }
 
-  it('lays its twelve floats out as the shader reads them', () => {
+  it('lays its sixteen floats out as the shader reads them', () => {
     const out = write()
-    expect(out).toHaveLength(12)
+    expect(out).toHaveLength(16)
     expect(out[2]).toBeCloseTo(1.6, 6)
-    expect(out[3]).toBeCloseTo(3.2, 6)
-    expect(out[4]).toBeCloseTo(0.8, 6)
+    expect(out[3]).toBeCloseTo(4, 6)
+    expect(out[4]).toBeCloseTo(0.55, 6)
     expect(out[5]).toBe(GRID_CELL)
     expect(out[6]).toBe(GRID_REACH)
     expect(out[7]).toBeCloseTo(HORIZON_GAIN, 6)
     expect(out[8]).toBe(0.25)
     // No pulse in the air: nothing of it reaches the shader.
     expect(out[11]).toBe(0)
+    // The horizon's reach, the speeds a crossing line fades between on this canvas, and the flight in cells a second.
+    expect(out[12]).toBeCloseTo(0.08, 6)
+    expect(out[13]).toBeCloseTo(GRID_MOTION.start, 6)
+    expect(out[14]).toBeCloseTo(GRID_MOTION.end, 6)
+    expect(out[15]).toBeCloseTo(1.2 / GRID_CELL, 6)
+  })
+
+  it('scales the speeds a line fades at with the canvas, so a 4K one fades the same lines', () => {
+    const at4k = writeGridUniform(
+      gridParams(REST),
+      features,
+      3840,
+      2160,
+      0,
+      PULSE_SECONDS,
+      new Float32Array(GRID_UNIFORM_FLOATS),
+    )
+    expect(at4k[13]).toBeCloseTo(GRID_MOTION.start * 2, 6)
+    expect(at4k[14]).toBeCloseTo(GRID_MOTION.end * 2, 6)
   })
 
   it('colours the near lines and the horizon a third of a turn apart, and turns both with the key', () => {
@@ -253,7 +321,7 @@ describe('the uniform', () => {
 describe('what it lights', () => {
   // The widest lines the study reaches: a full packet with the hardness at
   // nothing and the bass pulse up, at the intensity it rests at.
-  const WIDEST = gridParams({ ...REST, width: 1.7, glow: 5.7 })
+  const WIDEST = gridParams({ ...REST, speed: 2.7, width: 1.2, glow: 6 })
   const CANVASES = [
     [480, 270],
     [270, 270],
@@ -264,7 +332,7 @@ describe('what it lights', () => {
     for (const [width, height] of CANVASES) {
       const share = gridCoverage(WIDEST, width, height)
       expect(share, `${width} by ${height}`).toBeGreaterThan(0.02)
-      expect(share, `${width} by ${height}`).toBeLessThan(0.25)
+      expect(share, `${width} by ${height}`).toBeLessThan(0.15)
     }
   })
 
@@ -276,6 +344,12 @@ describe('what it lights', () => {
     const small = gridCoverage(gridParams(REST), 320, 180)
     const large = gridCoverage(gridParams(REST), 640, 360)
     expect(Math.abs(small - large)).toBeLessThan(0.04)
+  })
+
+  it('lights less the faster the flight, since the fast lines are the ones that leave copies', () => {
+    const slow = gridCoverage(gridParams({ ...REST, speed: 0.4 }), 480, 270)
+    const fast = gridCoverage(gridParams({ ...REST, speed: 8 }), 480, 270)
+    expect(fast).toBeLessThan(slow)
   })
 
   it('lights nothing with no light', () => {

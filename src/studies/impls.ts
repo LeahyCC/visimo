@@ -332,7 +332,8 @@ export type LightningKnob = (typeof LIGHTNING_KNOBS)[number]
  * of the field's half width); `width` and `glow` are a line's half width and
  * its glow in pixels on a 1080 high canvas; `pulse` is 1 on the frame of an
  * impact and starts the bright band racing in from the horizon; `hue` is added
- * to the key.
+ * to the key; `horizon` is how far the horizon's glow reaches above the line, in
+ * half-heights of the frame, which is the width and never the light.
  */
 export const GRID_KNOBS = [
   'speed',
@@ -343,6 +344,7 @@ export const GRID_KNOBS = [
   'intensity',
   'pulse',
   'hue',
+  'horizon',
 ] as const
 export type GridKnob = (typeof GRID_KNOBS)[number]
 

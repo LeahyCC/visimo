@@ -33,34 +33,48 @@ struct Look {
   // The lines' phase in cells' worth of travel, the pulse's place in
   // 1 / distance, its width in the same, and its strength.
   motion: vec4<f32>,
+  // How far the horizon's glow reaches above the line in half-heights, the
+  // speed a crossing line starts to fade at and is at its floor by (pixels a
+  // second), and the flight in cells a second.
+  sky: vec4<f32>,
 }
 
 @group(0) @binding(2) var<uniform> look: Look;
 
 // How much of a line's own light its glow has at the line's edge.
-const HALO_GAIN: f32 = 0.5;
+const HALO_GAIN: f32 = 0.28;
 // A pixel that spans this many cells has lines too fine to resolve: they are
 // whole at the start and gone at the end.
 const LOD_START: f32 = 0.16;
 const LOD_END: f32 = 0.48;
+// The lines that run into the distance pack together toward the vanishing
+// point, and are gone sooner: a pixel that spans this many cells across.
+const LOD_ACROSS_START: f32 = 0.04;
+const LOD_ACROSS_END: f32 = 0.16;
+// The moving lines' glow is this share of the still lines'. What a moving
+// line leaves in the canvas is in proportion to all of it, the body
+// included, so the body is kept small and the hot core carries the line.
+const MOVING_GLOW: f32 = 0.35;
 // How much brighter a line is on the tallest, hottest ground, and how much a
 // slope facing the camera adds.
 const HEAT_LIFT: f32 = 1.4;
 const FACING_LIFT: f32 = 0.5;
-// The nearest lines move fastest across the frame and leave the longest
-// trails, so they are held back to this share.
-const NEAR_DIM: f32 = 0.3;
+// A crossing line that moves across the frame faster than `sky.y` pixels a
+// second is drawn fainter and at `sky.z` is at this share of its light, since
+// the canvas keeps what was drawn and a fast line leaves a second line behind
+// it and not a blur.
+const MOTION_FLOOR: f32 = 0.02;
 
 // The lines that run into the distance stand still on the screen while the
 // ground is flat, and the canvas sums a still mark to about forty times what
 // is drawn, so they are drawn at this share of the lines that cross them.
-const STATIC_LINE: f32 = 0.08;
+const STATIC_LINE: f32 = 0.14;
 
 // How much of the crossing lines' light is taken away as they pack together:
 // none while a pixel spans `CROWD_START` cells or fewer, `CROWD` of it by
 // `CROWD_END`.
 const CROWD: f32 = 0.9;
-const CROWD_START: f32 = 0.02;
+const CROWD_START: f32 = 0.03;
 const CROWD_END: f32 = 0.12;
 
 // A fully saturated hue, brightest channel at 1: three cosines a third of a
@@ -114,22 +128,30 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
 
   // Lines thin as they recede, and the pixel-wide floor of the core is what
   // keeps a far line a faint one rather than a gap.
-  let thin = mix(1.0, 0.4, smoothstep(2.0, reach * 0.6, ground.dz));
+  let thin = mix(1.0, 0.5, smoothstep(4.0, reach * 0.6, ground.dz));
   let half_px = look.line.x * thin;
   let across = line_light(to_line.x, half_px, look.light.w);
-  let along = line_light(to_line.y, half_px, look.light.w);
-  let detail = vec2<f32>(line_detail(footprint.x), line_detail(footprint.y));
+  let along = line_light(to_line.y, half_px, look.light.w * MOVING_GLOW);
+  let detail = vec2<f32>(
+    1.0 - smoothstep(LOD_ACROSS_START, LOD_ACROSS_END, footprint.x),
+    line_detail(footprint.y),
+  );
   // A line that moves leaves a trail as long as its speed times the canvas's
   // memory, which is about a cell a second's worth of cells, wherever it is,
   // while the gap between two of them shrinks with distance. So the further
   // the crossing lines are packed, the fainter they are drawn.
-  let sparse = 1.0 - CROWD * smoothstep(CROWD_START, CROWD_END, footprint.y);
+  let crowd = 1.0 - CROWD * smoothstep(CROWD_START, CROWD_END, footprint.y);
+  // How fast a crossing line moves on screen: the flight in cells a second over
+  // the cells a pixel spans along the ground.
+  let across_speed = look.sky.w / footprint.y;
+  let motion = 1.0 - (1.0 - MOTION_FLOOR) * smoothstep(look.sky.y, look.sky.z, across_speed);
+  let sparse = crowd * motion;
   let core = STATIC_LINE * across.x * detail.x + sparse * along.x * detail.y;
   let halo = STATIC_LINE * across.y * detail.x + sparse * along.y * detail.y;
   // How close to the middle of a line this pixel is, for the white-hot spine.
   let spine = max(
-    clamp(1.0 - to_line.x / (half_px + 0.75), 0.0, 1.0) * detail.x,
-    clamp(1.0 - to_line.y / (half_px + 0.75), 0.0, 1.0) * detail.y,
+    clamp(1.0 - to_line.x / (half_px + 0.5), 0.0, 1.0) * detail.x,
+    clamp(1.0 - to_line.y / (half_px + 0.5), 0.0, 1.0) * detail.y,
   );
 
   // The music in the ground: how much of it is here, how tall the ground is
@@ -153,21 +175,20 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
 
   // Colour is graded along the distance from the near hue to the far one, and
   // the hot middle of a line, the hot ground and the pulse all pull it to white.
-  let tint = mix(vivid(look.light.x), vivid(look.light.y), smoothstep(3.0, 14.0, ground.dz));
+  let tint = mix(vivid(look.light.x), vivid(look.light.y), smoothstep(6.0, 30.0, ground.dz));
   let white = clamp(spine * spine * 0.9 + heat * 0.25 + flare * 0.7, 0.0, 1.0);
   let core_colour = mix(tint, vec3<f32>(1.0), white);
 
   let fog = mix(height_fog(ground.dz, reach), 1.0, clamp(flare, 0.0, 1.0) * 0.85);
-  let near = mix(NEAR_DIM, 1.0, smoothstep(1.0, 3.5, ground.dz));
   let lift = 1.0 + HEAT_LIFT * heat + FACING_LIFT * facing + 3.0 * flare;
-  let lines = (core_colour * core + tint * halo) * look.light.z * fog * near * lift * ground.hit;
+  let lines = (core_colour * core + tint * halo) * look.light.z * fog * lift * ground.hit;
 
   // The horizon: a hairline exactly at it and a glow band round it, the far
   // hue with a white heart. It flares as the pulse sets off from it.
-  let glow = height_horizon_glow(ndc.y, 0.07);
+  let glow = height_horizon_glow(ndc.y, look.sky.x);
   let launch = look.motion.w * exp(-max(look.motion.y - 0.017, 0.0) * 50.0);
   let horizon = mix(vivid(look.light.y), vec3<f32>(1.0), 0.5 * glow.x)
-    * (glow.x * 0.9 + glow.y * 0.2)
+    * (glow.x * 0.9 + glow.y * 0.35)
     * look.light.z
     * look.line.w
     * (1.0 + 1.5 * launch);

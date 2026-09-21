@@ -37,13 +37,13 @@ import type { GridKnob } from '../studies/impls'
 import { groundPoint, HEIGHT_CAMERA, heightFog, pixelToNdc } from './height.params'
 
 /** Floats in the uniform; the shader's `Look` struct reads them in this order. */
-export const GRID_UNIFORM_FLOATS = 12
+export const GRID_UNIFORM_FLOATS = 16
 
 /** World units between two lines, across and along. One row spacing is 0.4, so a cell is two and a half rows. */
 export const GRID_CELL = 1
 
 /** The distance a line has faded to nothing at, and exactly nothing past. It is fog to true black. */
-export const GRID_REACH = 46
+export const GRID_REACH = 45
 
 /** The canvas height a `width` and `glow` are written against, the same the lasers' are. */
 const REFERENCE_HEIGHT = 1080
@@ -75,7 +75,12 @@ export const PULSE_NEAR = 0.8
  */
 export const PULSE_WIDTH = 0.05
 
-/** The horizon's light as a share of `intensity`. */
+/**
+ * The horizon's light at the line itself as a share of `intensity`. Small: the
+ * band is still on the screen, so the canvas sums it to about forty times what
+ * is drawn, and it is the width that carries the music (`horizon` below), not
+ * how bright it is.
+ */
 export const HORIZON_GAIN = 0.02
 
 /** The knob value an `impact` has to reach to start a pulse, and the one it has to fall under to be ready for another. */
@@ -88,7 +93,7 @@ export const PULSE_REARM = 0.2
  * at a full packet.
  */
 export const GRID_RANGES: Record<GridKnob, readonly [number, number]> = {
-  // World units a second the camera flies. A cell is one unit, so 8 is eight
+  // World units a second the camera flies. A cell is one unit, so 3 is three
   // lines a second passing under you.
   speed: [0, 20],
   // How tall the relief is, 0 flat to 1 the full range the kit allows.
@@ -107,6 +112,9 @@ export const GRID_RANGES: Record<GridKnob, readonly [number, number]> = {
   pulse: [0, 1],
   // Turns added to the key.
   hue: [-0.5, 0.5],
+  // How far the horizon's glow reaches above the line, in half-heights of the
+  // frame. It is the width and not the light that moves with the music.
+  horizon: [0.02, 0.3],
 }
 
 export type GridParams = Record<GridKnob, number>
@@ -123,6 +131,7 @@ const FALLBACK: GridParams = {
   intensity: 0,
   pulse: 0,
   hue: 0,
+  horizon: 0.08,
 }
 
 const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high)
@@ -208,14 +217,30 @@ export function pulseAt(age: number): { position: number; strength: number } {
 export const GRID_LOD = { start: 0.16, end: 0.48 } as const
 
 /** How much of a line's own light its glow has at the line's edge. The shader's `HALO_GAIN`. */
-export const GRID_HALO = 0.5
+export const GRID_HALO = 0.28
+
+/**
+ * The lines that run into the distance are gone sooner than the ones that cross
+ * them: a pixel that spans `start` cells across is all of one, `end` none of it.
+ * They pack toward the vanishing point, and what is drawn there the canvas sums
+ * to a bright point and sharpens into a dark wedge. The shader's `LOD_ACROSS_START`
+ * and `LOD_ACROSS_END`.
+ */
+export const GRID_LOD_ACROSS = { start: 0.04, end: 0.16 } as const
+
+/**
+ * The moving lines' glow as a share of the still lines'. What a moving line
+ * leaves in the canvas is in proportion to all of it, body included, so the body
+ * is kept small and the hot core carries the line. The shader's `MOVING_GLOW`.
+ */
+export const GRID_MOVING_GLOW = 0.35
 
 /**
  * The share of its light a line that runs into the distance is drawn at. It
  * stands still on the screen while the ground is flat, and the canvas sums a
  * still mark to about forty times what is drawn. The shader's `STATIC_LINE`.
  */
-export const GRID_STATIC_LINE = 0.08
+export const GRID_STATIC_LINE = 0.14
 
 /**
  * The lines that cross the view are drawn fainter as they pack together, which
@@ -225,14 +250,22 @@ export const GRID_STATIC_LINE = 0.08
  * light is lost while a pixel spans `start` cells or fewer, `amount` of it is
  * by `end`. The shader's `CROWD`, `CROWD_START` and `CROWD_END`.
  */
-export const GRID_CROWD = { amount: 0.9, start: 0.02, end: 0.12 } as const
+export const GRID_CROWD = { amount: 0.9, start: 0.03, end: 0.12 } as const
 
 /**
- * The nearest lines move fastest across the frame and leave the longest
- * trails, so they are drawn at `dim` of their light at the camera, rising to
- * all of it between `start` and `end` world units. The shader's `NEAR_DIM`.
+ * The lines that cross the view are also drawn fainter the faster they move
+ * across the frame, which is what puts a ghost of a line behind it: the canvas
+ * keeps what was drawn, a line that moves `m` pixels a frame leaves a copy of
+ * itself every `m` pixels, and past a few pixels those are separate lines and
+ * not a blur. Full light while a line crosses fewer than `start` pixels a
+ * second, `floor` of it by `end`, both on a 1080 high canvas and scaled with
+ * the canvas. At 60 frames a second 100 is under two pixels a frame, which is a
+ * blur along the way the line moves, and 420 is seven, which is a second line.
+ * The speed of a line on screen is the flight's cells a second over the cells
+ * one pixel spans along the ground. The shader's `MOTION_FLOOR` and the
+ * uniform's start and end.
  */
-export const GRID_NEAR = { dim: 0.3, start: 1, end: 3.5 } as const
+export const GRID_MOTION = { floor: 0.02, start: 100, end: 420 } as const
 
 /**
  * A line's light across it, in pixels from its centre: a core that is full
@@ -258,17 +291,30 @@ const smoothstep = (low: number, high: number, value: number) => {
 export const lineDetail = (footprint: number): number =>
   1 - smoothstep(GRID_LOD.start, GRID_LOD.end, footprint)
 
+/** The lines into the distance fade sooner. The shader's `detail.x`. */
+export const acrossDetail = (footprint: number): number =>
+  1 - smoothstep(GRID_LOD_ACROSS.start, GRID_LOD_ACROSS.end, footprint)
+
 /** How thin a line is at a distance, as a share of its width at the camera. The shader's `thin`. */
 export const lineThinning = (distance: number): number =>
-  1 - 0.6 * smoothstep(2, GRID_REACH * 0.6, distance)
+  1 - 0.5 * smoothstep(4, GRID_REACH * 0.6, distance)
 
 /** The share of light left to the crossing lines at this footprint. The shader's `sparse`. */
 export const lineCrowding = (footprint: number): number =>
   1 - GRID_CROWD.amount * smoothstep(GRID_CROWD.start, GRID_CROWD.end, footprint)
 
-/** The share of light left to a line this far from the camera, before the fog. The shader's `near`. */
-export const lineNearness = (distance: number): number =>
-  GRID_NEAR.dim + (1 - GRID_NEAR.dim) * smoothstep(GRID_NEAR.start, GRID_NEAR.end, distance)
+/**
+ * The share of light left to a crossing line that moves `pixelsPerSecond`
+ * across a canvas this high. The shader's `motion`.
+ */
+export const lineMotion = (pixelsPerSecond: number, canvasHeight: number): number => {
+  const scale = canvasHeight / REFERENCE_HEIGHT
+  return (
+    1 -
+    (1 - GRID_MOTION.floor) *
+      smoothstep(GRID_MOTION.start * scale, GRID_MOTION.end * scale, pixelsPerSecond)
+  )
+}
 
 /** A pixel counts as lit, for coverage, when its light passes this share of one line's core at the intensity of 1. */
 export const LIT_THRESHOLD = 0.1
@@ -276,7 +322,7 @@ export const LIT_THRESHOLD = 0.1
 /**
  * The share of a frame the grid lights, on flat ground with the camera at
  * rest: the pixels below the horizon whose light from the lines, at the
- * study's own intensity and after the fog, the near dimming and the loss of
+ * study's own intensity and after the fog, the fade of fast lines and the loss of
  * detail, passes `LIT_THRESHOLD`. Flat ground is where the lines are closest
  * together on screen, so it is the worst case: a hill spreads them out. The
  * horizon's own glow is not counted, it is a band a few percent of the frame
@@ -322,14 +368,15 @@ export function gridCoverage(
       const fromAcross = Math.abs(here.across - Math.round(here.across)) / footprint.across
       const fromAlong = Math.abs(here.along - Math.round(here.along)) / footprint.along
       const acrossLight = lineLight(fromAcross, width, glow)
-      const alongLight = lineLight(fromAlong, width, glow)
+      const alongLight = lineLight(fromAlong, width, glow * GRID_MOVING_GLOW)
+      const motion = lineMotion(params.speed / GRID_CELL / footprint.along, canvasHeight)
       const light =
-        (GRID_STATIC_LINE * (acrossLight.core + acrossLight.glow) * lineDetail(footprint.across) +
+        (GRID_STATIC_LINE * (acrossLight.core + acrossLight.glow) * acrossDetail(footprint.across) +
           lineCrowding(footprint.along) *
+            motion *
             (alongLight.core + alongLight.glow) *
             lineDetail(footprint.along)) *
         params.intensity *
-        lineNearness(here.distance) *
         heightFog(here.distance, GRID_REACH)
 
       if (light > LIT_THRESHOLD) lit += 1
@@ -344,6 +391,8 @@ export function gridCoverage(
  *   0 to 3    the near hue and the far hue in turns, the intensity, the glow's sigma in pixels
  *   4 to 7    a line's half width in pixels, the cell, the fog's reach, the horizon's glow
  *   8 to 11   the lines' phase, the pulse's place in 1 / distance, its width, its strength
+ *   12 to 15  the horizon's reach, the speed a crossing line starts to fade at and is at its
+ *             floor by (pixels a second on this canvas), and the flight in cells a second
  *
  * The key is read from the packet, not the knobs, because it is a colour the
  * tracker keeps, the way the lasers read it. `phase` is the kit's travel
@@ -374,5 +423,10 @@ export function writeGridUniform(
   out[9] = pulse.position
   out[10] = PULSE_WIDTH
   out[11] = pulse.strength
+  const scale = height / REFERENCE_HEIGHT
+  out[12] = params.horizon
+  out[13] = GRID_MOTION.start * scale
+  out[14] = GRID_MOTION.end * scale
+  out[15] = params.speed / GRID_CELL
   return out
 }

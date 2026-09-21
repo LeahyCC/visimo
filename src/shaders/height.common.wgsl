@@ -4,7 +4,7 @@
 // starts at 2. Everything here is a transcription of height.params.ts, which
 // is what the tests measure. Keep the two in step.
 //
-// The world is one unit of camera height tall. The camera flies down +z at the
+// The camera is `camera.x` units up (two, in the kit's own numbers). It flies down +z at the
 // middle of the field looking along the ground, so the horizon is a straight
 // line and a pixel's ray is (x, y - horizon, focal) in half-heights. The
 // ground is a ring of rows, one strip across the width each, that the CPU
@@ -168,13 +168,13 @@ fn height_fog(along: f32, reach: f32) -> f32 {
 
 // The horizon as two amounts, a hairline at exactly the horizon and the glow
 // round it. `spread` is how far the glow reaches above it in half-heights; it
-// reaches most of that below, where the far ground has already dissolved in fog
-// and the glow is what joins it to the horizon.
+// reaches nearly as far below, where the far ground has already dissolved in
+// fog and the glow is what joins it to the horizon.
 fn height_horizon_glow(ndc_y: f32, spread: f32) -> vec2<f32> {
   let e = ndc_y - height_view.screen.z;
   let pixel = 2.0 / height_view.screen.y;
   let line = exp(-(e * e) / (2.8 * pixel * pixel));
-  let side = select(0.8, 1.0, e > 0.0);
+  let side = select(0.9, 1.0, e > 0.0);
   let band = exp(-abs(e) / (spread * side));
   return vec2<f32>(line, band);
 }

@@ -50,10 +50,17 @@ const BUDGET_MS = 1000 / 60
 const byId = new Map(STUDIES.map((study) => [study.id, study]))
 
 /**
- * Everything the panel shows that changes on its own, read once. The knobs are
- * resolved here from the packet the renderer is using and not read out of the
- * renderer, which keeps them private: the resolver is the same one, on the
- * same packet, so the numbers are the ones the study was drawn with.
+ * Everything the panel shows that changes on its own, read once.
+ *
+ * The knobs come from the renderer, which resolved them for the frame it is
+ * drawing. They used to be resolved here instead, on the packet the renderer
+ * had written, which gave the same numbers and kept the renderer's own
+ * resolved frame private. A row may now carry a shape, which remembers where
+ * it was: a second resolver stepping the same rows five times a second would
+ * be reading a different study from the one on screen, and one handed no step
+ * at all would show every shaped row at rest. A study the renderer is not
+ * drawing has nothing to read, and is resolved here at rest, which is what it
+ * looks like the instant before it arrives.
  */
 function snapshot(state: BenchState, session: BenchSession): Snapshot {
   const packet = renderer.features
@@ -63,7 +70,8 @@ function snapshot(state: BenchState, session: BenchSession): Snapshot {
     const study = byId.get(id)
     const presence = state.presence[id] ?? 1
     if (!study || presence <= 0) continue
-    const now = resolveStudy(study, undefined, packet, tension, presence, {})
+    const now =
+      renderer.resolvedKnobs(id) ?? resolveStudy(study, undefined, packet, tension, presence, {})
     const lines = Object.entries(study.knobs).map(([knob, rest]) => ({
       knob,
       rest,

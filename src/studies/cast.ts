@@ -12,8 +12,8 @@
  */
 import { DEFAULT_POST_PARAMS } from '../post/params'
 import type { PostKnob } from '../post/params'
-import type { Curve } from '../presets/knobs'
-import { CURVES } from '../presets/knobs'
+import type { Curve, HoldPeriod, Shape, ShapeKind } from '../presets/knobs'
+import { CURVES, HOLD_PERIODS, SHAPES } from '../presets/knobs'
 import {
   describe,
   fail,
@@ -26,7 +26,7 @@ import {
 import { implKnobs, isImplKnob } from './impls'
 import { findStudy } from './registry'
 import { STUDY_FIELDS } from './types'
-import type { Study, StudyField, StudyMapping } from './types'
+import type { Study, StudyField, StudyMapping, StudyScale } from './types'
 
 /**
  * The feedback, which is the canvas itself and not a look. It is what carries
@@ -55,6 +55,12 @@ export type CanvasKnob = (typeof CANVAS_KNOBS)[number]
 export const isCanvasKnob = (value: string): value is CanvasKnob =>
   (CANVAS_KNOBS as readonly string[]).includes(value)
 
+/**
+ * The canvas's own rows. They take no `scale` and no `shape`: the canvas is
+ * the picture every study is drawing on rather than a study, it has no
+ * presence and nothing fades it, so there is nowhere for a row of its own to
+ * keep a memory that is dropped when something leaves.
+ */
 export type CanvasMapping = {
   from: StudyField
   to: CanvasKnob
@@ -99,6 +105,21 @@ export const castStudyIds = (cast: Cast): readonly string[] =>
 export const MAX_INKS = 3
 
 const KEYS = ['id', 'name', 'flow', 'inks', 'look', 'canvas', 'overrides']
+const ROW_KEYS = ['from', 'to', 'gain', 'curve', 'scale', 'shape']
+const CANVAS_ROW_KEYS = ['from', 'to', 'gain', 'curve']
+const SCALE_KEYS = ['from', 'curve']
+/**
+ * What each shape takes, beside its `kind`. It is a table rather than four
+ * branches of checks so that the message for a key in the wrong shape can
+ * name the keys that shape does take, which is the mistake this catches most:
+ * a `releaseMs` on a spring, or a `damping` on an envelope.
+ */
+const SHAPE_KEYS: Readonly<Record<ShapeKind, readonly string[]>> = {
+  envelope: ['attackMs', 'releaseMs'],
+  spring: ['frequency', 'damping'],
+  integrate: ['rate', 'wrap'],
+  hold: ['per'],
+}
 const CANVAS_KEYS = ['enabled', 'knobs', 'mapping']
 const OVERRIDE_KEYS = ['knobs', 'mapping']
 
@@ -238,6 +259,79 @@ function readCurve(value: unknown, source: string, path: string): Curve {
   return curve as Curve
 }
 
+/** A number that has to be positive, or zero as well when `zero` allows it. */
+function readAtLeast(value: unknown, source: string, path: string, zero: boolean): number {
+  const number = readNumber(value, source, path)
+  if (number < 0 || (!zero && number === 0))
+    fail(source, path, `is ${number}; it must be ${zero ? '0 or more' : 'more than 0'}`)
+  return number
+}
+
+/**
+ * The second field a row's signal is multiplied by. `from` is any field a row
+ * may read and `curve` is optional, as it is on the row itself, so the short
+ * form of it is a plain multiply by the level.
+ */
+function readScale(value: unknown, source: string, path: string): StudyScale {
+  if (!isRecord(value)) fail(source, path, `expected an object, got ${describe(value)}`)
+  for (const key of Object.keys(value))
+    if (!SCALE_KEYS.includes(key))
+      fail(source, `${path}.${key}`, `is not part of a scale; it has ${list(SCALE_KEYS)}`)
+  if (value.from === undefined) fail(source, `${path}.from`, 'is missing; a scale reads a field')
+  return {
+    from: readField(value.from, source, `${path}.from`),
+    curve: readCurve(value.curve, source, `${path}.curve`),
+  }
+}
+
+/**
+ * The stage with a memory over a row's signal. `kind` decides what else the
+ * object may hold, and every number is checked for a sign that means
+ * something: a negative attack or release is not a slower follower but a
+ * divergent one, a frequency of 0 is no spring at all, a damping of 0 is a
+ * spring that rings for ever and never settles on anything, and a wrap of 0
+ * is the way to say "do not wrap" and so is left out rather than written.
+ */
+function readShape(value: unknown, source: string, path: string): Shape {
+  if (!isRecord(value)) fail(source, path, `expected an object, got ${describe(value)}`)
+  const kind = readString(value.kind, source, `${path}.kind`)
+  if (!(SHAPES as readonly string[]).includes(kind))
+    fail(source, `${path}.kind`, `is not a shape; they are ${list(SHAPES)}`)
+  const allowed = SHAPE_KEYS[kind as ShapeKind]
+  for (const key of Object.keys(value))
+    if (key !== 'kind' && !allowed.includes(key))
+      fail(
+        source,
+        `${path}.${key}`,
+        `is not part of ${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}; it takes ${list(allowed)}`,
+      )
+  if (kind === 'envelope')
+    return {
+      kind,
+      attackMs: readAtLeast(value.attackMs, source, `${path}.attackMs`, true),
+      releaseMs: readAtLeast(value.releaseMs, source, `${path}.releaseMs`, true),
+    }
+
+  if (kind === 'spring')
+    return {
+      kind,
+      frequency: readAtLeast(value.frequency, source, `${path}.frequency`, false),
+      damping: readAtLeast(value.damping, source, `${path}.damping`, false),
+    }
+
+  if (kind === 'integrate') {
+    const rate = readNumber(value.rate, source, `${path}.rate`)
+    return value.wrap === undefined
+      ? { kind, rate }
+      : { kind, rate, wrap: readAtLeast(value.wrap, source, `${path}.wrap`, false) }
+  }
+
+  const per = readString(value.per, source, `${path}.per`)
+  if (!(HOLD_PERIODS as readonly string[]).includes(per))
+    fail(source, `${path}.per`, `is not a period; they are ${list(HOLD_PERIODS)}`)
+  return { kind: 'hold', per: per as HoldPeriod }
+}
+
 const article = (kind: Study['kind']) => (kind === 'ink' ? 'an' : 'a')
 
 /**
@@ -288,6 +382,15 @@ function readCanvasMapping(value: unknown, source: string, path: string): Canvas
   return value.map((row: unknown, index: number) => {
     const at = `${path}[${index}]`
     if (!isRecord(row)) fail(source, at, `expected an object, got ${describe(row)}`)
+    for (const key of Object.keys(row))
+      if (!CANVAS_ROW_KEYS.includes(key))
+        fail(
+          source,
+          `${at}.${key}`,
+          key === 'scale' || key === 'shape'
+            ? `is not part of a canvas row; the canvas keeps no memory of its own, so a ${key} belongs on a study's row`
+            : `is not part of a canvas row; it has ${list(CANVAS_ROW_KEYS)}`,
+        )
     const to = readString(row.to, source, `${at}.to`)
     if (!isCanvasKnob(to))
       fail(source, `${at}.to`, `is not a canvas knob; they are ${list(CANVAS_KNOBS)}`)
@@ -342,6 +445,9 @@ function readOverride(study: Study, value: unknown, source: string, path: string
 
 function readRow(study: Study, value: unknown, source: string, path: string): StudyMapping {
   if (!isRecord(value)) fail(source, path, `expected an object, got ${describe(value)}`)
+  for (const key of Object.keys(value))
+    if (!ROW_KEYS.includes(key))
+      fail(source, `${path}.${key}`, `is not part of a row; it has ${list(ROW_KEYS)}`)
   const to = readString(value.to, source, `${path}.to`)
   if (!isImplKnob(study.impl, to))
     fail(
@@ -354,6 +460,12 @@ function readRow(study: Study, value: unknown, source: string, path: string): St
     to,
     gain: readNumber(value.gain, source, `${path}.gain`),
     curve: readCurve(value.curve, source, `${path}.curve`),
+    ...(value.scale === undefined
+      ? {}
+      : { scale: readScale(value.scale, source, `${path}.scale`) }),
+    ...(value.shape === undefined
+      ? {}
+      : { shape: readShape(value.shape, source, `${path}.shape`) }),
   }
 }
 

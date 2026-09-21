@@ -26,7 +26,11 @@ const position = (n: number) => (n > 0 ? n : null)
  * one at a time, which a test file does.
  */
 export async function createWgslChecker(): Promise<WgslChecker> {
-  const gpu = create(['backend=null'])
+  // Dawn lives only while something holds what `create` returned, and the
+  // closures below would not, so a garbage collection mid-run tears it down
+  // under the device and kills the process with SIGSEGV or SIGABRT. It is
+  // kept in `gpu` until `close`.
+  let gpu: GPU | undefined = create(['backend=null'])
   const adapter = await gpu.requestAdapter()
   if (!adapter) throw new Error('Dawn found no adapter, not even the null backend')
   const device = await adapter.requestDevice()
@@ -64,9 +68,9 @@ export async function createWgslChecker(): Promise<WgslChecker> {
       }
     },
     close() {
-      // Dropping the device lets the process exit; Dawn keeps it alive
-      // otherwise.
       device.destroy()
+      // Dawn keeps the process alive until nothing refers to it.
+      gpu = undefined
     },
   }
 }

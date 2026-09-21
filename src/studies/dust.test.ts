@@ -3,8 +3,15 @@
  * packet through its whole path draws nothing while a quiet passage does, what
  * tension does to it, that it stays sparse at the most its own mapping
  * reaches, and that the same song draws the same dust at any frame rate. The
- * numbers and the ink have their own tests beside them; the generic bar every
- * study meets is `registry.test.ts`.
+ * field's own numbers have their tests in `impls/particles.params.test.ts` and
+ * its GPU side in `impls/ParticleField.test.ts`; the generic bar every study
+ * meets is `registry.test.ts`.
+ *
+ * It used to run on a CPU pool of at most 160 specks placed in closed form.
+ * The pool is gone and the specks live in a storage buffer now, so the tests
+ * that read a filled buffer read the field's plan and its CPU mirror instead:
+ * what the study resolves to, how many particles that puts in the air, and
+ * where one of them is after the same seconds at four frame rates.
  */
 import { describe, expect, it } from 'vitest'
 
@@ -12,16 +19,17 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { closeness } from '../director/score'
 import { HARDSTYLE, HOUSE, LOFI } from '../director/song.fixture'
 import {
-  advanceClock,
+  DUST_PROFILE,
   DUST_RANGES,
-  dustCoverage,
-  dustParams,
-  fillSpecks,
-  MAX_SPECKS,
-  SPECK_AT,
-  SPECK_FLOATS,
-} from '../impls/dust.params'
-import type { DustClock } from '../impls/dust.params'
+  fieldRuns,
+  particleCoverage,
+  particleParams,
+  particlesAlive,
+  planSpawns,
+  spawnState,
+  stepParticle,
+} from '../impls/particles.params'
+import type { ParticleState, SpawnGroup } from '../impls/particles.params'
 import { DUST_KNOBS } from './impls'
 import { findStudy, sceneOf } from './registry'
 import { resolveStudy } from './resolve'
@@ -39,6 +47,9 @@ const packetOf = (fields: Partial<Record<keyof typeof F, number>> = {}) => {
 const at = (packet: Float32Array, tension = 0) =>
   resolveStudy(study, undefined, packet, tension, 1, {})
 
+const paramsAt = (packet: Float32Array, tension = 0) =>
+  particleParams(at(packet, tension), DUST_PROFILE)
+
 const SIZES = [
   [1920, 1080],
   [1080, 1920],
@@ -46,6 +57,7 @@ const SIZES = [
   [3840, 2160],
   [3840, 1080],
   [1080, 1080],
+  [640, 360],
   [320, 320],
 ] as const
 
@@ -84,16 +96,16 @@ describe('silence and quiet', () => {
   const silent = packetOf()
 
   // A silent packet has to draw nothing, and the count is what says so: it is
-  // the level that brings the specks in, and at nothing there is no pass.
-  it('resolves a silent packet to a count of nothing, and draws nothing, at any tension', () => {
+  // the level that brings the specks in, and at nothing there is no pass and
+  // no dispatch.
+  it('resolves a silent packet to a count of nothing, and neither spawns nor draws, at any tension', () => {
     for (const tension of [0, 0.5, 1]) {
       const knobs = at(silent, tension)
       expect(knobs.count).toBe(0)
-      const out = new Float32Array(MAX_SPECKS * SPECK_FLOATS).fill(-1)
-      expect(
-        fillSpecks(dustParams(knobs), { travel: 3, seconds: 4 }, silent, 1920, 1080, out),
-      ).toBe(0)
-      expect(out.every((value) => value === -1)).toBe(true)
+      const params = particleParams(knobs, DUST_PROFILE)
+      expect(fieldRuns(params, 1)).toBe(false)
+      const groups: SpawnGroup[] = []
+      expect(planSpawns(params, DUST_PROFILE, silent, 1 / 60, spawnState(), groups)).toBe(0)
     }
   })
 
@@ -103,16 +115,9 @@ describe('silence and quiet', () => {
   // time; the first sound at all already brings a good part of the dust in.
   it('draws in a quiet passage, and starts with the first sound at all', () => {
     for (const energy of [0.01, 0.05, 0.1, 0.3]) {
-      const packet = packetOf({ energy })
-      const lit = fillSpecks(
-        dustParams(at(packet)),
-        { travel: 3, seconds: 4 },
-        packet,
-        1920,
-        1080,
-        new Float32Array(MAX_SPECKS * SPECK_FLOATS),
-      )
-      expect(lit, `energy ${energy}`).toBeGreaterThanOrEqual(10)
+      const params = paramsAt(packetOf({ energy }))
+      expect(fieldRuns(params, 1), `energy ${energy}`).toBe(true)
+      expect(params.count, `energy ${energy}`).toBeGreaterThan(2000)
     }
   })
 
@@ -125,7 +130,7 @@ describe('silence and quiet', () => {
 
     // It does not fall to nothing under a full packet either: a soft track
     // spends its loudest moments at the top of the scale.
-    expect(loud).toBeGreaterThan(10)
+    expect(loud).toBeGreaterThan(1000)
   })
 
   it('rises from silence to a peak in the quiet and falls from there, never past its range', () => {
@@ -144,19 +149,22 @@ describe('silence and quiet', () => {
     for (let step = peakAt + 1; step < counts.length; step += 1)
       expect(counts[step]).toBeLessThanOrEqual(counts[step - 1] ?? 0)
     expect(peak).toBeLessThanOrEqual(DUST_RANGES.count[1])
+    // Tens of thousands, which is what the field bought over the pool of 160.
+    expect(peak).toBeGreaterThan(20000)
     for (const count of counts) expect(count).toBeGreaterThanOrEqual(0)
   })
 })
 
 describe('what the music does to the dust', () => {
   it('lifts the drift with the swell, so a lifting passage drifts faster than a falling one', () => {
-    const falling = at(packetOf({ swell: 0 })).drift ?? 0
-    const steady = at(packetOf({ swell: 0.5 })).drift ?? 0
-    const lifting = at(packetOf({ swell: 1 })).drift ?? 0
+    const falling = at(packetOf({ swell: 0 })).curl ?? 0
+    const steady = at(packetOf({ swell: 0.5 })).curl ?? 0
+    const lifting = at(packetOf({ swell: 1 })).curl ?? 0
     expect(steady).toBeGreaterThan(falling)
     expect(lifting).toBeGreaterThan(steady)
-    // Slow all the way: at the top a speck crosses the frame in under half a minute.
-    expect(lifting).toBeLessThan(0.05)
+    // Slow all the way: at the top the curl carries a speck a fifteenth of a
+    // short side a second, which is most of a minute to cross the frame.
+    expect(lifting).toBeLessThanOrEqual(0.07)
   })
 
   it('deepens the twinkle with the treble', () => {
@@ -174,14 +182,14 @@ describe('what the music does to the dust', () => {
       packetOf({ hardness: 1 }),
     ])
       expect(at(packet).intensity).toBeLessThanOrEqual(rest)
-    expect(at(packetOf({ energy: 1, swell: 1, hardness: 1 })).intensity).toBeLessThan(rest * 0.6)
+    expect(at(packetOf({ energy: 1, swell: 1, hardness: 1 })).intensity).toBeLessThan(rest * 0.7)
   })
 })
 
 describe('what tension does to the dust', () => {
   const packet = packetOf({ energy: 0.3 })
 
-  it('gathers it: the pull toward the centre climbs with tension, to half at a full build', () => {
+  it('gathers it: the pull toward the centre climbs with tension, to half a short side a second at a full build', () => {
     const levels = [0, 0.25, 0.5, 0.75, 1].map((tension) => at(packet, tension).gather ?? -1)
     expect(levels[0]).toBe(0)
     for (let step = 1; step < levels.length; step += 1)
@@ -189,43 +197,33 @@ describe('what tension does to the dust', () => {
     expect(levels[4]).toBeCloseTo(0.5, 9)
   })
 
-  it('moves the specks in toward the middle of the frame, and only that', () => {
-    const [width, height] = [1920, 1080]
-    const draw = (tension: number) => {
-      const out = new Float32Array(MAX_SPECKS * SPECK_FLOATS)
-      const lit = fillSpecks(
-        dustParams(at(packet, tension)),
-        { travel: 2, seconds: 3 },
-        packet,
-        width,
-        height,
-        out,
-      )
-      return { lit, out }
+  // The gather is a rate on the distance to the middle, so it draws a speck in
+  // over a second or two rather than jumping it, and the drag keeps it off the
+  // one point it would otherwise pile onto.
+  it('moves a speck in toward the middle of the frame over seconds, and never past it', () => {
+    const params = paramsAt(packet, 1)
+    const speck: ParticleState = {
+      x: 0.4,
+      y: 0.3,
+      vx: 0,
+      vy: 0,
+      age: 0,
+      life: 20,
+      seed: 0.5,
+      hue: 0,
+    }
+    const reach: number[] = []
+    for (let frame = 0; frame < 60 * 4; frame += 1) {
+      stepParticle(speck, { ...params, curl: 0, flow: 0 }, 1 / 60, frame / 60)
+      if (frame % 60 === 59) reach.push(Math.hypot(speck.x, speck.y))
     }
 
-    const calm = draw(0)
-    const wound = draw(1)
-    // The same specks, the same light, the same size: only the place moves.
-    expect(wound.lit).toBe(calm.lit)
-    let calmReach = 0
-    let woundReach = 0
-    for (let index = 0; index < calm.lit; index += 1) {
-      const base = index * SPECK_FLOATS
-      for (const part of [SPECK_AT.radius, SPECK_AT.red, SPECK_AT.green, SPECK_AT.blue])
-        expect(wound.out[base + part]).toBe(calm.out[base + part])
-      calmReach += Math.hypot(
-        (calm.out[base] ?? 0) - width / 2,
-        (calm.out[base + 1] ?? 0) - height / 2,
-      )
-
-      woundReach += Math.hypot(
-        (wound.out[base] ?? 0) - width / 2,
-        (wound.out[base + 1] ?? 0) - height / 2,
-      )
-    }
-
-    expect(woundReach / calmReach).toBeCloseTo(0.5, 3)
+    const start = Math.hypot(0.4, 0.3)
+    expect(reach[0]).toBeLessThan(start)
+    for (let step = 1; step < reach.length; step += 1)
+      expect(reach[step]).toBeLessThan(reach[step - 1] ?? 0)
+    // In, not through: nothing overshoots the middle and comes out the far side.
+    expect(Math.min(...reach)).toBeGreaterThan(0)
   })
 
   it('does not change the count, the size or the light', () => {
@@ -246,85 +244,89 @@ describe('how much of the frame it covers', () => {
     for (let step = 0; step <= 200; step += 1)
       for (const swell of [0, 0.5, 1])
         count = Math.max(count, at(packetOf({ energy: step / 200, swell })).count ?? 0)
-    return dustParams({ size: study.knobs.size ?? 0, count })
+    return particleParams({ size: study.knobs.size ?? 0, count }, DUST_PROFILE)
   }
 
-  it('is a fraction of a percent at the most its own mapping reaches, on every canvas shape', () => {
+  it('is a few percent at the most its own mapping reaches, on every canvas shape', () => {
     const reach = worst()
-    expect(reach.count).toBeGreaterThan(60)
-    expect(reach.count).toBeLessThan(80)
-    // 70 specks 10 pixels across on a canvas 1080 high.
-    expect(dustCoverage(reach, 1080, 1080)).toBeCloseTo(0.006, 3)
-    expect(dustCoverage(reach, 1920, 1080)).toBeCloseTo(0.0034, 3)
+    expect(reach.count).toBeGreaterThan(21000)
+    expect(reach.count).toBeLessThan(24000)
+    // The dust spawns at a rate and never in a burst, so everything in the
+    // pool is in the air: the count is the number alive.
+    expect(particlesAlive(reach)).toBe(reach.count)
+    // 22,374 specks 1.5 pixels across on a canvas 1080 high.
+    expect(particleCoverage(reach, 1080, 1080)).toBeCloseTo(0.043, 3)
+    expect(particleCoverage(reach, 1920, 1080)).toBeCloseTo(0.024, 3)
     for (const [width, height] of SIZES)
-      expect(dustCoverage(reach, width, height), `${width} by ${height}`).toBeLessThan(0.0075)
+      expect(particleCoverage(reach, width, height), `${width} by ${height}`).toBeLessThan(1 / 20)
   })
 
-  it('is under a twentieth of the frame with every knob at the top of its range, on every canvas shape', () => {
-    const top = dustParams({ count: DUST_RANGES.count[1], size: DUST_RANGES.size[1] })
-    for (const [width, height] of SIZES)
-      expect(dustCoverage(top, width, height), `${width} by ${height}`).toBeLessThan(1 / 20)
-  })
-
-  // Gathering lays specks over one another, and additive light that piles up
-  // is what would turn the middle into a white dot. At a full build, half the
-  // way in, no pixel is under more than a few of them.
-  it('does not pile the specks up at a full build', () => {
-    const [width, height] = [1920, 1080]
-    const params = { ...worst(), gather: at(packetOf({ energy: 0.3 }), 1).gather ?? 0 }
-    const out = new Float32Array(MAX_SPECKS * SPECK_FLOATS)
-    let deepest = 0
-    for (let step = 0; step < 30; step += 1) {
-      const lit = fillSpecks(
-        params,
-        { travel: step * 0.7, seconds: step * 3 },
-        packetOf(),
-        width,
-        height,
-        out,
-      )
-      const under = new Map<number, number>()
-      for (let index = 0; index < lit; index += 1) {
-        const x = out[index * SPECK_FLOATS + SPECK_AT.x] ?? 0
-        const y = out[index * SPECK_FLOATS + SPECK_AT.y] ?? 0
-        const radius = out[index * SPECK_FLOATS + SPECK_AT.radius] ?? 0
-        for (let row = Math.floor(y - radius); row <= Math.ceil(y + radius); row += 1)
-          for (let column = Math.floor(x - radius); column <= Math.ceil(x + radius); column += 1)
-            if ((column - x) ** 2 + (row - y) ** 2 <= radius * radius) {
-              const key = row * 8192 + column
-              under.set(key, (under.get(key) ?? 0) + 1)
-            }
-      }
-
-      for (const count of under.values()) deepest = Math.max(deepest, count)
-    }
-
-    expect(deepest).toBeLessThanOrEqual(3)
+  // The pool is a budget and the ranges are what keep the study inside it,
+  // which is the one claim a field cannot make the way a pool of 160 could: at
+  // the top of every range it would cover most of a small frame, and nothing
+  // in the study's own mapping goes there.
+  it('states what every knob at the top of its range would cover, which the mapping never reaches', () => {
+    const top = particleParams(
+      { count: DUST_RANGES.count[1], size: DUST_RANGES.size[1] },
+      DUST_PROFILE,
+    )
+    expect(particleCoverage(top, 1080, 1080)).toBeCloseTo(0.548, 2)
+    expect(particleCoverage(top, 1920, 1080)).toBeCloseTo(0.308, 2)
+    expect(top.count).toBeGreaterThan((worst().count ?? 0) * 1.5)
   })
 })
 
 describe('the same at any frame rate', () => {
-  // The whole path a frame takes: resolve the study, step the clocks, place the
-  // specks. A frame rate is only a number of steps, so after the same seconds
-  // the same picture is drawn.
-  it('draws the same dust after the same seconds at 30, 60, 144 and 240 frames a second', () => {
+  // A frame rate is only a number of steps, so after the same seconds a speck
+  // is in the same place. The drag is closed form and exact; everything else
+  // is symplectic Euler, so the two rates agree closely rather than exactly.
+  it('carries a speck to the same place after four seconds at 30, 60, 144 and 240 steps a second', () => {
     const packet = packetOf({ energy: 0.3, swell: 0.7, treble: 0.4, keyHue: 0.2 })
-    const drawn = (fps: number) => {
-      const clock: DustClock = { travel: 0, seconds: 0 }
-      const params = dustParams(at(packet, 0.4))
-      for (let frame = 0; frame < fps * 4; frame += 1) advanceClock(clock, params.drift, 1 / fps)
-      const out = new Float32Array(MAX_SPECKS * SPECK_FLOATS)
-      const lit = fillSpecks(params, clock, packet, 1920, 1080, out)
-      return { lit, out }
+    const params = paramsAt(packet, 0.4)
+    const drifted = (fps: number) => {
+      const speck: ParticleState = {
+        x: 0.21,
+        y: -0.17,
+        vx: 0.05,
+        vy: 0.02,
+        age: 0,
+        life: 30,
+        seed: 0.25,
+        hue: 0.1,
+      }
+      for (let frame = 0; frame < fps * 4; frame += 1)
+        stepParticle(speck, params, 1 / fps, frame / fps)
+      return speck
     }
 
-    const reference = drawn(60)
-    expect(reference.lit).toBeGreaterThan(30)
+    const reference = drifted(60)
+    // It actually moved, so the comparison is worth making.
+    expect(Math.hypot(reference.x - 0.21, reference.y + 0.17)).toBeGreaterThan(0.01)
     for (const fps of [30, 144, 240]) {
-      const other = drawn(fps)
-      expect(other.lit).toBe(reference.lit)
-      for (let index = 0; index < reference.lit * SPECK_FLOATS; index += 1)
-        expect(other.out[index]).toBeCloseTo(reference.out[index] ?? Number.NaN, 2)
+      const other = drifted(fps)
+      expect(other.x, `${fps} fps`).toBeCloseTo(reference.x, 2)
+      expect(other.y, `${fps} fps`).toBeCloseTo(reference.y, 2)
+      expect(other.age, `${fps} fps`).toBeCloseTo(reference.age, 6)
     }
+  })
+
+  it('spawns the same number of specks a second at 30, 60, 144 and 240 steps a second', () => {
+    const packet = packetOf({ energy: 0.3 })
+    const params = paramsAt(packet)
+    const born = (fps: number) => {
+      const state = spawnState()
+      const groups: SpawnGroup[] = []
+      let total = 0
+      for (let frame = 0; frame < fps * 3; frame += 1) {
+        const live = planSpawns(params, DUST_PROFILE, packet, 1 / fps, state, groups)
+        for (let group = 0; group < live; group += 1) total += groups[group]?.count ?? 0
+      }
+
+      return total
+    }
+
+    const reference = born(60)
+    expect(reference).toBeGreaterThan(0)
+    for (const fps of [30, 144, 240]) expect(born(fps) / reference, `${fps} fps`).toBeCloseTo(1, 3)
   })
 })

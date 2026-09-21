@@ -26,7 +26,7 @@
  */
 import { F } from '../audio/FeatureExtractor'
 import { levelWaveform } from '../audio/waveform'
-import type { Flow } from '../scenes/Scene'
+import type { CanvasSample, Flow } from '../scenes/Scene'
 import blur from '../shaders/post.blur.wgsl?raw'
 import bright from '../shaders/post.bright.wgsl?raw'
 import common from '../shaders/post.common.wgsl?raw'
@@ -371,6 +371,28 @@ export class PostStack {
   /** Discard the old scene's trails without reallocating its textures. */
   resetHistory() {
     this.historyReady = false
+  }
+
+  /**
+   * Last frame's canvas, for an ink that wants to read the picture: the half
+   * of the ping-pong the inks are NOT drawing into this frame, which is
+   * exactly what the composite last wrote. Null until a frame has been
+   * composited, so an ink reading it draws nothing on the first frame of a
+   * scene rather than sampling an uninitialised texture.
+   *
+   * It is a read of the other half and never of the one in `target`, so an ink
+   * binding it while drawing into the shared target is not reading the texture
+   * it is writing, which no backend allows.
+   *
+   * The contract an ink takes on with it is in `SceneContext.canvas`: one
+   * frame of latency, and a loop it has to stay out of.
+   */
+  get lastCanvas(): CanvasSample | null {
+    const sized = this.sized
+    if (!sized || !this.historyReady) return null
+    const other = this.current === 0 ? 1 : 0
+    const view = sized.history[other]?.view
+    return view ? { view, width: sized.width, height: sized.height } : null
   }
 
   private historyReady = false

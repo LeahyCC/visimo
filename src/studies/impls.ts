@@ -122,19 +122,72 @@ export const STREAKS_KNOBS = [
 export type StreaksKnob = (typeof STREAKS_KNOBS)[number]
 
 /**
- * The dust's numbers. Their ranges and units are in `impls/dust.params.ts`.
- * `gather` is the one that is not a property of a speck: it pulls every
- * speck's place toward the middle of the canvas, which is what tension does.
+ * The whole vocabulary of the particle field, which is one compute-simulated
+ * pool and every force that can act on it. Their ranges and units are in
+ * `impls/particles.params.ts`.
+ *
+ * Nothing names all of these. A field is a profile (`ParticleProfile`) giving
+ * every knob a resting value and a narrower range, and a study names the
+ * subset it actually moves; `DUST_KNOBS` and `SPARKS_KNOBS` below are those
+ * two subsets. That is how two studies as unlike as slow specks and thrown
+ * sparks come out of one implementation, and it is where a new field study
+ * starts: a profile beside those two, an id in `IMPL_IDS`, and its own subset
+ * here.
+ */
+export const PARTICLE_KNOBS = [
+  // The pool, and what fills it: a continuous rate and a burst a hit throws.
+  'count',
+  'rate',
+  'burst',
+  // What a particle is born with.
+  'life',
+  'speed',
+  'spread',
+  // What it looks like, over its life.
+  'size',
+  'grow',
+  'streak',
+  'intensity',
+  'fade',
+  'hueSpread',
+  'heat',
+  'pale',
+  'twinkle',
+  // What moves it.
+  'drag',
+  'gravity',
+  'gravityAngle',
+  'flow',
+  'curl',
+  'curlScale',
+  'gather',
+  'attractX',
+  'attractY',
+  // How it answers the particles around it.
+  'separation',
+  'alignment',
+  'cohesion',
+  'neighbourhood',
+] as const
+export type ParticleKnob = (typeof PARTICLE_KNOBS)[number]
+
+/**
+ * The dust's subset of the field's knobs. `gather` is the one that is not a
+ * property of a speck: it pulls every speck toward the attractor, which sits
+ * in the middle of the canvas, and that is what tension does to it. `curl` is
+ * the drift the old CPU pool named, which is now a real curl noise rather than
+ * a closed-form curve.
  */
 export const DUST_KNOBS = [
   'count',
   'size',
-  'drift',
+  'curl',
+  'curlScale',
   'twinkle',
   'intensity',
   'hueSpread',
   'gather',
-] as const
+] as const satisfies readonly ParticleKnob[]
 export type DustKnob = (typeof DUST_KNOBS)[number]
 
 /**
@@ -182,20 +235,25 @@ export const SPECTRUM_KNOBS = [
 export type SpectrumKnob = (typeof SPECTRUM_KNOBS)[number]
 
 /**
- * The sparks' numbers. Their ranges and units are in `impls/sparks.params.ts`.
- * `rate` is sparks a second at most and is what the bucket refills at, `count`
- * is how many one hit throws, `speed` is short sides a second at birth and
- * `life` is seconds.
+ * The sparks' subset of the field's knobs. Their ranges and units are in
+ * `impls/particles.params.ts`. `count` is the pool, `rate` is the shimmer
+ * between hits in sparks a second, `burst` is what one hit throws at its full
+ * strength, `speed` is short sides a second at birth and `life` is seconds.
+ *
+ * `count` meant "sparks one hit throws" while the sparks had a CPU pool of 96.
+ * It is the pool now, because that is what it means everywhere else in the
+ * field's vocabulary, and the throw is `burst`.
  */
 export const SPARKS_KNOBS = [
-  'rate',
   'count',
+  'rate',
+  'burst',
   'speed',
   'life',
   'size',
   'intensity',
   'hueSpread',
-] as const
+] as const satisfies readonly ParticleKnob[]
 export type SparksKnob = (typeof SPARKS_KNOBS)[number]
 
 /**
@@ -289,18 +347,17 @@ export const isCountKnob = (knob: string): boolean =>
   (COUNT_KNOBS as readonly string[]).includes(knob)
 
 export type ImplKnob =
+  | ParticleKnob
   | FluidKnob
   | AnalyticKnob
   | KaleidoscopeKnob
   | ShardKnob
   | PostKnob
   | StreaksKnob
-  | DustKnob
   | CausticsKnob
   | HaloKnob
   | RingsKnob
   | SpectrumKnob
-  | SparksKnob
   | LaserKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */

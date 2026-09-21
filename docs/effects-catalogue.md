@@ -60,16 +60,20 @@ A note on literal things (animals, spacecraft, Buddha, the devil): a shader draw
 
 ## Shared pieces
 
-Built once, before the rows that need them. Six pieces.
+Built once, before the rows that need them. Six pieces, two of them built.
 
-| Piece            | What it is                                                                                                                  | Needed by                                                                                 |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `raymarch-kit`   | WGSL camera, SDF ops, soft shadow, half-res render and upscale, the glint threshold                                         | wormhole, shape-morph, liquid-chrome, nebula, city                                        |
-| `canvas-sampler` | lets an ink or look read last frame's canvas as a texture (MilkDrop's textured shapes)                                      | echo-shapes, liquid-chrome, wormhole, black-hole                                          |
-| `swarm-kit`      | one GPU boids pool with steering rules as knobs, drawn as points, quads or short trails                                     | murmuration, school, fireflies                                                            |
-| `subtract-blend` | a second ink blend that darkens. Today inks only add light, so nothing can be dark on light                                 | void-tendrils, eclipse, ink-wash                                                          |
-| `chroma-rows`    | the twelve note strengths appended to the END of the packet (`docs/open-leads.md` has this as the blocker for chord petals) | chord-petals, cymatics, mandala, stained-glass, harmonograph, sacred-lines, constellation |
-| `height-kit`     | a scrolling heightfield from the spectrum with horizon, fog and parallax layers                                             | ridgeline, ocean, grid-3d, city                                                           |
+| Piece            | What it is                                                                                                                  | Needed by                                                                                 | Status |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ |
+| `raymarch-kit`   | WGSL camera, SDF ops, soft shadow, half-res render and upscale, the glint threshold                                         | wormhole, shape-morph, liquid-chrome, nebula, city                                        | open   |
+| `canvas-sampler` | lets an ink or look read last frame's canvas as a texture (MilkDrop's textured shapes)                                      | echo-shapes, liquid-chrome, wormhole, black-hole                                          | built  |
+| `swarm-kit`      | one GPU boids pool with steering rules as knobs, drawn as points, quads or short trails                                     | murmuration, school, fireflies                                                            | built  |
+| `subtract-blend` | a second ink blend that darkens. Today inks only add light, so nothing can be dark on light                                 | void-tendrils, eclipse, ink-wash                                                          | open   |
+| `chroma-rows`    | the twelve note strengths appended to the END of the packet (`docs/open-leads.md` has this as the blocker for chord petals) | chord-petals, cymatics, mandala, stained-glass, harmonograph, sacred-lines, constellation | open   |
+| `height-kit`     | a scrolling heightfield from the spectrum with horizon, fog and parallax layers                                             | ridgeline, ocean, grid-3d, city                                                           | open   |
+
+**`swarm-kit` is `impls/ParticleField.ts`**, one compute-simulated pool from ten thousand to half a million, with drag, gravity, curl noise, attraction to a point and the three boids terms on a uniform grid, all as knobs, drawn as velocity-aligned streaks that shrink to round points. A study on it is a `ParticleProfile` in `impls/particles.params.ts` and a knob subset in `studies/impls.ts`; the dust and the sparks are the first two, and murmuration, school and fireflies need nothing new built. See "The particle field" in the README.
+
+**`canvas-sampler` is `SceneContext.canvas()`**, which hands an ink the half of the post stack's history the inks are not drawing into. Two things go with it: it is one frame behind, and it is a loop, so an ink reading it has to stay sparse or keep its gain under one. `impls/CanvasQuadInk.ts` is the worked example and is not a study. See "Implementations" in the README.
 
 ## Space and time
 

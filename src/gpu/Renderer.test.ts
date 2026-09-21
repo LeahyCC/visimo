@@ -280,26 +280,6 @@ vi.mock('../impls/ShardsInk', () => ({
   },
 }))
 
-vi.mock('../impls/DustInk', () => ({
-  DustInk: class {
-    readonly detail = ''
-    constructor() {
-      impls.built.dust = (impls.built.dust ?? 0) + 1
-    }
-    init() {}
-    resize() {}
-    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
-      record('dust', knobs, presence)
-    }
-    render() {
-      impls.drawn.push('dust')
-    }
-    dispose() {
-      impls.disposed.dust = (impls.disposed.dust ?? 0) + 1
-    }
-  },
-}))
-
 vi.mock('../impls/CausticsInk', () => ({
   CausticsInk: class {
     readonly detail = ''
@@ -360,22 +340,26 @@ vi.mock('../impls/SpectrumInk', () => ({
   },
 }))
 
-vi.mock('../impls/SparksInk', () => ({
-  SparksInk: class {
+// The dust and the sparks are two profiles over one implementation, so one
+// stand-in covers both and keys itself off the profile it was handed.
+vi.mock('../impls/ParticleField', () => ({
+  ParticleField: class {
     readonly detail = ''
-    constructor() {
-      impls.built.sparks = (impls.built.sparks ?? 0) + 1
+    private readonly name: string
+    constructor(profile: { label: string }) {
+      this.name = profile.label
+      impls.built[this.name] = (impls.built[this.name] ?? 0) + 1
     }
     init() {}
     resize() {}
     update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
-      record('sparks', knobs, presence)
+      record(this.name, knobs, presence)
     }
     render() {
-      impls.drawn.push('sparks')
+      impls.drawn.push(this.name)
     }
     dispose() {
-      impls.disposed.sparks = (impls.disposed.sparks ?? 0) + 1
+      impls.disposed[this.name] = (impls.disposed[this.name] ?? 0) + 1
     }
   },
 }))
@@ -1903,12 +1887,14 @@ describe('the study bench', () => {
     expect(impls.drawn).toEqual(['ribbon', 'sparks'])
     expect(impls.seen.sparks?.presence).toBe(1)
     expect(Object.keys(impls.seen.sparks?.knobs ?? {}).sort()).toEqual([...SPARKS_KNOBS].sort())
-    expect(impls.seen.sparks?.knobs.count).toBeGreaterThan(0)
-    expect(impls.seen.sparks?.knobs.intensity ?? 0).toBeGreaterThan(0.1)
-    const calm = impls.seen.sparks?.knobs.rate ?? 0
+    // The count is the pool, which is tens of thousands of slots on the GPU,
+    // and the light of one particle among them is a small number.
+    expect(impls.seen.sparks?.knobs.count ?? 0).toBeGreaterThan(10000)
+    expect(impls.seen.sparks?.knobs.intensity ?? 0).toBeGreaterThan(0)
+    const calm = impls.seen.sparks?.knobs.burst ?? 0
 
     // The study's tension row reaches the ink through the resolver: a build
-    // makes the sparks come faster.
+    // makes a hit throw more.
     renderer.setBench({
       live: renderer.liveCast,
       frame: (packet) => {
@@ -1917,7 +1903,7 @@ describe('the study bench', () => {
       },
     })
     draw(2000)
-    expect(impls.seen.sparks?.knobs.rate ?? 0).toBeGreaterThan(calm + 10)
+    expect(impls.seen.sparks?.knobs.burst ?? 0).toBeGreaterThan(calm + 100)
   })
 
   it('does not build the sparks ink for a study that is faded to nothing', async () => {

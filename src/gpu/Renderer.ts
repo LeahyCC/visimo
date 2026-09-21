@@ -34,16 +34,16 @@ import type { MomentWeights, Playhead } from '../director/moment'
 import { Hud } from '../hud/Hud'
 import { AnalyticFlow } from '../impls/analytic'
 import { CausticsInk } from '../impls/CausticsInk'
-import { DustInk } from '../impls/DustInk'
 import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
 import { HaloInk } from '../impls/HaloInk'
 import { LasersInk } from '../impls/LasersInk'
+import { ParticleField } from '../impls/ParticleField'
+import { DUST_PROFILE, SPARKS_PROFILE } from '../impls/particles.params'
 import { RibbonInk } from '../impls/RibbonInk'
 import { RingsInk } from '../impls/RingsInk'
 import { ShardsInk } from '../impls/ShardsInk'
-import { SparksInk } from '../impls/SparksInk'
 import { SpectrumInk } from '../impls/SpectrumInk'
 import { StreaksInk } from '../impls/StreaksInk'
 import { mergePostPatch, patchPostParams, postSummary } from '../post/params'
@@ -55,7 +55,7 @@ import type { FlowImpl, InkImpl } from '../scenes/Impl'
 import { Kaleidoscope } from '../scenes/Kaleidoscope'
 import { KaleidoscopeMotion } from '../scenes/kaleidoscope.params'
 import { KaleidoscopeWebGL } from '../scenes/KaleidoscopeWebGL'
-import type { SceneContext } from '../scenes/Scene'
+import type { Flow, SceneContext } from '../scenes/Scene'
 import { defaultCanvas } from '../studies/cast'
 import type { PinnedCast } from '../studies/cast'
 import { castOrDefault, CASTS, DEFAULT_CAST_ID } from '../studies/casts/index'
@@ -264,6 +264,12 @@ class Renderer {
   private readonly liveInkStudies: LiveEntry[] = []
   private readonly liveIds: string[] = []
   private readonly liveFlows: LiveFlow[] = []
+  /**
+   * The one field this frame's flows blended to, or null. Written once a frame
+   * before any ink draws and read by an ink through the implementation
+   * context, since which half of a ping-pong pair it names alternates.
+   */
+  private carried: Flow | null = null
   // One flow implementation's live studies and the knobs they blend to, both
   // written over every frame.
   private readonly flowParts: KnobsAt[] = []
@@ -345,6 +351,8 @@ class Renderer {
     if (this.canvas) this.detach(this.canvas)
     if (gpu) {
       this.gpu = gpu
+      // The context holds the device, so a fresh one has to build a fresh context.
+      this.implContextCache = null
       if (!this.post) {
         this.post = new PostStack()
         this.post.init(gpu.device, gpu.format)
@@ -429,6 +437,8 @@ class Renderer {
     this.client?.dispose()
     this.client = null
     this.gpu = null
+    this.implContextCache = null
+    this.carried = null
   }
 
   setHud(visible: boolean) {
@@ -656,12 +666,13 @@ class Renderer {
         ? new RibbonInk(this.post, () => this.bench?.waveform?.() ?? this.client?.waveform ?? null)
         : null
     if (impl === 'streaks') return new StreaksInk()
-    if (impl === 'dust') return new DustInk()
+    // Two profiles over one compute-simulated pool; see `particles.params.ts`.
+    if (impl === 'dust') return new ParticleField(DUST_PROFILE)
     if (impl === 'caustics') return new CausticsInk()
     if (impl === 'halo') return new HaloInk()
     if (impl === 'rings') return new RingsInk()
     if (impl === 'spectrum') return new SpectrumInk()
-    if (impl === 'sparks') return new SparksInk()
+    if (impl === 'sparks') return new ParticleField(SPARKS_PROFILE)
     if (impl === 'lasers') return new LasersInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
@@ -718,7 +729,7 @@ class Renderer {
       this.spareInks,
     )
     if (!this.blendReady) {
-      this.blend.init({ device: gpu.device, format: SCENE_FORMAT, software: gpu.info.software })
+      this.blend.init(this.implContext(gpu))
       this.blendReady = true
     }
 
@@ -730,6 +741,27 @@ class Renderer {
     if (reset && (flows || inks)) this.post?.resetHistory()
     this.sizeImpls()
   }
+
+  /**
+   * What every implementation is built on: the device, the format, and the two
+   * things a frame offers back that an implementation may read while it
+   * encodes. Both are functions and not values, because both name a half of a
+   * ping-pong that alternates: the flow is whatever this frame's flows blended
+   * to and only exists once the encoder does, and the canvas is the history
+   * the inks are NOT drawing into. It is made once and kept, so the closures
+   * an implementation holds do not change under it when the device does not.
+   */
+  private implContext(gpu: Gpu): SceneContext {
+    return (this.implContextCache ??= {
+      device: gpu.device,
+      format: SCENE_FORMAT,
+      software: gpu.info.software,
+      flow: () => this.carried,
+      canvas: () => this.post?.lastCanvas ?? null,
+    })
+  }
+
+  private implContextCache: SceneContext | null = null
 
   private holds(flow: FlowImpl) {
     for (const held of this.flows.values()) if (held.object === flow) return true
@@ -771,7 +803,7 @@ class Renderer {
       // A study whose implementation this renderer has nothing for is
       // skipped, and the cast draws with what is left.
       if (!object) continue
-      object.init({ device: gpu.device, format: SCENE_FORMAT, software: gpu.info.software })
+      object.init(this.implContext(gpu))
       held.set(id, { impl: entry.impl, object })
       changed = true
     }
@@ -1019,7 +1051,10 @@ class Renderer {
         if (field) this.liveFlows.push({ flow: field, presence: this.flowPresence.get(impl) ?? 1 })
       }
 
+      // Held on the renderer, not just in this scope, because an ink reads it
+      // through the implementation context while it encodes.
       const carried = this.blend.blend(encoder, this.liveFlows)
+      this.carried = carried
       // The uniform before any ink, because the ribbon ink reads it.
       post.prepare(this.packet, carried?.cover ?? null)
       post.clear(encoder, offscreen)
@@ -1099,6 +1134,8 @@ class Renderer {
     this.client?.dispose()
     this.client = null
     this.gpu = null
+    this.implContextCache = null
+    this.carried = null
     if (!canvas || !hudCanvas || !onFailure) return
     void this.attach(canvas, hudCanvas, onFailure)
       .then((result) => {

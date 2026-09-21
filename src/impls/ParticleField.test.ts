@@ -14,11 +14,14 @@ import type { Flow, SceneContext } from '../scenes/Scene'
 import common from '../shaders/particles.common.wgsl?raw'
 import draw from '../shaders/particles.draw.wgsl?raw'
 import simulation from '../shaders/particles.sim.wgsl?raw'
+import { findStudy } from '../studies/registry'
+import { resolveStudy } from '../studies/resolve'
 import { ParticleField } from './ParticleField'
 import {
   DUST_PROFILE,
   GRID_CELLS,
   GRID_SLOTS,
+  MURMURATION_PROFILE,
   PARTICLE_FLOATS,
   PARTICLE_UNIFORM_FLOATS,
   PARTICLE_WORKGROUP,
@@ -426,13 +429,14 @@ describe('the shaders read what the ink declares', () => {
     expect(gpu.calls.renderPipelines[0]?.fragment?.entryPoint).toBe('fs')
   })
 
-  it('declares a particle of exactly the floats the uniform is written against', () => {
-    // Two vec4s, which is the eight floats `PARTICLE_FLOATS` sizes the pool by.
+  it('declares a particle of exactly the floats the pool is sized by', () => {
+    // Three vec4s, which is the twelve floats `PARTICLE_FLOATS` sizes the pool
+    // by: the place and velocity, the age and seed, and how hard it is turning.
     expect(common).toContain('struct Particle {')
-    expect(PARTICLE_FLOATS).toBe(8)
+    expect(PARTICLE_FLOATS).toBe(12)
     const struct = common.slice(common.indexOf('struct Particle {'))
     const body = struct.slice(0, struct.indexOf('}'))
-    expect(body.match(/vec4<f32>/g)).toHaveLength(2)
+    expect(body.match(/vec4<f32>/g)).toHaveLength(3)
   })
 
   it('declares the same workgroup the ink counts its dispatches in', () => {
@@ -452,5 +456,92 @@ describe('the shaders read what the ink declares', () => {
     // said so, and the shader silently drew nothing.
     for (const reserved of ['\\btarget\\s*:', '\\blet target\\b', '\\bvar target\\b'])
       for (const code of [sim, drawn]) expect(code).not.toMatch(new RegExp(reserved))
+  })
+})
+
+// The flock is the first study to switch the boids grid on, so this is where
+// the promise the README makes about it is counted: two dispatches more than a
+// field with no steering, and none of them when the steering is off.
+describe('the flock and its grid', () => {
+  const study = findStudy('murmuration')
+  if (!study) throw new Error('Expected the murmuration study')
+
+  /** A groove: the music is on, the hats and the kick are sounding, nothing is winding up. */
+  const groove = () => {
+    const out = packet()
+    for (const row of [F.energy, F.bass, F.sub, F.lowMid, F.highMid, F.treble]) out[row] = 0.7
+    out[F.pace] = 0.5
+    out[F.bassPulse] = 0.8
+    return out
+  }
+
+  const resolved = (patch: Record<string, number> = {}): Record<string, number> => ({
+    ...resolveStudy(study, undefined, groove(), 0, 1, {}),
+    ...patch,
+  })
+
+  it('clears the grid, fills it and steps the pool, in that order, while the steering is live', () => {
+    build(MURMURATION_PROFILE)
+    field.update(groove(), 1 / 60, resolved(), 1)
+    field.render(gpu.encoder, view)
+    expect(gpu.calls.computePasses).toBe(1)
+    expect(gpu.calls.dispatches.map((entry) => entry.pipeline)).toEqual([
+      { entry: 'clear_grid' },
+      { entry: 'bin' },
+      { entry: 'step' },
+    ])
+    expect(gpu.calls.dispatches[0]?.groups).toBe(Math.ceil(GRID_CELLS / PARTICLE_WORKGROUP))
+  })
+
+  it('skips both grid dispatches when no steering term is live', () => {
+    // Each of the two ways of switching the grid off: no reach, and no rule.
+    for (const off of [
+      { neighbourhood: 0 },
+      { separation: 0, alignment: 0, cohesion: 0 },
+    ] as const) {
+      build(MURMURATION_PROFILE)
+      field.update(groove(), 1 / 60, resolved(off), 1)
+      field.render(gpu.encoder, view)
+      expect(gpu.calls.dispatches.map((entry) => entry.pipeline)).toEqual([{ entry: 'step' }])
+    }
+  })
+
+  it('draws nothing and dispatches nothing in silence', () => {
+    build(MURMURATION_PROFILE)
+    const silent = resolveStudy(study, undefined, packet(), 0, 1, {})
+    field.update(packet(), 1 / 60, silent, 1)
+    field.render(gpu.encoder, view)
+    expect(gpu.calls.computePasses).toBe(0)
+    expect(gpu.calls.renderPasses).toBe(0)
+    expect(gpu.calls.dispatches).toEqual([])
+    expect(gpu.calls.writes).toEqual([])
+  })
+
+  it('says how many birds are in the air and hands the shader its turn light', () => {
+    build(MURMURATION_PROFILE)
+    field.update(groove(), 1 / 60, resolved(), 1)
+    field.render(gpu.encoder, view)
+    expect(field.detail).toMatch(/^\d+ birds$/)
+    const written = gpu.calls.writes.at(-1)?.data
+    // How much a turn lights a bird, how far it pushes the hue, and how much
+    // of the arc a bird's own seed spreads it over.
+    expect(written?.[48]).toBeCloseTo(study.knobs.turnLight ?? 0, 6)
+    expect(written?.[49]).toBe(MURMURATION_PROFILE.turnHue)
+    expect(written?.[50]).toBeCloseTo(MURMURATION_PROFILE.scatter, 6)
+  })
+
+  it('leaves the dust and the sparks drawn by their age and seed alone', () => {
+    field.update(hat(), 1 / 60, SPARKS, 1)
+    field.render(gpu.encoder, view)
+    const written = gpu.calls.writes.at(-1)?.data
+    expect([written?.[48], written?.[49], written?.[50]]).toEqual([0, 0, 1])
+  })
+
+  it('reads its births from the pool, and only the flock does', () => {
+    const sim = common + simulation
+    expect(sim).toContain('c.x > 1.5')
+    expect(MURMURATION_PROFILE.fill).toBe('flock')
+    expect(DUST_PROFILE.fill).toBe('field')
+    expect(SPARKS_PROFILE.fill).toBe('field')
   })
 })

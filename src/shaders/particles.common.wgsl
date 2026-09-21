@@ -40,8 +40,14 @@ struct Params {
   high: vec4<f32>,
   // How many spawn groups are live, and whether the field wraps at the edges.
   spawns: vec4<f32>,
+  // How much a turn adds to a particle's light, how far it pushes its hue
+  // toward the third stop, and how much of the hue coordinate a particle's own
+  // seed is allowed to spread it over. (0, 0, 1) draws a particle by its age
+  // and its seed alone, which is what every field but the flock does.
+  turn: vec4<f32>,
   // Four groups of three vec4s: (first, count, x, y), (spread, speed, life,
-  // pad), (shape, radius, cone, strength).
+  // pad), (shape, radius, cone, strength). A shape is 0 for the whole field, 1
+  // for a ring about the attractor and 2 for a flock, born on a live bird.
   groups: array<vec4<f32>, 12>,
 }
 
@@ -52,6 +58,9 @@ struct Particle {
   // Age and life in seconds, the particle's own seed, and its hue coordinate
   // in -0.5 to 0.5 before the spread is applied.
   span: vec4<f32>,
+  // How hard it is turning, 0 to 1 and smoothed over a moment, then three
+  // floats to spare.
+  motion: vec4<f32>,
 }
 
 // The same mix the CPU mirror in particles.params.ts uses, written out so the

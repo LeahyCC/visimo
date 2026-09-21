@@ -25,7 +25,7 @@
 import { DEFAULT_BANDS, F } from '../audio/FeatureExtractor'
 import { peakPaletteAt, RIBBON_TINT } from '../post/params'
 import { PARTICLE_KNOBS } from '../studies/impls'
-import type { DustKnob, ParticleKnob, SparksKnob } from '../studies/impls'
+import type { DustKnob, MurmurationKnob, ParticleKnob, SparksKnob } from '../studies/impls'
 import { hash01 } from './streaks.params'
 
 const TAU = Math.PI * 2
@@ -43,8 +43,11 @@ const mix = (low: number, high: number, amount: number) => low + (high - low) * 
  */
 export const MAX_PARTICLES = 500_000
 
-/** Floats one particle takes: place, velocity, age, life, seed, hue. */
-export const PARTICLE_FLOATS = 8
+/**
+ * Floats one particle takes: place, velocity, age, life, seed, hue, and then
+ * how hard it is turning with three floats to spare.
+ */
+export const PARTICLE_FLOATS = 12
 
 /** Where a particle's fields sit in its eight floats; the shader reads the same order. */
 export const PARTICLE_AT = {
@@ -56,6 +59,7 @@ export const PARTICLE_AT = {
   life: 5,
   seed: 6,
   hue: 7,
+  turn: 8,
 } as const
 
 /** Particles one compute invocation handles, and so what a dispatch counts in. */
@@ -76,8 +80,8 @@ export const MAX_SPAWN_GROUPS = 4
 /** Floats one spawn group takes in the uniform: three vec4s. */
 export const SPAWN_FLOATS = 12
 
-/** Floats in the uniform before the spawn groups: twelve vec4s. */
-export const PARTICLE_UNIFORM_HEAD = 48
+/** Floats in the uniform before the spawn groups: thirteen vec4s. */
+export const PARTICLE_UNIFORM_HEAD = 52
 
 /** Floats in the whole uniform. */
 export const PARTICLE_UNIFORM_FLOATS = PARTICLE_UNIFORM_HEAD + MAX_SPAWN_GROUPS * SPAWN_FLOATS
@@ -165,9 +169,16 @@ export const PARTICLE_RANGES: Readonly<Record<ParticleKnob, readonly [number, nu
   // How far a particle looks for its neighbours, in short sides. It is also
   // the grid's cell, so raising it costs nothing but reach.
   neighbourhood: [0, 0.5],
+  // How much brighter a particle is, over its resting light, while it is
+  // turning as hard as `TURN_FULL` in the shader. 0 draws every particle by
+  // its age alone, which is what every field but the flock does.
+  turnLight: [0, 8],
 }
 
 export type ParticleParams = Record<ParticleKnob, number>
+
+export const PARTICLE_COLOURS = ['palette', 'vivid'] as const
+export type ParticleColour = (typeof PARTICLE_COLOURS)[number]
 
 export type ParticleRanges = Readonly<Record<ParticleKnob, readonly [number, number]>>
 
@@ -175,13 +186,19 @@ export type ParticleRanges = Readonly<Record<ParticleKnob, readonly [number, num
  * Where a burst of particles is laid. `field` scatters them over the whole
  * canvas, which is what a continuous haze wants; `ring` lays them round a
  * circle about the attractor and throws them outward, which is what a hit
- * wants. It belongs to the profile rather than to a knob, because no mapping
- * row should be able to turn one into the other halfway through a bar.
+ * wants. `flock` is born on a bird that is already alive, a little way off it
+ * and going the way it is going, so a body that is replenishing itself does
+ * not have to be told where it is: the CPU never reads the pool back, and a
+ * newborn at a fixed place would appear away from a flock that has moved.
+ * It falls back to a disc about the attractor when nothing is alive, which is
+ * how a flock starts. It belongs to the profile rather than to a knob, because
+ * no mapping row should be able to turn one into the other halfway through a
+ * bar.
  */
-export const SPAWN_SHAPES = ['field', 'ring'] as const
+export const SPAWN_SHAPES = ['field', 'ring', 'flock'] as const
 export type SpawnShape = (typeof SPAWN_SHAPES)[number]
 
-export const SHAPE_CODE: Readonly<Record<SpawnShape, number>> = { field: 0, ring: 1 }
+export const SHAPE_CODE: Readonly<Record<SpawnShape, number>> = { field: 0, ring: 1, flock: 2 }
 
 /** One band's rows: how loud it is, whether it was struck, and where the strike sat. */
 export type HitBand = {
@@ -210,8 +227,33 @@ export type ParticleProfile = {
   readonly detail: string
   readonly capacity: number
   readonly shape: SpawnShape
-  /** Short sides from the attractor that a `ring` burst is laid on. */
+  /**
+   * Where the continuous rate lays what it spawns. A haze wants `field`; a body
+   * that has to stay one body wants `flock`, which is born on its own members.
+   */
+  readonly fill: SpawnShape
+  /**
+   * Short sides from the attractor that a `ring` burst is laid on, and for a
+   * `flock` how far from its host a newborn lands.
+   */
   readonly ringRadius: number
+  /**
+   * Whether a particle's colour is a stretch of the shared palette (`palette`)
+   * or three saturated hues of the field's own (`vivid`). The palette is one
+   * colour at a time and a flock lit in it is a monochrome one.
+   */
+  readonly colour: ParticleColour
+  /**
+   * How much of the hue arc a particle's own draw of the dice spreads it over,
+   * from 0 (all one hue) to 1 (the whole arc). The flock keeps it small so its
+   * body is one colour and the turning is what carries it across the arc.
+   */
+  readonly scatter: number
+  /**
+   * How far toward the leading hue a particle turning at full rate is pushed,
+   * in shares of the arc. 0 leaves the colour to the dice alone.
+   */
+  readonly turnHue: number
   /** Radians either side of straight out that a `ring` burst is thrown within. */
   readonly cone: number
   /** The bands whose hits throw a burst, strongest first so the first one wins a tie. */
@@ -408,12 +450,13 @@ export function planSpawns(
     group.count = whole
     group.x = 0
     group.y = 0
-    // The continuous rate is a haze rather than a throw, so it is laid over
-    // the whole field whatever shape the profile's bursts take.
+    // The continuous rate is a haze rather than a throw, so unless the profile
+    // says otherwise it is laid over the whole field whatever shape the
+    // profile's bursts take.
     group.spread = 1
     group.speed = params.speed
     group.life = params.life
-    group.shape = 'field'
+    group.shape = profile.fill
     group.radius = profile.ringRadius
     group.cone = Math.PI
     group.strength = 1
@@ -623,12 +666,58 @@ export function particleCoverage(
 }
 
 /**
- * The three palette stops the shader runs a particle's hue along: the ribbon's
- * colour at the key, and the same palette a half spread either side of it. The
- * shader mixes between them by the particle's own hue coordinate, which saves
- * it carrying a palette texture for the sake of one lookup a particle.
+ * A fully saturated hue, brightest channel at 1: three cosines a third of a
+ * turn apart, squared so the hue is sharp. It is `vivid()` in `lasers.wgsl`
+ * written again on the CPU, which is where this field picks its colours. The
+ * wheel runs red, magenta, blue, cyan, green, yellow as the turn climbs.
  */
-export function particleColours(features: Float32Array, spread: number, out: Float32Array): void {
+export function vividAt(turns: number): [number, number, number] {
+  const channel = (offset: number) => {
+    const level = 0.5 + 0.5 * Math.cos(TAU * (turns + offset))
+    return level * level
+  }
+  const red = channel(0)
+  const green = channel(1 / 3)
+  const blue = channel(2 / 3)
+  const peak = Math.max(red, green, blue, 1e-4)
+  return [red / peak, green / peak, blue / peak]
+}
+
+/**
+ * Where the flock's resting colour sits on that wheel at a key of 0, a blue
+ * with some cyan in it, the way a flock reads against a dusk sky. The leading
+ * hue is a spread's worth of turns down the wheel from it, which for the
+ * flock's 0.36 lands on a hot red. Both move with the key.
+ */
+export const VIVID_BASE = 0.42
+
+/**
+ * The three colour stops the shader runs a particle's hue along, from the
+ * hue coordinate's low end through the middle to its high end. The shader
+ * mixes between them by the particle's own coordinate, which saves it
+ * carrying a palette texture for the sake of one lookup a particle.
+ *
+ * `palette` is the ribbon's colour at the key and the same palette a half
+ * spread either side of it, so every ink that follows the look's palette
+ * follows it here. `vivid` is a colour of the field's own: the middle stop is
+ * the resting hue, the high stop is the leading hue a spread down the wheel,
+ * and the low stop sits a quarter of a spread the other way so a particle a
+ * little off the middle in either direction is still a hue and never a grey.
+ */
+export function particleColours(
+  features: Float32Array,
+  spread: number,
+  out: Float32Array,
+  colour: ParticleColour = 'palette',
+): void {
+  if (colour === 'vivid') {
+    const key = (features[F.keyHue] ?? 0) + VIVID_BASE
+    out.set(vividAt(key + spread * 0.25), 0)
+    out.set(vividAt(key), 3)
+    out.set(vividAt(key - spread), 6)
+    return
+  }
+
   const key = (features[F.keyHue] ?? 0) + RIBBON_TINT
   out.set(peakPaletteAt(key - spread / 2), 0)
   out.set(peakPaletteAt(key), 3)
@@ -676,6 +765,10 @@ export type UniformFrame = {
   flowCover: readonly [number, number] | null
   /** Whether a particle leaving one edge comes in at the other. */
   wrap: boolean
+  /** The profile's own share of the hue arc a particle's dice spread it over. */
+  scatter: number
+  /** How far toward the leading hue a particle turning at full rate is pushed. */
+  turnHue: number
 }
 
 /**
@@ -693,6 +786,7 @@ export function writeParticleUniform(
   out: Float32Array,
 ): Float32Array {
   const { width, height, dt, time, colours, groups, groupCount, flowCover, wrap } = frame
+  const { scatter, turnHue } = frame
   const short = Math.max(1, Math.min(width, height))
   out.fill(0)
   // The canvas in pixels, its short side, and what one unit of `size` is worth
@@ -751,6 +845,11 @@ export function writeParticleUniform(
   out[43] = FADE_IN
   out[44] = groupCount
   out[45] = wrap ? 1 : 0
+  // How much a turn adds to the light, how far it pushes the hue, and how much
+  // of the arc a particle's own hue is spread over.
+  out[48] = params.turnLight
+  out[49] = turnHue
+  out[50] = scatter
   for (let group = 0; group < MAX_SPAWN_GROUPS; group += 1) {
     const at = PARTICLE_UNIFORM_HEAD + group * SPAWN_FLOATS
     const spawn = group < groupCount ? groups[group] : undefined
@@ -832,8 +931,12 @@ export const DUST_PROFILE: ParticleProfile = {
   detail: '',
   capacity: 40_000,
   shape: 'field',
+  fill: 'field',
   ringRadius: 0,
   cone: Math.PI,
+  colour: 'palette',
+  scatter: 1,
+  turnHue: 0,
   bands: [],
   ranges: narrow(DUST_RANGES),
   defaults: {
@@ -868,6 +971,7 @@ export const DUST_PROFILE: ParticleProfile = {
     alignment: 0,
     cohesion: 0,
     neighbourhood: 0,
+    turnLight: 0,
   },
 }
 
@@ -884,10 +988,14 @@ export const SPARKS_PROFILE: ParticleProfile = {
   detail: 'sparks',
   capacity: 60_000,
   shape: 'ring',
+  fill: 'field',
   // Short sides from the middle, the same circle the pool threw from.
   ringRadius: 0.2,
   // Radians either side of straight out.
   cone: 0.4,
+  colour: 'palette',
+  scatter: 1,
+  turnHue: 0,
   bands: TREBLE_BANDS,
   ranges: narrow(SPARK_RANGES),
   defaults: {
@@ -923,5 +1031,105 @@ export const SPARKS_PROFILE: ParticleProfile = {
     alignment: 0,
     cohesion: 0,
     neighbourhood: 0,
+    turnLight: 0,
+  },
+}
+
+/**
+ * The flock's ranges. `rate` and `count` are the birds, `separation`,
+ * `alignment` and `cohesion` are the three rules, and every one is held to a
+ * span in which the flock is still one body: a separation past what cohesion
+ * and the gather can pull back is a flock that never closes again.
+ */
+export const MURMURATION_RANGES: Readonly<Record<MurmurationKnob, readonly [number, number]>> = {
+  count: [0, 30_000],
+  rate: [0, 6_000],
+  life: [1, 30],
+  speed: [0, 0.2],
+  size: [0, 3],
+  streak: [0, 0.12],
+  intensity: [0, 0.5],
+  hueSpread: [0, 0.5],
+  turnLight: [0, 6],
+  drag: [0.2, 4],
+  gravity: [0, 1],
+  gravityAngle: [0, TAU],
+  curl: [0, 0.5],
+  curlScale: [0.25, 4],
+  gather: [0, 2],
+  attractX: [0.15, 0.85],
+  attractY: [0.15, 0.85],
+  separation: [0, 2],
+  alignment: [0, 8],
+  cohesion: [0, 6],
+  neighbourhood: [0, 0.2],
+}
+
+/**
+ * Thousands of birds moving as one body, which is what the `murmuration`
+ * study is. It is the first field to use the boids grid, and the profile is
+ * where the four things that make a flock a flock and not a haze are decided:
+ *
+ * - **It replenishes itself in place.** `fill` is `flock`, so a newborn lands
+ *   beside a bird that is alive and goes the way that bird goes, and the body
+ *   never has to be told where it is. A field spawn would have every newborn
+ *   fly in from the far side of the frame and read as dust converging.
+ * - **A bird lives about as long as the pool takes to come round.** The ring
+ *   overwrites a slot every `count / rate` seconds, and the life is set longer
+ *   than that, so a bird is replaced by a clone of another while it is still
+ *   at full light. Nobody can see one of ten thousand change places, and the
+ *   fade never has to dim a bird out, which would thin the body from inside.
+ * - **A turn is light, and the light is a colour.** `turnLight` makes a bird
+ *   brighter while it turns and `turnHue` pushes it toward the leading hue, so
+ *   a fold ripples across the body as a wave of light and of colour and not as
+ *   a change in count. `scatter` is small so the body at rest is one hue.
+ * - **The colour is its own.** `vivid` is a blue body and a hot red where it
+ *   turns, a third of a turn apart on the wheel, and both move with the key.
+ */
+export const MURMURATION_PROFILE: ParticleProfile = {
+  label: 'murmuration',
+  detail: 'birds',
+  capacity: 30_000,
+  shape: 'field',
+  fill: 'flock',
+  // Short sides between a newborn and the bird it was born beside.
+  ringRadius: 0.02,
+  cone: Math.PI,
+  colour: 'vivid',
+  scatter: 0.3,
+  turnHue: 1,
+  bands: [],
+  ranges: narrow(MURMURATION_RANGES),
+  defaults: {
+    count: 0,
+    rate: 0,
+    burst: 0,
+    life: 30,
+    speed: 0.02,
+    spread: 1,
+    size: 1.4,
+    grow: 1,
+    streak: 0.03,
+    intensity: 0.2,
+    // Flat to the end: a bird is replaced before it dims, see above.
+    fade: 0,
+    hueSpread: 0.36,
+    heat: 0,
+    pale: 0,
+    twinkle: 0,
+    drag: 1,
+    gravity: 0.3,
+    gravityAngle: 0,
+    flow: 0,
+    curl: 0.1,
+    curlScale: 0.8,
+    gather: 0.4,
+    attractX: 0.5,
+    attractY: 0.5,
+    separation: 0.5,
+    alignment: 3,
+    cohesion: 1.5,
+    neighbourhood: 0.08,
+    turnLight: 2,
   },
 }

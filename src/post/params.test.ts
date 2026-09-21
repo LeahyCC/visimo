@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
-import { paletteAt, visibleExtent } from '../scenes/fluid.params'
+import { paletteAt } from '../palettes/active'
+import { visibleExtent } from '../scenes/fluid.params'
 import { CASTS } from '../studies/casts/index'
 import { castFrame, resolveCast } from '../studies/resolve'
 import {

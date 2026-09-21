@@ -74,12 +74,19 @@ import type { InkStudy } from '../types'
  * as it turns, holds 19.
  *
  * **Its home** is the middle of the dance floor: a drive of 0.58, steady at
- * 0.7, hard at 0.6, with no opinion about tonality, and a reach of 0.35. Of
- * the twenty measured tracks that puts it nearest John Summit's tech house
- * (0.84), Pendulum (0.83) and Subtronics (0.83), and well away from the folk,
- * the orchestral cue and the ambient pieces. It excludes `fractal-glints`: two
- * heavy raymarched inks in one cast is two marches a frame and a budget spent
- * twice over, and both of them want to be the thing being looked at.
+ * 0.7, hard at 0.6, with no opinion about tonality, and a reach of 0.4. Of the
+ * twenty measured tracks that puts it nearest John Summit's tech house (0.90),
+ * Pendulum (0.87) and Subtronics (0.87), and at a third of that or less on the
+ * folk, the orchestral cue and the ambient pieces.
+ *
+ * The reach was 0.35, which is what the card asked for, and at 0.35 the study
+ * was never cast: it came third on its best track, behind the spectrum ring
+ * and the beat rings, and by the time a heavy ink was considered for the
+ * second slot the budget had gone on two cheap ones. 0.4 is the smallest
+ * number that wins it a seat, and `fairness.test.ts` is what says so. It
+ * excludes `fractal-glints`: two heavy raymarched inks in one cast is two
+ * marches a frame and a budget spent twice over, and both of them want to be
+ * the thing being looked at.
  */
 export const SHAPE_MORPH: InkStudy = {
   id: 'shape-morph',
@@ -87,7 +94,7 @@ export const SHAPE_MORPH: InkStudy = {
   name: 'Shape morph',
   impl: 'morph',
   home: { drive: 0.58, weight: 0.35, tonality: 0.5, steadiness: 0.7, hardness: 0.6 },
-  reach: 0.35,
+  reach: 0.4,
   moments: { intro: 0, groove: 1, build: 0.8, drop: 0.8, rest: 0, outro: 0 },
   knobs: {
     size: 0.55,

@@ -37,6 +37,7 @@ import { CausticsInk } from '../impls/CausticsInk'
 import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
+import { GridInk } from '../impls/GridInk'
 import { HaloInk } from '../impls/HaloInk'
 import { LasersInk } from '../impls/LasersInk'
 import { LightningInk } from '../impls/LightningInk'
@@ -681,6 +682,7 @@ class Renderer {
     if (impl === 'morph') return new MorphInk()
     if (impl === 'petals') return new PetalsInk()
     if (impl === 'lightning') return new LightningInk()
+    if (impl === 'grid') return new GridInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

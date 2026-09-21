@@ -208,6 +208,19 @@ the solid's light is continuous in the size, the turn and the level, and the
 one event it reads, `impact`, changes which form is drawn and not how much
 light there is.
 
+## Where it sits
+
+A drive of 0.58, steady at 0.7, hard at 0.6, no opinion about tonality, and a
+reach of 0.4. Of the twenty measured tracks that is nearest John Summit's tech
+house, Pendulum and Subtronics, and a third of that or less on the folk, the
+orchestral cue and the ambient pieces.
+
+The reach was 0.35, which is what the card asked for, and at 0.35 the study
+was never cast at all: it came third on its best track, behind the spectrum
+ring and the beat rings, and by the time a heavy ink was considered for the
+second slot the budget had gone on two cheap ones. 0.4 is the smallest number
+that wins it a seat, and `director/fairness.test.ts` is what says so.
+
 ## Silence, presence and frame rate
 
 A silent packet draws nothing at all: under `SILENT_FLOOR` (an `energy` of

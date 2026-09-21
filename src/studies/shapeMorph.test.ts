@@ -112,9 +112,13 @@ describe('the shape morph study', () => {
     }
 
     for (const name of ['John Summit', 'Pendulum', 'Subtronics'])
-      expect(found(name), name).toBeGreaterThan(0.6)
+      expect(found(name), name).toBeGreaterThan(0.75)
+    // Half what the dance tracks read, and less: the reach is wide enough to
+    // win a seat among twenty inks and no wider.
     for (const name of ['Wilco', 'Daft Punk', 'Christian Loffler'])
-      expect(found(name), name).toBeLessThan(0.25)
+      expect(found(name), name).toBeLessThan(0.35)
+    for (const name of ['Wilco', 'Daft Punk', 'Christian Loffler'])
+      expect(found(name), name).toBeLessThan(found('Pendulum') / 2)
   })
 
   it('suits the three moments the catalogue gives it and nothing else', () => {

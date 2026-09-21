@@ -81,7 +81,7 @@ const LAZY_FLUID: FlowStudy = {
 }
 
 /**
- * The same solver at Wash's numbers: thin viscosity, hard vorticity and a
+ * The same solver at the numbers the retired Wash cast had: thin viscosity, hard vorticity and a
  * wide slow orbit, which draws fine filaments instead of plumes. Tension
  * climbs the vorticity, so a build frays.
  */
@@ -1173,10 +1173,10 @@ const SPARKS: InkStudy = {
 }
 
 /**
- * Low contrast, grain and a gentle bloom: what Plume, Wash and Drift are
- * shown through. A hard track splits more and is clean, a soft one splits
- * less and is grainy, which is the one row `hardness` owns here. Tension
- * pulls the glow back before the drop puts it out again.
+ * Low contrast, grain and a gentle bloom: what Plume is shown through. A
+ * hard track splits more and is clean, a soft one splits less and is grainy,
+ * which is the one row `hardness` owns here. Tension pulls the glow back
+ * before the drop puts it out again.
  */
 const WARM_SOFT: LookStudy = {
   id: 'warm-soft',

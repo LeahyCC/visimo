@@ -287,7 +287,8 @@ const ALLOWED: Record<string, Record<string, string>> = {
     twist: 'the same, and a twist that varies with radius is the polar twist study',
   },
   'dye-plumes': {
-    hitDye: 'which sound fires it differs by cast, the low end in Plume and the treble in Wash',
+    hitDye:
+      'which sound fires it differs by cast, and is the cast to choose: Plume takes the low end and novelty',
     colourDrift: 'the palette drifts on a clock of its own; the key moves where it drifts from',
     eventDye: 'what one hit’s puff is worth over its life; the hit’s strength is the drive',
   },

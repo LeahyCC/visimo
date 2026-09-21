@@ -266,7 +266,9 @@ describe('it does not wash the canvas out', () => {
     }
 
     expect(across(settled(packetOf({ energy: 0.3 })))).toBeGreaterThan(0.4)
-    expect(across(settled(filled(1), 0))).toBeGreaterThan(across(settled(packetOf({ energy: 0.3 }))))
+    expect(across(settled(filled(1), 0))).toBeGreaterThan(
+      across(settled(packetOf({ energy: 0.3 }))),
+    )
     expect(across(settled(filled(1), 0))).toBeLessThan(0.8)
   })
 

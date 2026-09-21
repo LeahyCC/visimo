@@ -15,8 +15,8 @@ import { paletteAt } from '../palettes/active'
 import { RIBBON_TINT } from '../post/params'
 import {
   BODY,
-  FOV,
   FORMS,
+  FOV,
   HALF_VIEW,
   luminance,
   MARCH_STEPS,
@@ -289,10 +289,7 @@ describe('the light and its threshold', () => {
     const turned = morphLights(packet, params)
     const hueOf = (colour: Rgb) => srgbToOklch(colour).h
     expect(hueOf(turned.key)).not.toBeCloseTo(hueOf(key), 1)
-    expect(Math.abs(hueGap(hueOf(turned.key), hueOf(turned.rim)))).toBeCloseTo(
-      RIM_TURN_DEGREES,
-      0,
-    )
+    expect(Math.abs(hueGap(hueOf(turned.key), hueOf(turned.rim)))).toBeCloseTo(RIM_TURN_DEGREES, 0)
   })
 
   it('has a peak that counts every light and rises with each of them', () => {
@@ -321,7 +318,8 @@ describe('the light and its threshold', () => {
   it('holds the body well under the edge, so the canvas keeps an outline', () => {
     const params = morphParams(REST)
     const body = luminance(key) * BODY * params.intensity * MORPH_LIGHT
-    const edge = (RIM_WRAP + RIM_BASE + params.rim) * luminance(rim) * params.intensity * MORPH_LIGHT
+    const edge =
+      (RIM_WRAP + RIM_BASE + params.rim) * luminance(rim) * params.intensity * MORPH_LIGHT
     expect(edge).toBeGreaterThan(body * 5)
   })
 

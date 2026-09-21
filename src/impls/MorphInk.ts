@@ -22,7 +22,6 @@
  * hold the whole cast to 60 for an ink that costs nothing.
  */
 import type { Tuning } from '../presets/knobs'
-import { MAX_SCALE } from './raymarch.params'
 import shader from '../shaders/morph.wgsl?raw'
 import {
   MORPH_UNIFORM_FLOATS,
@@ -32,6 +31,7 @@ import {
   morphSteps,
   writeMorphUniform,
 } from './morph.params'
+import { MAX_SCALE } from './raymarch.params'
 import { RaymarchInk } from './RaymarchInk'
 
 export class MorphInk extends RaymarchInk {

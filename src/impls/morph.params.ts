@@ -446,10 +446,7 @@ export const luminance = (rgb: readonly [number, number, number]) =>
  * `peakPaletteAt` does for every other ink and what makes `intensity` mean
  * the same thing in every key.
  */
-export function morphLights(
-  features: Float32Array,
-  params: MorphParams,
-): { key: Rgb; rim: Rgb } {
+export function morphLights(features: Float32Array, params: MorphParams): { key: Rgb; rim: Rgb } {
   const turn = features[F.keyHue] ?? 0
   const place = (Number.isFinite(turn) ? turn : 0) + RIBBON_TINT + params.hue
   const hue = srgbToOklch(paletteAt(place)).h

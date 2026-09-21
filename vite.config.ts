@@ -10,5 +10,9 @@ export default defineConfig({
   // Unit tests are for pure TypeScript and run in Node. Anything that needs a
   // GPU has to be driven in a real browser by hand. The demo's bench keeps its
   // pure parts under `demo/bench/`, so those are run too.
-  test: { root: '.', include: ['src/**/*.test.ts', 'demo/**/*.test.ts'], environment: 'node' },
+  test: {
+    root: '.',
+    include: ['src/**/*.test.ts', 'demo/**/*.test.ts', 'test/**/*.test.ts'],
+    environment: 'node',
+  },
 })

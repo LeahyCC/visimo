@@ -14,8 +14,8 @@ import { isPaletteId, PALETTE_IDS } from '../palettes/palette'
 import type { PaletteId } from '../palettes/palette'
 import { DEFAULT_POST_PARAMS } from '../post/params'
 import type { PostKnob } from '../post/params'
-import type { Curve } from '../presets/knobs'
-import { CURVES } from '../presets/knobs'
+import type { Curve, HoldPeriod, Shape, ShapeKind } from '../presets/knobs'
+import { CURVES, HOLD_PERIODS, SHAPES } from '../presets/knobs'
 import {
   describe,
   fail,
@@ -28,7 +28,7 @@ import {
 import { implKnobs, isImplKnob } from './impls'
 import { findStudy } from './registry'
 import { STUDY_FIELDS } from './types'
-import type { Study, StudyField, StudyMapping } from './types'
+import type { Study, StudyField, StudyMapping, StudyScale } from './types'
 
 /**
  * The feedback, which is the canvas itself and not a look. It is what carries
@@ -45,6 +45,11 @@ export const CANVAS_KNOBS = [
   'feedback.rotate',
   'feedback.carry',
   'feedback.floor',
+  'feedback.fade',
+  'feedback.hold',
+  'feedback.hue',
+  'feedback.cool',
+  'feedback.sharpen',
   'feedback.ceiling',
 ] as const satisfies readonly PostKnob[]
 export type CanvasKnob = (typeof CANVAS_KNOBS)[number]
@@ -52,6 +57,12 @@ export type CanvasKnob = (typeof CANVAS_KNOBS)[number]
 export const isCanvasKnob = (value: string): value is CanvasKnob =>
   (CANVAS_KNOBS as readonly string[]).includes(value)
 
+/**
+ * The canvas's own rows. They take no `scale` and no `shape`: the canvas is
+ * the picture every study is drawing on rather than a study, it has no
+ * presence and nothing fades it, so there is nowhere for a row of its own to
+ * keep a memory that is dropped when something leaves.
+ */
 export type CanvasMapping = {
   from: StudyField
   to: CanvasKnob
@@ -105,6 +116,21 @@ export const castStudyIds = (cast: Cast): readonly string[] =>
 export const MAX_INKS = 3
 
 const KEYS = ['id', 'name', 'flow', 'inks', 'look', 'canvas', 'overrides', 'palette']
+const ROW_KEYS = ['from', 'to', 'gain', 'curve', 'scale', 'shape']
+const CANVAS_ROW_KEYS = ['from', 'to', 'gain', 'curve']
+const SCALE_KEYS = ['from', 'curve']
+/**
+ * What each shape takes, beside its `kind`. It is a table rather than four
+ * branches of checks so that the message for a key in the wrong shape can
+ * name the keys that shape does take, which is the mistake this catches most:
+ * a `releaseMs` on a spring, or a `damping` on an envelope.
+ */
+const SHAPE_KEYS: Readonly<Record<ShapeKind, readonly string[]>> = {
+  envelope: ['attackMs', 'releaseMs'],
+  spring: ['frequency', 'damping'],
+  integrate: ['rate', 'wrap'],
+  hold: ['per'],
+}
 const CANVAS_KEYS = ['enabled', 'knobs', 'mapping']
 const OVERRIDE_KEYS = ['knobs', 'mapping']
 
@@ -115,6 +141,11 @@ const defaultCanvasKnobs = (): Record<CanvasKnob, number> => ({
   'feedback.rotate': DEFAULT_POST_PARAMS.feedback.rotate,
   'feedback.carry': DEFAULT_POST_PARAMS.feedback.carry,
   'feedback.floor': DEFAULT_POST_PARAMS.feedback.floor,
+  'feedback.fade': DEFAULT_POST_PARAMS.feedback.fade,
+  'feedback.hold': DEFAULT_POST_PARAMS.feedback.hold,
+  'feedback.hue': DEFAULT_POST_PARAMS.feedback.hue,
+  'feedback.cool': DEFAULT_POST_PARAMS.feedback.cool,
+  'feedback.sharpen': DEFAULT_POST_PARAMS.feedback.sharpen,
   'feedback.ceiling': DEFAULT_POST_PARAMS.feedback.ceiling,
 })
 
@@ -133,42 +164,95 @@ export const defaultCanvas = (): CastCanvas => ({
 /**
  * The canvas a chosen cast draws on, which has no file to read numbers from:
  * the one persistent picture of docs/canvas-plan.md. It keeps nearly all of
- * itself, reads the last frame back along whatever flow is live, and holds a
- * floor and a ceiling so long trails neither haze nor burn.
+ * itself, reads the last frame back along whatever flow is live, holds its own
+ * mean brightness so it can do that without burning out, and ages the light it
+ * keeps.
  *
  * It used to be `defaultCanvas`, whose carry is 0, and under the director no
  * flow moved the picture at all: the fluid showed only through its dye, and
  * a flow that draws nothing, as implode and radial burst do, did nothing.
  *
- * The numbers are Drift's (a cast since folded into Plume, whose canvas rests
- * at them when the music is calm), which were tuned by eye on real tracks
- * for a dye ink and the ribbon, the cast the director reaches for most. One
- * row is added: tension shortens the trails, so a build tightens the picture
- * as well as whatever its studies do, and the drop opens it again.
+ * It then kept 0.93 a frame with a subtractive floor of 0.018, which put a
+ * mark out in about half a second: no flow had time to shape anything, and the
+ * only reason the decay was that low was that nothing controlled the sum, so a
+ * longer memory went white. Three rows took the ceiling down as the music got
+ * loud, which made the loudest moments the dullest. `feedback.hold` is what
+ * replaced all of it, and the numbers here are what a canvas with a gain
+ * control can afford:
+ *
+ * - 0.975 a reference frame, which is a memory of about two thirds of a
+ *   second to a tenth and two and a half seconds to a thousandth, against the
+ *   0.36 of a second 0.93 gave. That is long enough for the carry to fold a
+ *   mark into a shape rather than merely smearing it.
+ * - a `fade` of 0.0005 in place of the 0.018 floor. The floor was the haze
+ *   control as well as the tail's shape, and took a mark out in half a second
+ *   doing it; the hold is the haze control now, so the knee only has to shape
+ *   the tail. Well above it a pixel decays as the decay says; at it a pixel
+ *   loses half its light a frame; under it the last of a trail collapses and
+ *   is never clipped, so the trail ends rather than stopping.
+ * - `hold` at 0.13, rising to 0.23 when the music is full: the mean the whole
+ *   canvas settles at. A frame of constant white then settles near a quarter
+ *   rather than at forty times what was drawn, and a thin fresh mark still
+ *   lands at full brightness, because only the carried sum is scaled. The
+ *   number was found by looking, on the reference track's second drop at 1:54
+ *   on a real adapter: at 0.44 the middle of the frame was a pale mass with
+ *   the ring lost in it, and at 0.22 the same moment has black in it, the
+ *   fluid's filaments read, and the spectrum ring's bars stand out of the dye.
+ * - the three negative ceiling rows are gone, and the ceiling rests at 1.8
+ *   as a per-pixel backstop.
+ * - the trail cools, turns its hue with the harmony and keeps a little of its
+ *   own detail, all gently. Light that lasts two seconds has time to change,
+ *   which is most of what a long memory is for.
+ *
+ * The rest are Drift's (a cast since folded into Plume), tuned by eye on real
+ * tracks for a dye ink and the ribbon, the cast the director reaches for most.
+ * The rows on the decay are much smaller than they were for one reason: near
+ * 1 the decay is highly levered, and the 0.02 that moved 0.93 to 0.95 would
+ * take 0.975 past 0.99 and the canvas would never let go of anything. They are
+ * scaled by what they do to the memory's length instead, so tension still
+ * shortens the trails by about a third through a build and the drop opens them
+ * again.
  */
 export const carriedCanvas = (): CastCanvas => ({
   enabled: true,
   knobs: {
     'feedback.amount': 1,
-    'feedback.decay': 0.93,
+    'feedback.decay': 0.975,
     'feedback.zoom': 1.0015,
     'feedback.rotate': 0,
     'feedback.carry': 1,
-    'feedback.floor': 0.018,
+    // The subtractive floor is off: the fade beside it does the same job
+    // without a cliff at the bottom of a trail.
+    'feedback.floor': 0,
+    'feedback.fade': 0.0005,
+    'feedback.hold': 0.13,
+    'feedback.hue': 0.006,
+    'feedback.cool': 0.004,
+    'feedback.sharpen': 0.03,
     'feedback.ceiling': 1.8,
   },
   mapping: [
-    { from: 'energy', to: 'feedback.decay', gain: 0.02, curve: 'linear' },
-    { from: 'swell', to: 'feedback.decay', gain: 0.02, curve: 'linear' },
-    { from: 'tension', to: 'feedback.decay', gain: -0.04, curve: 'linear' },
+    { from: 'energy', to: 'feedback.decay', gain: 0.004, curve: 'linear' },
+    { from: 'swell', to: 'feedback.decay', gain: 0.004, curve: 'linear' },
+    { from: 'tension', to: 'feedback.decay', gain: -0.012, curve: 'linear' },
     { from: 'beatPhase', to: 'feedback.zoom', gain: 0.003, curve: 'invert' },
     { from: 'harmonicChange', to: 'feedback.rotate', gain: 0.0015, curve: 'linear' },
     { from: 'energy', to: 'feedback.carry', gain: 0.4, curve: 'linear' },
-    { from: 'energy', to: 'feedback.floor', gain: 0.001, curve: 'linear' },
-    { from: 'swell', to: 'feedback.floor', gain: 0.001, curve: 'linear' },
-    { from: 'energy', to: 'feedback.ceiling', gain: -0.25, curve: 'square' },
-    { from: 'swell', to: 'feedback.ceiling', gain: -0.15, curve: 'square' },
-    { from: 'hardness', to: 'feedback.ceiling', gain: -0.15, curve: 'square' },
+    // A loud passage may hold a brighter canvas, and a build a dimmer one, so
+    // the hold is what the old ceiling rows were reaching for and could not
+    // say: it eases the whole picture rather than clipping what is carried.
+    { from: 'energy', to: 'feedback.hold', gain: 0.1, curve: 'linear' },
+    { from: 'tension', to: 'feedback.hold', gain: -0.08, curve: 'linear' },
+    // The trail thins toward black a little faster when the music is loud,
+    // which is where the most light is landing in it.
+    { from: 'energy', to: 'feedback.fade', gain: 0.0005, curve: 'linear' },
+    // A chord change spins the hue of everything already on the canvas, so
+    // the harmony is visible in light that was drawn seconds ago.
+    { from: 'harmonicChange', to: 'feedback.hue', gain: 0.012, curve: 'linear' },
+    // A build drains the warmth out of what is left and picks out its
+    // filaments, so the picture tightens as well as shortening.
+    { from: 'tension', to: 'feedback.cool', gain: 0.012, curve: 'linear' },
+    { from: 'tension', to: 'feedback.sharpen', gain: 0.04, curve: 'linear' },
   ],
 })
 
@@ -184,6 +268,79 @@ function readCurve(value: unknown, source: string, path: string): Curve {
   if (!(CURVES as readonly string[]).includes(curve))
     fail(source, path, `is not a curve; they are ${list(CURVES)}`)
   return curve as Curve
+}
+
+/** A number that has to be positive, or zero as well when `zero` allows it. */
+function readAtLeast(value: unknown, source: string, path: string, zero: boolean): number {
+  const number = readNumber(value, source, path)
+  if (number < 0 || (!zero && number === 0))
+    fail(source, path, `is ${number}; it must be ${zero ? '0 or more' : 'more than 0'}`)
+  return number
+}
+
+/**
+ * The second field a row's signal is multiplied by. `from` is any field a row
+ * may read and `curve` is optional, as it is on the row itself, so the short
+ * form of it is a plain multiply by the level.
+ */
+function readScale(value: unknown, source: string, path: string): StudyScale {
+  if (!isRecord(value)) fail(source, path, `expected an object, got ${describe(value)}`)
+  for (const key of Object.keys(value))
+    if (!SCALE_KEYS.includes(key))
+      fail(source, `${path}.${key}`, `is not part of a scale; it has ${list(SCALE_KEYS)}`)
+  if (value.from === undefined) fail(source, `${path}.from`, 'is missing; a scale reads a field')
+  return {
+    from: readField(value.from, source, `${path}.from`),
+    curve: readCurve(value.curve, source, `${path}.curve`),
+  }
+}
+
+/**
+ * The stage with a memory over a row's signal. `kind` decides what else the
+ * object may hold, and every number is checked for a sign that means
+ * something: a negative attack or release is not a slower follower but a
+ * divergent one, a frequency of 0 is no spring at all, a damping of 0 is a
+ * spring that rings for ever and never settles on anything, and a wrap of 0
+ * is the way to say "do not wrap" and so is left out rather than written.
+ */
+function readShape(value: unknown, source: string, path: string): Shape {
+  if (!isRecord(value)) fail(source, path, `expected an object, got ${describe(value)}`)
+  const kind = readString(value.kind, source, `${path}.kind`)
+  if (!(SHAPES as readonly string[]).includes(kind))
+    fail(source, `${path}.kind`, `is not a shape; they are ${list(SHAPES)}`)
+  const allowed = SHAPE_KEYS[kind as ShapeKind]
+  for (const key of Object.keys(value))
+    if (key !== 'kind' && !allowed.includes(key))
+      fail(
+        source,
+        `${path}.${key}`,
+        `is not part of ${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}; it takes ${list(allowed)}`,
+      )
+  if (kind === 'envelope')
+    return {
+      kind,
+      attackMs: readAtLeast(value.attackMs, source, `${path}.attackMs`, true),
+      releaseMs: readAtLeast(value.releaseMs, source, `${path}.releaseMs`, true),
+    }
+
+  if (kind === 'spring')
+    return {
+      kind,
+      frequency: readAtLeast(value.frequency, source, `${path}.frequency`, false),
+      damping: readAtLeast(value.damping, source, `${path}.damping`, false),
+    }
+
+  if (kind === 'integrate') {
+    const rate = readNumber(value.rate, source, `${path}.rate`)
+    return value.wrap === undefined
+      ? { kind, rate }
+      : { kind, rate, wrap: readAtLeast(value.wrap, source, `${path}.wrap`, false) }
+  }
+
+  const per = readString(value.per, source, `${path}.per`)
+  if (!(HOLD_PERIODS as readonly string[]).includes(per))
+    fail(source, `${path}.per`, `is not a period; they are ${list(HOLD_PERIODS)}`)
+  return { kind: 'hold', per: per as HoldPeriod }
 }
 
 const article = (kind: Study['kind']) => (kind === 'ink' ? 'an' : 'a')
@@ -236,6 +393,15 @@ function readCanvasMapping(value: unknown, source: string, path: string): Canvas
   return value.map((row: unknown, index: number) => {
     const at = `${path}[${index}]`
     if (!isRecord(row)) fail(source, at, `expected an object, got ${describe(row)}`)
+    for (const key of Object.keys(row))
+      if (!CANVAS_ROW_KEYS.includes(key))
+        fail(
+          source,
+          `${at}.${key}`,
+          key === 'scale' || key === 'shape'
+            ? `is not part of a canvas row; the canvas keeps no memory of its own, so a ${key} belongs on a study's row`
+            : `is not part of a canvas row; it has ${list(CANVAS_ROW_KEYS)}`,
+        )
     const to = readString(row.to, source, `${at}.to`)
     if (!isCanvasKnob(to))
       fail(source, `${at}.to`, `is not a canvas knob; they are ${list(CANVAS_KNOBS)}`)
@@ -290,6 +456,9 @@ function readOverride(study: Study, value: unknown, source: string, path: string
 
 function readRow(study: Study, value: unknown, source: string, path: string): StudyMapping {
   if (!isRecord(value)) fail(source, path, `expected an object, got ${describe(value)}`)
+  for (const key of Object.keys(value))
+    if (!ROW_KEYS.includes(key))
+      fail(source, `${path}.${key}`, `is not part of a row; it has ${list(ROW_KEYS)}`)
   const to = readString(value.to, source, `${path}.to`)
   if (!isImplKnob(study.impl, to))
     fail(
@@ -302,6 +471,12 @@ function readRow(study: Study, value: unknown, source: string, path: string): St
     to,
     gain: readNumber(value.gain, source, `${path}.gain`),
     curve: readCurve(value.curve, source, `${path}.curve`),
+    ...(value.scale === undefined
+      ? {}
+      : { scale: readScale(value.scale, source, `${path}.scale`) }),
+    ...(value.shape === undefined
+      ? {}
+      : { shape: readShape(value.shape, source, `${path}.shape`) }),
   }
 }
 

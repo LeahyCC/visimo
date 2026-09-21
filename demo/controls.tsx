@@ -116,6 +116,14 @@ const RANGES: Partial<Record<string, readonly [number, number]>> = {
   'feedback.rotate': [-0.1, 0.1],
   'feedback.carry': [0, 2],
   'feedback.floor': [0, 0.1],
+  // The knee of the multiplicative floor, far smaller than the floor above
+  // it: it takes about its own size off anything bright, every frame.
+  'feedback.fade': [0, 0.01],
+  // The mean the canvas is held at; 0 is no holding at all.
+  'feedback.hold': [0, 2],
+  'feedback.hue': [-0.05, 0.05],
+  'feedback.cool': [-0.05, 0.05],
+  'feedback.sharpen': [0, 0.25],
   'feedback.ceiling': [0.05, 24],
   'bloom.threshold': [0, 4],
   'bloom.knee': [0, 2],

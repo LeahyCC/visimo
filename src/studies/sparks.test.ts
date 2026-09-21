@@ -19,6 +19,7 @@ import {
 import { SPARKS_KNOBS } from './impls'
 import { findStudy, sceneOf } from './registry'
 import { resolveStudy } from './resolve'
+import type { RowState } from './resolve'
 
 const study = findStudy('sparks')
 if (!study) throw new Error('Expected the sparks study')
@@ -34,6 +35,49 @@ const with_ = (rows: Record<number, number>) => {
 
 const at = (packet: Float32Array, tension = 0) =>
   resolveStudy(study, undefined, packet, tension, 1, {})
+
+/**
+ * The same, with the count's envelope given time to reach the packet it is
+ * being held at. The count row reads the treble's own hit through an
+ * envelope, so it is where the last second put it and a stateless reading of
+ * it is a reading of a study that has just arrived. Two seconds at 60 frames
+ * is a dozen time constants of the 320 ms release.
+ */
+const settled = (packet: Float32Array, tension = 0) => {
+  const out: Record<string, number> = {}
+  const states: RowState[] = []
+  for (let frame = 0; frame < 120; frame += 1)
+    resolveStudy(study, undefined, packet, tension, 1, out, 1 / 60, states)
+  return out
+}
+
+/**
+ * The count frame by frame through one hit: the pulse held for a sixth of a
+ * second and then let go, so the envelope's release is what is being read.
+ * The hold is counted in frames rather than compared against a clock, so the
+ * hit is the same sixth of a second at 30, 60 and 144 and a comparison
+ * between them is the envelope's and not the grid's. A sixth is also a whole
+ * number of frames at all three, so `count` below reads the same instant.
+ */
+const countAfterAHit = (fps: number, seconds = 1) => {
+  const packet = with_({ ...GROOVE, [F.treblePulse]: 1 })
+  const out: Record<string, number> = {}
+  const states: RowState[] = []
+  const read: number[] = []
+  const dt = 1 / fps
+  const hold = Math.round(fps / 6)
+  for (let frame = 0; frame < Math.round(seconds * fps); frame += 1) {
+    packet[F.treblePulse] = frame < hold ? 1 : 0
+    resolveStudy(study, undefined, packet, 0, 1, out, dt, states)
+    read.push(out.count ?? 0)
+  }
+
+  return {
+    peak: Math.max(...read),
+    /** The count that many seconds in, which has to land on a frame. */
+    count: (at: number) => read[Math.round(at * fps) - 1] ?? 0,
+  }
+}
 
 /** A groove: the music is on, the hits are the hats, and nothing is winding up. */
 const GROOVE = {
@@ -99,16 +143,50 @@ describe('what the music does to the sparks', () => {
     expect(hard.speed ?? 0).toBeGreaterThan((soft.speed ?? 0) + 0.2)
   })
 
-  it('throws more sparks for a hit when the treble is up, and does not brighten them', () => {
-    const dull = at(with_({ ...GROOVE, [F.treble]: 0 }))
-    const bright = at(with_({ ...GROOVE, [F.treble]: 1 }))
+  it('throws more sparks while the hats are cracking, and does not brighten them', () => {
+    const dull = settled(with_({ ...GROOVE, [F.treblePulse]: 0 }))
+    const bright = settled(with_({ ...GROOVE, [F.treblePulse]: 1 }))
     expect(bright.count ?? 0).toBeGreaterThan(dull.count ?? 0)
     // The treble is the tempting row for the light, and it would break the
-    // rule that a full packet is no brighter than rest, so it must not be there.
-    expect(study.mapping.filter((row) => row.from === 'treble' && row.to === 'intensity')).toEqual(
-      [],
-    )
+    // rule that a full packet is no brighter than rest, so it must not be
+    // there, as a level or as a hit.
+    expect(
+      study.mapping.filter(
+        (row) => (row.from === 'treble' || row.from === 'treblePulse') && row.to === 'intensity',
+      ),
+    ).toEqual([])
     expect(bright.intensity).toBe(dull.intensity)
+  })
+
+  // The envelope is the study saying how long its own hit lasts, rather than
+  // taking the extractor's pulse decay as it comes. Up in 5 milliseconds is
+  // the crack, one frame at any frame rate; down over 320 is the taper that
+  // keeps a run of sixteenths fat.
+  it('swells the count on a hit and tapers it over about a third of a second', () => {
+    const read = countAfterAHit(60)
+    const rest = study.knobs.count ?? 0
+    expect(read.peak).toBeGreaterThan(rest + 2.9)
+    // And never past its own gain, so nothing about the shape can add light.
+    expect(read.peak).toBeLessThanOrEqual(rest + 3 + 1e-9)
+    // The release is 320 ms, so the tail falls by e^(-1) over any 320 ms of
+    // itself, wherever the hit ended. Two readings a release apart say so
+    // without the test having to know when the pulse let go.
+    const early = read.count(0.5) - rest
+    const late = read.count(0.82) - rest
+    expect(early).toBeGreaterThan(0)
+    expect(late / early).toBeCloseTo(Math.exp(-1), 2)
+  })
+
+  it('tapers it along the same curve at 30, 60 and 144 frames a second', () => {
+    const curves = [30, 60, 144].map((fps) => ({ fps, read: countAfterAHit(fps) }))
+    const first = curves[0]
+    if (!first) throw new Error('Expected a frame rate')
+    // Sixths of a second, which is a whole number of frames at each of them.
+    for (let sixth = 1; sixth <= 6; sixth += 1) {
+      const time = sixth / 6
+      for (const { fps, read } of curves)
+        expect(read.count(time), `${fps} fps at ${time}s`).toBeCloseTo(first.read.count(time), 6)
+    }
   })
 
   it('is no brighter on a full packet than at rest, and dimmer as the music fills', () => {
@@ -122,7 +200,7 @@ describe('what the music does to the sparks', () => {
   it('keeps the count a few and the rate under what the ink allows at a full packet', () => {
     const full = new Float32Array(PACKET_LENGTH).fill(1)
     for (const tension of [0, 1]) {
-      const knobs = at(full, tension)
+      const knobs = settled(full, tension)
       expect(knobs.count ?? 0).toBeLessThanOrEqual(8)
       expect(knobs.rate ?? 0).toBeLessThanOrEqual(60)
       expect(knobs.speed ?? 0).toBeLessThanOrEqual(1.2)
@@ -132,8 +210,9 @@ describe('what the music does to the sparks', () => {
 
 describe('what tension does to the sparks', () => {
   it('makes them come faster and moves nothing else', () => {
-    const calm = at(with_(GROOVE), 0)
-    const wound = at(with_(GROOVE), 1)
+    const groove = with_({ ...GROOVE, [F.treblePulse]: 0.6 })
+    const calm = settled(groove, 0)
+    const wound = settled(groove, 1)
     expect(wound.rate ?? 0).toBeGreaterThan((calm.rate ?? 0) + 15)
     for (const knob of SPARKS_KNOBS) {
       if (knob === 'rate') continue
@@ -143,7 +222,9 @@ describe('what tension does to the sparks', () => {
 
   it('throws more sparks over a run of hats, through the rate limit, with tension up', () => {
     const born = (tension: number) => {
-      const params = sparkParams(at(with_(GROOVE), tension))
+      // A run of hats holds the count's envelope near its top, which is the
+      // handful each crack throws before the bucket rations them.
+      const params = sparkParams(settled(with_({ ...GROOVE, [F.treblePulse]: 0.8 }), tension))
       const pool = new SparkPool()
       // Sixteenths at 174, a hat every 86 ms, for ten seconds at 60 steps a second.
       let next = 0

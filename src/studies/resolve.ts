@@ -13,6 +13,14 @@
  * fluid is not the same operation as thinning a line. The looks and the
  * ribbon are the two exceptions, and `blendLooks` and `writeRibbon` say why.
  *
+ * A row may also carry a `shape`, a stage with a memory between its signal
+ * and its gain, and that memory lives here: one small object per study and
+ * row, made the first time the row is stepped and dropped when the study's
+ * presence returns to 0. It is here rather than on the study because a study
+ * is data that two casts may hold at once, and it is keyed by study id rather
+ * than by where the study sat in this frame's list because the list changes
+ * order as the director fades one thing into another.
+ *
  * Everything writes into an object the caller owns and keeps, because this
  * runs on every animation frame and there is nothing here worth allocating.
  */
@@ -27,6 +35,7 @@ import {
 } from '../post/params'
 import type { PostParams } from '../post/params'
 import { bend, feature } from '../presets/resolve'
+import { follow, integrate, stepSpring, wrapped } from '../presets/shapes'
 import { CANVAS_KNOBS, castStudyIds, PINNED_PALETTE } from './cast'
 import type { Cast, CastCanvas, CastOverride } from './cast'
 import {
@@ -54,21 +63,123 @@ export function studyFeature(
   return feature(features, field)
 }
 
+/**
+ * What one shaped row remembers between frames. One object serves all four
+ * shapes rather than one type each, because a row's shape never changes and
+ * four small objects of one shape are cheaper for the engine to hold than
+ * four shapes of one size.
+ *
+ * `value` is the shape's own output: the follower's level, the spring's
+ * position, the running total, or the number a `hold` last sampled.
+ * `velocity` is the spring's alone, and `phase` is the beat or bar phase a
+ * `hold` last saw, so the wrap that is a boundary can be told from the
+ * tracker nudging its phase back.
+ */
+export type RowState = {
+  value: number
+  velocity: number
+  phase: number
+}
+
+const restRow = (state: RowState) => {
+  state.value = 0
+  state.velocity = 0
+  state.phase = 0
+  return state
+}
+
+const newRow = (): RowState => ({ value: 0, velocity: 0, phase: 0 })
+
+// For a caller that keeps no state of its own: a row shaped against this is
+// a row at rest, which is what a single stateless reading of a study means.
+// One object, reset each time, so the no-state path allocates nothing either.
+const loose = newRow()
+
+/**
+ * The row's signal through its shape, and the state moved on. Nothing here
+ * reads a knob or a study: the signal is already bent and scaled, and what
+ * comes back is what the gain multiplies.
+ *
+ * A `hold` is the one that reads the packet again, for the phase it steps on.
+ * It samples nothing until it has seen a boundary, so a row on the bar draws
+ * its resting value until the first downbeat rather than a number taken from
+ * whatever frame the study happened to arrive on, and a track with no beat to
+ * speak of leaves it there: `beatPhase` sits at 0 until a tempo is found and
+ * never wraps, which is the tracker's own way of saying it does not know.
+ */
+function stepShape(
+  row: StudyMapping,
+  signal: number,
+  features: Float32Array,
+  dt: number,
+  state: RowState,
+): number {
+  const shape = row.shape
+  if (!shape) return signal
+  if (shape.kind === 'envelope') {
+    state.value = follow(state.value, signal, shape.attackMs, shape.releaseMs, dt)
+    return state.value
+  }
+
+  if (shape.kind === 'spring') {
+    stepSpring(state, signal, shape.frequency, shape.damping, dt)
+    return state.value
+  }
+
+  if (shape.kind === 'integrate') {
+    state.value = integrate(state.value, signal, shape.rate, shape.wrap ?? 0, dt)
+    return state.value
+  }
+
+  const phase = feature(features, shape.per === 'bar' ? 'barPhase' : 'beatPhase')
+  if (wrapped(state.phase, phase)) state.value = signal
+  state.phase = phase
+  return state.value
+}
+
+/**
+ * The rows applied. `states` is the study's own list, indexed by the row's
+ * place in the mapping it came from; `offset` is where that mapping starts in
+ * the list, which is 0 for the study's own rows and past them for the cast's,
+ * so the two cannot share a spring.
+ */
 function applyRows(
   mapping: readonly StudyMapping[],
   features: Float32Array,
   tension: number,
   presence: number,
   out: Record<string, number>,
+  dt: number,
+  states: RowState[] | undefined,
+  offset: number,
 ) {
-  for (const row of mapping) {
+  for (let index = 0; index < mapping.length; index += 1) {
+    const row = mapping[index]
+    if (!row) continue
     const current = out[row.to]
     // A row aimed at a knob this study does not have is ignored, the way the
     // preset resolver ignores a row aimed at the post stack. The parser has
     // already refused one in a file; this is what keeps the frame cheap.
     if (current === undefined) continue
-    out[row.to] =
-      current + row.gain * bend(studyFeature(features, row.from, tension, presence), row.curve)
+    // A row with no scale and no shape is the row it always was, by the same
+    // arithmetic in the same order, so nothing that existed before this
+    // moves by a bit.
+    if (!row.scale && !row.shape) {
+      out[row.to] =
+        current + row.gain * bend(studyFeature(features, row.from, tension, presence), row.curve)
+      continue
+    }
+
+    let signal = bend(studyFeature(features, row.from, tension, presence), row.curve)
+    if (row.scale)
+      signal *= bend(studyFeature(features, row.scale.from, tension, presence), row.scale.curve)
+    if (row.shape) {
+      const at = offset + index
+      const state = states ? (states[at] ??= newRow()) : restRow(loose)
+      signal = stepShape(row, signal, features, dt, state)
+    }
+
+    out[row.to] = current + row.gain * signal
   }
 }
 
@@ -77,6 +188,13 @@ function applyRows(
  * the cast's patch over them, then its own rows and the cast's rows on top.
  * The cast's rows come last so a cast can only ever add to what the study
  * already does.
+ *
+ * `dt` is the real seconds since the last call and `states` what this study's
+ * shaped rows remember. Both are optional and a study with no shaped row
+ * reads the same without them; a caller that leaves them out and resolves a
+ * study that has one reads it with every shape at rest, which is one
+ * stateless reading of it and not a step of anything. `resolveLive` is what
+ * keeps the state across frames, and the renderer is what hands it the step.
  */
 export function resolveStudy(
   study: Study,
@@ -85,13 +203,18 @@ export function resolveStudy(
   tension: number,
   presence: number,
   out: Record<string, number>,
+  dt = 0,
+  states?: RowState[],
 ): Readonly<Record<string, number>> {
   for (const key of Object.keys(out)) if (!(key in study.knobs)) delete out[key]
   for (const [key, value] of Object.entries(study.knobs)) out[key] = value
   if (overrides?.knobs)
     for (const [key, value] of Object.entries(overrides.knobs)) if (key in out) out[key] = value
-  applyRows(study.mapping, features, tension, presence, out)
-  if (overrides?.mapping) applyRows(overrides.mapping, features, tension, presence, out)
+  applyRows(study.mapping, features, tension, presence, out, dt, states, 0)
+  // The cast's rows are indexed past the study's own, so a cast that shapes a
+  // row does not step the state the study's row of the same number is using.
+  if (overrides?.mapping)
+    applyRows(overrides.mapping, features, tension, presence, out, dt, states, study.mapping.length)
   return out
 }
 
@@ -175,20 +298,43 @@ export type LiveCast = {
 }
 
 /**
- * A cast resolved: every drawing study's knobs by id, the whole post stack,
- * and the palettes the picture is coloured in.
+ * A cast resolved: every live study's knobs by id, the whole post stack, and
+ * the palettes the picture is coloured in.
+ *
+ * The looks are in `knobs` as well as blended into `post`, so that anything
+ * wanting the numbers a study was drawn with this frame finds them by its id:
+ * the bench's readout does, and the shape state below is keyed the same way.
+ * Nothing draws from this map, so a look sitting in it draws nothing.
+ *
+ * `palette` is the choice the looks make between them, written by
+ * `blendPalette` from the same presences the looks are blended by.
+ *
+ * `shapes` is what the shaped rows remember, by study id. It is on the frame
+ * and not in a module of its own so that two renderers, or a test and a
+ * renderer, do not step each other's springs.
  */
 export type CastFrame = {
   knobs: Map<string, Record<string, number>>
   post: PostParams
   palette: PaletteChoice
+  shapes: Map<string, RowState[]>
 }
 
 export const castFrame = (): CastFrame => ({
   knobs: new Map(),
   post: defaultPostParams(),
   palette: { from: PINNED_PALETTE, to: PINNED_PALETTE, mix: 0 },
+  shapes: new Map(),
 })
+
+/**
+ * Every shaped row back at rest, which is what a new track or a seek means:
+ * a spring mid-ring and a total that has been climbing for three minutes are
+ * both about the piece of music that has just stopped being played. The
+ * canvas is deliberately not reset with them, for the reason `newTrack` gives
+ * in the renderer: one track running into the next should morph.
+ */
+export const forgetShapes = (out: CastFrame) => out.shapes.clear()
 
 /**
  * The stack back at its own defaults, with every stage off. What runs is then
@@ -250,6 +396,8 @@ function writeRibbon(knobs: Record<string, number>, presence: number, out: PostP
 // allocates once the lists have grown to the most looks ever live at once.
 const heldLooks: LookStudy[] = []
 const heldShare: number[] = []
+// References into the frame's own records rather than buffers of their own,
+// since a look's numbers are kept by id there for the bench to read.
 const heldKnobs: Record<string, number>[] = []
 const stageShare: Record<LookStage, number> = {
   bloom: 0,
@@ -346,10 +494,12 @@ const paletteShare = new Float64Array(PALETTE_IDS.length)
  * A choice is two palettes and a mix, so with three looks live the weakest
  * palette is dropped. The director fades one look into another, which is two
  * at a time; a third would need a change landing mid-glide, and a list with
- * one is drawn by its two strongest rather than refused.
- * The pair is kept in the registry's order, `from` the earlier, so it does not
- * swap ends when one palette overtakes the other halfway through a fade: the
- * mix runs 0 to 1 once, and the colour at half is the same from either side.
+ * three is drawn by its two strongest rather than refused.
+ *
+ * The pair is kept in the order of `PALETTE_IDS`, `from` the earlier, so it
+ * does not swap ends when one palette overtakes the other halfway through a
+ * fade: the mix runs 0 to 1 once, and the colour at half is the same from
+ * either side.
  *
  * Two looks that name one palette are one palette, whatever their fades.
  */
@@ -388,11 +538,44 @@ function choosePalette(out: PaletteChoice, id: PaletteId) {
   out.mix = 0
 }
 
+/** One study's own record in the frame, made the first time it is live. */
+function knobsFor(out: CastFrame, id: string): Record<string, number> {
+  let knobs = out.knobs.get(id)
+  if (!knobs) {
+    knobs = {}
+    out.knobs.set(id, knobs)
+  }
+
+  return knobs
+}
+
 /**
- * Whatever is live, resolved for this frame: each drawing study's knobs by
- * id, the whole post stack and the palette. This is the entry point the
- * director feeds. A study at presence 0 is not resolved and is not in the
- * output, so the renderer never touches it.
+ * One study's shaped-row memory, made the first time it is live. An empty
+ * list costs one object per live study and is never grown for a study with no
+ * shaped row, so a cast of plain studies allocates nothing past its first
+ * frame.
+ */
+function statesFor(out: CastFrame, id: string): RowState[] {
+  let states = out.shapes.get(id)
+  if (!states) {
+    states = []
+    out.shapes.set(id, states)
+  }
+
+  return states
+}
+
+/**
+ * Whatever is live, resolved for this frame: each live study's knobs by id,
+ * the whole post stack and the palette. This is the entry point the director
+ * feeds. A study at presence 0 is not resolved and is not in the output, so
+ * the renderer never touches it and whatever its shapes remembered goes with
+ * it: a study that comes back arrives at rest rather than where it left off
+ * half a song ago.
+ *
+ * `dt` is the real seconds since the last call, and only the shaped rows read
+ * it. A caller that passes none holds every shape where it is, which is what
+ * a single reading of a frame wants.
  *
  * `palette` is a pinned cast's own, held over the looks'. Without it the
  * palette is the one the looks name.
@@ -403,13 +586,17 @@ export function resolveLive(
   features: Float32Array,
   tension: number,
   out: CastFrame,
+  dt = 0,
   palette?: PaletteId,
 ): CastFrame {
   // Deleting from a Map while walking its keys is safe, and spares the copy.
   for (const id of out.knobs.keys()) {
     let kept = false
     for (const entry of live) if (entry.id === id && entry.presence > 0) kept = true
-    if (!kept) out.knobs.delete(id)
+    if (!kept) {
+      out.knobs.delete(id)
+      out.shapes.delete(id)
+    }
   }
 
   restPost(out.post)
@@ -421,22 +608,26 @@ export function resolveLive(
     // hand may not, and a missing study draws nothing.
     const study = findStudy(entry.id)
     if (!study) continue
+    const knobs = knobsFor(out, entry.id)
+    resolveStudy(
+      study,
+      entry.override,
+      features,
+      tension,
+      entry.presence,
+      knobs,
+      dt,
+      statesFor(out, entry.id),
+    )
+
     if (isLook(study)) {
-      const knobs = (heldKnobs[looks] ??= {})
-      resolveStudy(study, entry.override, features, tension, entry.presence, knobs)
       heldLooks[looks] = study
       heldShare[looks] = entry.presence
+      heldKnobs[looks] = knobs
       looks += 1
       continue
     }
 
-    let knobs = out.knobs.get(entry.id)
-    if (!knobs) {
-      knobs = {}
-      out.knobs.set(entry.id, knobs)
-    }
-
-    resolveStudy(study, entry.override, features, tension, entry.presence, knobs)
     if (study.impl === 'ribbon') writeRibbon(knobs, entry.presence, out.post)
   }
 
@@ -462,6 +653,7 @@ export function resolveCast(
   tension: number,
   out: CastFrame,
   presences?: ReadonlyMap<string, number>,
+  dt = 0,
 ): CastFrame {
   let live = pinned.get(cast)
   if (!live) {
@@ -470,7 +662,7 @@ export function resolveCast(
   }
 
   for (const entry of live) entry.presence = presences?.get(entry.id) ?? 1
-  return resolveLive(live, cast.canvas, features, tension, out, cast.palette ?? PINNED_PALETTE)
+  return resolveLive(live, cast.canvas, features, tension, out, dt, cast.palette ?? PINNED_PALETTE)
 }
 
 /**

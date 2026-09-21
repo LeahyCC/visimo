@@ -39,6 +39,7 @@ import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
 import { HaloInk } from '../impls/HaloInk'
+import { LasersInk } from '../impls/LasersInk'
 import { RibbonInk } from '../impls/RibbonInk'
 import { RingsInk } from '../impls/RingsInk'
 import { ShardsInk } from '../impls/ShardsInk'
@@ -61,7 +62,7 @@ import type { PinnedCast } from '../studies/cast'
 import { castOrDefault, CASTS, DEFAULT_CAST_ID } from '../studies/casts/index'
 import type { ImplId } from '../studies/impls'
 import { findStudy, sceneOf } from '../studies/registry'
-import { blendKnobs, castFrame, liveCast, resolveLive } from '../studies/resolve'
+import { blendKnobs, castFrame, forgetShapes, liveCast, resolveLive } from '../studies/resolve'
 import type { CastFrame, KnobsAt, LiveCast, LiveStudy } from '../studies/resolve'
 import type { Character } from '../studies/types'
 import { acquireGpu, configureCanvas, onGpuLost } from './Device'
@@ -529,6 +530,9 @@ class Renderer {
     this.characterDue = 0
     this.client?.newTrack()
     this.playheadAt = null
+    // A spring mid-ring and a total that has been climbing for three minutes
+    // are both about the track that has just stopped playing.
+    forgetShapes(this.resolved)
   }
 
   /**
@@ -555,7 +559,12 @@ class Renderer {
     if (position === undefined || !Number.isFinite(position)) return
     const last = this.playheadAt
     this.playheadAt = position
-    if (last !== null && Math.abs(position - last - dt) > SEEK_SECONDS) this.client?.seeked()
+    if (last !== null && Math.abs(position - last - dt) > SEEK_SECONDS) {
+      this.client?.seeked()
+      // The shaped rows are about the seconds of music just played, which are
+      // now the wrong seconds, so they start again as they do on a new track.
+      forgetShapes(this.resolved)
+    }
   }
 
   /**
@@ -654,6 +663,7 @@ class Renderer {
     if (impl === 'rings') return new RingsInk()
     if (impl === 'spectrum') return new SpectrumInk()
     if (impl === 'sparks') return new SparksInk()
+    if (impl === 'lasers') return new LasersInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.
@@ -876,6 +886,17 @@ class Renderer {
     return this.resolved.knobs.get(id) ?? NO_KNOBS
   }
 
+  /**
+   * The numbers one study was drawn with this frame, or nothing when it is not
+   * live. The bench's readout reads this rather than resolving the study
+   * again: a shaped row remembers where it was, so a second resolver stepping
+   * the same rows at the panel's own rate would be reading a different study
+   * from the one on screen.
+   */
+  resolvedKnobs(id: string): Readonly<Record<string, number>> | undefined {
+    return this.resolved.knobs.get(id)
+  }
+
   private drawFrame(now: number) {
     this.frame = 0
     const { canvas, context, gpu, post, compatibility } = this
@@ -940,7 +961,7 @@ class Renderer {
     // build unless a director was choosing.
     const live = this.live
     const tension = this.packet[F.tension] ?? 0
-    resolveLive(live.studies, live.canvas, this.packet, tension, this.resolved, live.palette)
+    resolveLive(live.studies, live.canvas, this.packet, tension, this.resolved, dt, live.palette)
     // Before any flow or ink updates, since they read the shared palette: the
     // fluid to write its lookup table and the inks for their colours.
     setPalette(this.resolved.palette, this.packet[F.keyHue] ?? 0)

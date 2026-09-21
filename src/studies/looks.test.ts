@@ -16,6 +16,7 @@ import {
   RELEASE_PHRASE_MIN_SECONDS,
 } from '../audio/FeatureExtractor'
 import { POST_UNIFORM_FLOATS, writePostUniform } from '../post/params'
+import { defaultCanvas } from './cast'
 import type { CastCanvas } from './cast'
 import { findStudy } from './registry'
 import { castFrame, resolveLive, resolveStudy } from './resolve'
@@ -35,19 +36,8 @@ const study = (id: string) => {
 const knobsAt = (id: string, features: Float32Array, tension: number) =>
   resolveStudy(study(id), undefined, features, tension, 1, {})
 
-const STILL: CastCanvas = {
-  enabled: false,
-  knobs: {
-    'feedback.amount': 0.22,
-    'feedback.decay': 0.72,
-    'feedback.zoom': 1.012,
-    'feedback.rotate': 0.002,
-    'feedback.carry': 0,
-    'feedback.floor': 0,
-    'feedback.ceiling': 16,
-  },
-  mapping: [],
-}
+/** The stack's own feedback numbers, switched off: a look is what is measured here. */
+const STILL: CastCanvas = { ...defaultCanvas(), enabled: false }
 
 /** The uniform the stack would write for this look alone at this packet. */
 const uniformOf = (id: string, features: Float32Array, tension: number) => {

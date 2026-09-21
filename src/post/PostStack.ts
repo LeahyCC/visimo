@@ -32,6 +32,7 @@ import bright from '../shaders/post.bright.wgsl?raw'
 import common from '../shaders/post.common.wgsl?raw'
 import composite from '../shaders/post.composite.wgsl?raw'
 import feedback from '../shaders/post.feedback.wgsl?raw'
+import reduce from '../shaders/post.reduce.wgsl?raw'
 import ribbon from '../shaders/post.ribbon.wgsl?raw'
 import type { FlowCover } from './params'
 import {
@@ -41,6 +42,8 @@ import {
   defaultPostParams,
   fillRibbonPoints,
   freshWeight,
+  holdRuns,
+  measureSizes,
   mergePostParams,
   POST_UNIFORM_FLOATS,
   RIBBON_POINTS,
@@ -88,6 +91,9 @@ type Gear = {
   /** One zero texel, bound as the flow when the scene offers none. */
   still: GPUTextureView
   stillTexture: GPUTexture
+  /** The ladder that measures the frame's mean; see post.reduce.wgsl. */
+  measure: GPURenderPipeline
+  measureLayout: GPUBindGroupLayout
   ribbon: GPURenderPipeline
   /** The uniform and the points, bound once: neither buffer is ever replaced. */
   ribbonGroup: GPUBindGroup
@@ -105,6 +111,16 @@ type Sized = {
   levels: Level[]
   bright: Pair<GPUBindGroup>
   composite: Pair<GPUBindGroup>
+  /** The measuring ladder, quartering each way until one texel is left. */
+  measure: Measure
+}
+
+type Measure = {
+  rungs: Target[]
+  /** The first rung, one group per history texture, since which is read alternates. */
+  first: Pair<GPUBindGroup>
+  /** Every rung after the first, each reading the one above it. */
+  rest: GPUBindGroup[]
 }
 
 export class PostStack {
@@ -161,6 +177,18 @@ export class PostStack {
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
         { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture },
         { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture },
+        { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture },
+      ],
+    })
+
+    // The measuring ladder reads no uniform: a rung takes its source's size
+    // from the texture itself, so one pipeline covers every rung and the two
+    // history textures alike. Its layout is named for the same reason the
+    // feedback one is, since the rung groups are built per resize.
+    const measureLayout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture },
       ],
     })
 
@@ -228,6 +256,8 @@ export class PostStack {
         feedbackLayout,
       ),
       feedbackLayout,
+      measure: pipeline(reduce, { format: SCENE_FORMAT }, measureLayout),
+      measureLayout,
       still: stillTexture.createView(),
       stillTexture,
       // Light added to what the scene drew and nothing else: the alpha is
@@ -365,8 +395,14 @@ export class PostStack {
     if (this.historyReady && stageEnabled(this.settings, 'feedback')) {
       const into = sized.history[this.current].view
       const fresh = freshWeight(this.settings, features)
+      // The frame the pass is about to read, reduced to one texel, and only
+      // when a cast asks the canvas to hold a mean: with the hold off nothing
+      // reads the texel, so nothing is drawn for it and a zeroed one is bound
+      // in its place. It measures history[other], which is exactly what the
+      // pass reads back, so the hold answers this frame and not the last.
+      const measured = this.measure(encoder, sized, other)
       // One bind group a frame, because the flow alternates and the history
-      // it reads does too. It is four bindings and no allocation on the GPU,
+      // it reads does too. It is five bindings and no allocation on the GPU,
       // which is well under what the pass itself costs.
       const group = gear.device.createBindGroup({
         layout: gear.feedbackLayout,
@@ -375,6 +411,7 @@ export class PostStack {
           { binding: 1, resource: gear.sampler },
           { binding: 2, resource: sized.history[other].view },
           { binding: 3, resource: flow?.view ?? gear.still },
+          { binding: 4, resource: measured },
         ],
       })
       draw(encoder, gear.feedback, group, into, 'load', fresh)
@@ -395,6 +432,27 @@ export class PostStack {
     // The frame just drawn becomes next frame's history.
     this.current = other
     this.historyReady = true
+  }
+
+  /**
+   * The mean brightness of one history texture, on the GPU and in one texel,
+   * or a zeroed texel when no cast is holding the canvas. Each rung quarters
+   * the one above it, so the cost is a fraction of a bloom level and nothing
+   * ever comes back to the CPU.
+   */
+  private measure(encoder: GPUCommandEncoder, sized: Sized, which: 0 | 1): GPUTextureView {
+    const gear = this.gear
+    const last = sized.measure.rungs.at(-1)
+    if (!gear || !last || !holdRuns(this.settings)) return gear?.still ?? sized.history[which].view
+    const first = sized.measure.rungs[0]
+    if (!first) return gear.still
+    draw(encoder, gear.measure, sized.measure.first[which], first.view, 'clear')
+    for (const [index, group] of sized.measure.rest.entries()) {
+      const into = sized.measure.rungs[index + 1]
+      if (into) draw(encoder, gear.measure, group, into.view, 'clear')
+    }
+
+    return last.view
   }
 
   /** Rebuild every texture for a new canvas size. The trails restart. */
@@ -464,11 +522,31 @@ export class PostStack {
       resource: level.target.view,
     }))
 
+    // The measuring ladder, quartering each way until a single texel is left.
+    // It hangs off the history rather than off the last bloom level, which the
+    // canvas plan suggested: the bloom levels hold what the bright pass let
+    // through, and the thing the hold is there to catch, an even mid haze
+    // under the threshold, reads as nothing there.
+    const rungs = measureSizes(width, height).map((size) => make(size.width, size.height))
+    const rung = (source: GPUTextureView): GPUBindGroup =>
+      gear.device.createBindGroup({
+        layout: gear.measureLayout,
+        entries: [
+          { binding: 0, resource: gear.sampler },
+          { binding: 1, resource: source },
+        ],
+      })
+
     this.sized = {
       width,
       height,
       history,
       levels,
+      measure: {
+        rungs,
+        first: forHistory((drawn) => rung(drawn.view)),
+        rest: rungs.slice(0, -1).map((source) => rung(source.view)),
+      },
       bright: forHistory((drawn) =>
         gear.device.createBindGroup({
           layout: gear.bright.getBindGroupLayout(0),
@@ -498,6 +576,7 @@ export class PostStack {
     const sized = this.sized
     if (!sized) return
     for (const target of sized.history) target.texture.destroy()
+    for (const rung of sized.measure.rungs) rung.texture.destroy()
     for (const level of sized.levels) {
       level.target.texture.destroy()
       level.temp.texture.destroy()

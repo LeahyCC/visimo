@@ -34,6 +34,7 @@ function resolveLooks(
     PACKET,
     0,
     out,
+    0,
     palette,
   )
 
@@ -246,7 +247,7 @@ describe('the director’s cast', () => {
   it('leaves the palette to the looks: a live cast with none set follows them', () => {
     const cast = { ...liveCast(FIRST), palette: undefined }
     const out = castFrame()
-    resolveLive([{ id: 'hard-clean', presence: 1 }], cast.canvas, PACKET, 0, out, cast.palette)
+    resolveLive([{ id: 'hard-clean', presence: 1 }], cast.canvas, PACKET, 0, out, 0, cast.palette)
     expect(out.palette).toEqual({ from: 'neon', to: 'neon', mix: 0 })
   })
 

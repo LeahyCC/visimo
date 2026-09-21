@@ -641,14 +641,17 @@ describe('a build beginning', () => {
 
 describe('the canvas a chosen cast draws on', () => {
   // With the post stack's own defaults the carry was 0, and under the
-  // director no flow moved the picture at all.
-  it('carries the picture along the flow, and keeps a floor and a ceiling', () => {
+  // director no flow moved the picture at all. The floor is a knee now rather
+  // than an amount taken off, and what stops a long memory running away is
+  // the hold: see `carriedCanvas`.
+  it('carries the picture along the flow, holds its mean, and fades to black', () => {
     const director = new Director({ studies: STUDIES })
     const { canvas } = director.step(packet({ section: 1 }), 1 / 60)
     expect(canvas.enabled).toBe(true)
     expect(canvas.knobs['feedback.carry']).toBe(1)
-    expect(canvas.knobs['feedback.amount'] * canvas.knobs['feedback.decay']).toBeGreaterThan(0.9)
-    expect(canvas.knobs['feedback.floor']).toBeGreaterThan(0)
+    expect(canvas.knobs['feedback.amount'] * canvas.knobs['feedback.decay']).toBeGreaterThan(0.97)
+    expect(canvas.knobs['feedback.hold']).toBeGreaterThan(0)
+    expect(canvas.knobs['feedback.fade']).toBeGreaterThan(0)
     expect(canvas.knobs['feedback.ceiling']).toBeLessThan(4)
   })
 
@@ -664,6 +667,9 @@ describe('the canvas a chosen cast draws on', () => {
       expect(feedback.amount * feedback.decay).toBeGreaterThan(0.8)
       expect(feedback.ceiling).toBeGreaterThan(feedback.floor + 0.5)
       expect(feedback.floor).toBeGreaterThanOrEqual(0)
+      // The hold is the thing that lets the decay run this long, so it is
+      // never allowed to resolve away at either end of the music.
+      expect(feedback.hold).toBeGreaterThan(0)
     }
   })
 

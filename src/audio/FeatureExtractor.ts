@@ -54,6 +54,8 @@
  *   50     impact          0..1      an event: 1 on the frame the payoff landed, then falling
  *   51     grit            0..1      how dense and how unrelenting the sound between the
  *                                    hits is, over twenty seconds
+ *   52     barPhase        0..1      where in the bar we are, 0 on the downbeat and rising
+ *                                    across four beats to the next
  *
  * Each band detects its own onsets, against its own flux and its own adaptive
  * threshold, which is what lets one emitter answer the kick and another the
@@ -116,13 +118,23 @@
  * constant, which is what makes them loudness independent and what makes
  * `tension` let go by itself when a build fizzles.
  *
+ * Row 52 is the beat as a clock one level up. `beatPhase` says where in the
+ * beat we are and this says where in the bar, 0 on the downbeat and rising
+ * across four beats, so a mapping row on it changes once a bar where a row on
+ * the beat phase changes four times as often. Which of the four beats is the
+ * downbeat is decided by the low end, in `TempoTracker.ts`, and it falls back
+ * to counting fours from the first beat the tracker was sure of. It carries
+ * no confidence of its own: it is built on the beat phase, so
+ * `tempoConfidence` is what gates both, and a bar read off a wrong tempo is
+ * wrong for the same reason and by the same amount.
+ *
  * Nothing on the GPU binds this. Every consumer reads the Float32Array on the
  * CPU, so the layout is free of any vec4 alignment. Rows are only ever added
  * at the end: the indices are public API.
  */
 import { TEMPO_MAX_BPM, TEMPO_MIN_BPM, TempoTracker } from './TempoTracker'
 
-export const PACKET_LENGTH = 52
+export const PACKET_LENGTH = 53
 
 /** The five bands, in order. Band `i` is packet slot `i`. */
 export const BAND_NAMES = ['sub', 'bass', 'lowMid', 'highMid', 'treble'] as const
@@ -189,6 +201,7 @@ export const F = {
   rest: 49,
   impact: 50,
   grit: 51,
+  barPhase: 52,
 } as const
 
 export type BandSpec = {
@@ -2494,6 +2507,7 @@ export class FeatureExtractor {
     packet[F.tempoBpm] = beat.bpm
     packet[F.tempoConfidence] = beat.confidence
     packet[F.beatPhase] = beat.phase
+    packet[F.barPhase] = beat.barPhase
 
     // Pace counts a hit in any band, since a kick that lives in three sub
     // bins barely moves the flux of the whole spectrum; the global detector

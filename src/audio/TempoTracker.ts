@@ -34,6 +34,32 @@
  * seconds and slid to where the onsets are, and the phase then runs forward
  * on its own between estimates, so a scene can anticipate the next beat
  * rather than react to the last one.
+ *
+ * And where in the bar. The beat phase is counted in fours, and which of the
+ * four is the downbeat is decided by the low end: the sub and bass flux of
+ * each beat is gathered under its place in the four, as a slow average over
+ * about four bars, and the loudest place wins. A margin keeps the incumbent
+ * whenever the two are close, because a hop slides the whole bar and is worse
+ * than being a beat out, and until two bars have been heard the answer is the
+ * first beat counted, which is plain four-beat counting.
+ *
+ * What that can see is the low end firing and not how hard it fires. The
+ * band levels the flux is taken from are scaled by each band's own recent
+ * peak, so among four kicks the loudest reads barely louder than the rest:
+ * measured on a synthetic bar with the kick on the one at 0.9 and the others
+ * at 0.4, the four places came out 0.44, 0.49, 0.51 and 0.34 and the estimate
+ * stayed where the counting had put it. Where the low end lands on the one
+ * and the snares carry the rest, which is most of the music this is for, they
+ * came out 0.27, 0.36, 0.48 and 0.24 and the one was found. Four to the
+ * floor has the same kick on every beat and there is nothing there to find,
+ * so it keeps the counting, which is the right answer as far as it goes: the
+ * bar is four beats long and wraps once through them, and only which of the
+ * four is the one is a guess. `synthetic.test.ts` holds both cases.
+ *
+ * A phase is a prediction and this one is a prediction built on another, so
+ * `confidence` is the number to gate it with, exactly as for the beat phase.
+ * Nothing here reports a confidence of its own, because a bar read off a
+ * wrong tempo is wrong for the same reason and by the same amount.
  */
 
 /** The envelopes are resampled to this many samples a second. */
@@ -94,6 +120,21 @@ const PHASE_SPAN = 4 * ENVELOPE_RATE
 // measurement is taken outright; after that a step is a nudge, so a reading
 // off by a fraction of a beat turns the ramp rather than snapping it.
 const PHASE_PULL = 0.35
+/** Beats in a bar. Four, and nothing here tries to read any other metre. */
+export const BAR_BEATS = 4
+// How much of each bar's low end is kept: a quarter, so the average is about
+// four bars of memory. Long enough that one loud snare cannot own it, short
+// enough to follow a track that changes its pattern.
+const DOWNBEAT_PULL = 0.25
+// How much louder a place has to be than the one holding the downbeat before
+// it takes over. The kick on the one usually wins by a mile; a margin is for
+// the tracks where two places are close, where hopping between them would
+// slide the whole bar back and forth.
+const DOWNBEAT_MARGIN = 1.2
+// Bars to hear before the low end is allowed an opinion at all. Under this
+// the downbeat is the first beat counted, which is four-beat counting from
+// the first beat the tracker was sure of.
+const DOWNBEAT_BARS = 2
 
 export type Beat = {
   /** Beats per minute, 0 until a period has clearly won. */
@@ -102,6 +143,8 @@ export type Beat = {
   confidence: number
   /** Where in the beat we are: 0 on the beat, rising to 1 just before the next. */
   phase: number
+  /** Where in the bar we are: 0 on the downbeat, rising to 1 across four beats. */
+  barPhase: number
 }
 
 const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value)
@@ -143,6 +186,21 @@ export class TempoTracker {
   private confidence = 0
   private phase = 0
   private phaseKnown = false
+  /** Which of the four beats of the bar is in progress, counted from 0. */
+  private beatIndex = 0
+  /** Which of the four the downbeat is, 0 until the low end has an opinion. */
+  private downbeat = 0
+  /** Bars counted since the phase was found, so the opinion can wait for a few. */
+  private barsHeard = 0
+  /** The low end gathered under each of the four places, as a slow average. */
+  private readonly lowAt = new Float32Array(BAR_BEATS)
+  /**
+   * The low end of the beat in progress, time weighted, and the seconds it has
+   * run for. Time weighted because the flux is a level that holds for as long
+   * as the lag it is measured over and not an amount belonging to the frame.
+   */
+  private beatLow = 0
+  private beatSeconds = 0
   private readonly prior = new Float32Array(MAX_LAG + 1)
   // Scratch for an estimate, allocated once. `series` is each band's window
   // unrolled oldest first, compressed and mean-removed; `summed` the bands
@@ -174,7 +232,8 @@ export class TempoTracker {
    * same height and length in the envelope at 120 frames a second as at 30.
    */
   step(flux: Float32Array, dt: number): Beat {
-    let remaining = dt > 0 ? dt : 0
+    const step = dt > 0 ? dt : 0
+    let remaining = step
     while (remaining > 0) {
       const take = Math.min(TICK - this.cursor, remaining)
       const share = take / TICK
@@ -191,13 +250,92 @@ export class TempoTracker {
     // The phase runs forward on the tempo between estimates, and on the last
     // tempo that won while the reading is 0, since a ramp that carries on
     // through a bar of doubt is less jarring than one that stalls.
+    //
+    // The frame is walked to each beat boundary it crosses rather than
+    // advanced whole, so the low end it carries is split between the beat
+    // that ended and the one that began. A frame is a twentieth of a beat at
+    // 60 a second and a tenth at 30, and giving the whole of it to one side
+    // put the kick in the wrong place of the bar at the lower rate. The count
+    // is taken here rather than from the phase falling, because `locate`
+    // nudges the phase and a nudge across the wrap is not a beat.
     const bpm = this.bpm || this.lastBpm
-    if (bpm > 0) this.phase = (this.phase + (dt * bpm) / 60) % 1
+    const low = (flux[0] ?? 0) + (flux[1] ?? 0)
+    if (bpm <= 0) {
+      this.beatLow += low * step
+      this.beatSeconds += step
+    } else {
+      const perBeat = 60 / bpm
+      let left = step
+      // A frame longer than a bar is a stall or a tab coming back, and where
+      // in the bar it lands is a guess either way; the guard keeps the walk
+      // bounded and the wrap below tidies up whatever is left.
+      for (let crossed = 0; crossed < BAR_BEATS; crossed++) {
+        const toBoundary = (1 - this.phase) * perBeat
+        if (toBoundary > left) break
+        this.beatLow += low * toBoundary
+        this.beatSeconds += toBoundary
+        left -= toBoundary
+        this.phase = 0
+        this.crossBeat()
+      }
+
+      this.beatLow += low * left
+      this.beatSeconds += left
+      this.phase += left / perBeat
+      if (this.phase >= 1) this.phase -= Math.floor(this.phase)
+    }
+
     return {
       bpm: this.bpm,
       confidence: this.confidence,
       phase: this.phaseKnown ? this.phase : 0,
+      barPhase: this.phaseKnown ? this.barPhase() : 0,
     }
+  }
+
+  /**
+   * A beat has gone by: what its low end came to is folded into the average
+   * for its place in the bar, the count moves on, and the downbeat is chosen
+   * again. The kick on the one is what this is looking for, and it is the one
+   * thing about the metre that four bands can see without knowing the music.
+   */
+  private crossBeat() {
+    const mean = this.beatSeconds > 0 ? this.beatLow / this.beatSeconds : 0
+    this.beatLow = 0
+    this.beatSeconds = 0
+    const place = this.beatIndex
+    this.lowAt[place] = (this.lowAt[place] ?? 0) * (1 - DOWNBEAT_PULL) + mean * DOWNBEAT_PULL
+    this.beatIndex = (place + 1) % BAR_BEATS
+    if (this.beatIndex === 0) this.barsHeard++
+    this.chooseDownbeat()
+  }
+
+  /**
+   * The loudest of the four places, once enough bars have been heard, and
+   * only if it beats the place holding the downbeat by the margin. A hop
+   * slides the whole bar and is worse than being a beat out, so the incumbent
+   * keeps it whenever the two are close.
+   */
+  private chooseDownbeat() {
+    if (this.barsHeard < DOWNBEAT_BARS) return
+    let best = this.downbeat
+    let top = 0
+    for (let place = 0; place < BAR_BEATS; place++) {
+      const low = this.lowAt[place] ?? 0
+      if (low > top) {
+        top = low
+        best = place
+      }
+    }
+
+    const held = this.lowAt[this.downbeat] ?? 0
+    if (best !== this.downbeat && top > held * DOWNBEAT_MARGIN) this.downbeat = best
+  }
+
+  /** Where in the bar the beat in progress is, 0 on the downbeat. */
+  private barPhase() {
+    const place = (this.beatIndex - this.downbeat + BAR_BEATS) % BAR_BEATS
+    return (place + this.phase) / BAR_BEATS
   }
 
   private emit() {
@@ -404,6 +542,14 @@ export class TempoTracker {
     if (!this.phaseKnown) {
       this.phase = measured
       this.phaseKnown = true
+      // The bar is counted from here, which is the first beat the tracker was
+      // sure of, and nothing is yet known about where the kick falls.
+      this.beatIndex = 0
+      this.downbeat = 0
+      this.barsHeard = 0
+      this.lowAt.fill(0)
+      this.beatLow = 0
+      this.beatSeconds = 0
       return
     }
 

@@ -58,6 +58,11 @@ const ASSEMBLIES: { owner: string; prefix: string; parts: string[] }[] = [
     prefix: 'fluid.common.wgsl',
     parts: ['fluid.render.wgsl', 'fluid.sim.wgsl'],
   },
+  {
+    owner: 'src/impls/ParticleField.ts',
+    prefix: 'particles.common.wgsl',
+    parts: ['particles.draw.wgsl', 'particles.sim.wgsl'],
+  },
 ]
 
 type Import = { ident: string; file: string }

@@ -6,11 +6,13 @@ import {
   atLevel,
   breakdown,
   build,
+  chord,
   denseChorus,
   denseVerse,
   fft,
   fourOnTheFloor,
   kit,
+  noise,
   padOnly,
   steadyHits,
   synthesize,
@@ -786,4 +788,94 @@ describe('the structure on a dense song', () => {
       })
     })
   }
+})
+
+describe('the note rows', () => {
+  const C_MAJOR = [0, 4, 7]
+  const F_MAJOR = [5, 9, 0]
+  const G_MAJOR = [7, 11, 2]
+  const notes = (packet: Float32Array | undefined) =>
+    Array.from({ length: 12 }, (_, k) => packet?.[F.chroma0 + k] ?? 0)
+  const progression: Section[] = [
+    { pattern: chord(120, C_MAJOR), seconds: 3 },
+    { pattern: chord(120, F_MAJOR), seconds: 3 },
+    { pattern: chord(120, G_MAJOR), seconds: 3 },
+  ]
+
+  it('lights the three notes of a C major triad and leaves the rest dark', () => {
+    const packets = play([{ pattern: chord(120, C_MAJOR), seconds: 5 }], 60)
+    const rows = notes(at(packets, 4, 60))
+    for (const lit of C_MAJOR) expect(rows[lit], `pitch class ${lit}`).toBeGreaterThan(0.8)
+    // Every other class holds only the partials of these three leaking in.
+    rows.forEach((row, k) => {
+      if (!C_MAJOR.includes(k)) expect(row, `pitch class ${k}`).toBeLessThan(0.15)
+    })
+    // The strongest note of a clear chord reads near 1.
+    expect(Math.max(...rows)).toBeGreaterThan(0.95)
+  })
+
+  it('follows a chord to the next and lets the last one go', () => {
+    const packets = play(progression, 60)
+    const settled = (seconds: number) => notes(at(packets, seconds, 60))
+    for (const lit of F_MAJOR) expect(settled(5.5)[lit]).toBeGreaterThan(0.8)
+    // E and G are in C major and not in F, and after two and a half seconds
+    // the release has all but finished them.
+    expect(settled(5.5)[4]).toBeLessThan(0.08)
+    expect(settled(5.5)[7]).toBeLessThan(0.08)
+    for (const lit of G_MAJOR) expect(settled(8.5)[lit]).toBeGreaterThan(0.8)
+    expect(settled(8.5)[5]).toBeLessThan(0.08)
+  })
+
+  it('is twelve zeros in silence, before a chord and after it', () => {
+    const before = play([{ pattern: padOnly(120, 0), seconds: 2 }], 60)
+    for (const packet of before) expect(notes(packet)).toEqual(new Array<number>(12).fill(0))
+
+    const after = play(
+      [
+        { pattern: chord(120, C_MAJOR), seconds: 2 },
+        { pattern: padOnly(120, 0), seconds: 4 },
+      ],
+      60,
+    )
+    expect(notes(after[Math.round(1.9 * 60)]).some((row) => row > 0.5)).toBe(true)
+    // Not tiny: exactly nothing, so a study that gates on a row of 0 is gated.
+    expect(notes(after[after.length - 1])).toEqual(new Array<number>(12).fill(0))
+  })
+
+  it('is the same at 60 and at 144 frames a second', () => {
+    const samples = synthesize(progression, SAMPLE_RATE)
+    const slow = run(samples, 60)
+    const fast = run(samples, 144)
+    // Steady in each chord, and a third of a second after the first change,
+    // when the rows are in the middle of moving.
+    for (const seconds of [2.5, 3.33, 5.5, 8.5]) {
+      const a = notes(at(slow, seconds, 60))
+      const b = notes(at(fast, seconds, 144))
+      a.forEach((row, k) =>
+        expect(Math.abs(row - (b[k] ?? 0)), `${seconds} s, pitch class ${k}`).toBeLessThan(0.1),
+      )
+    }
+  })
+
+  it('reads a quiet chord as it reads a loud one', () => {
+    const chordOnly = synthesize([{ pattern: chord(120, C_MAJOR), seconds: 5 }], SAMPLE_RATE)
+    const loud = notes(at(run(atLevel(chordOnly, 0.15), 60), 4, 60))
+    const quiet = notes(at(run(atLevel(chordOnly, 0.04), 60), 4, 60))
+    loud.forEach((row, k) =>
+      expect(Math.abs(row - (quiet[k] ?? 0)), `class ${k}`).toBeLessThan(0.1),
+    )
+  })
+
+  it('does not read drums or noise as a chord', () => {
+    const drums = play([{ pattern: fourOnTheFloor(128), seconds: 8 }], 60)
+    for (const packet of drums.slice(120))
+      for (const row of notes(packet)) expect(row).toBeLessThan(0.2)
+
+    const next = noise(5)
+    const hiss = new Float32Array(SAMPLE_RATE * 5)
+    for (let index = 0; index < hiss.length; index++) hiss[index] = next() * 0.5
+
+    for (const packet of run(hiss, 60).slice(120))
+      for (const row of notes(packet)) expect(row).toBeLessThan(0.1)
+  })
 })

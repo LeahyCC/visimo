@@ -46,9 +46,11 @@ import {
   implKnobs,
   MOMENTS,
   parseCast,
+  studiesOfKind,
   STUDY_FIELDS,
 } from '../src/presets'
 import { KALEIDOSCOPE_RANGES } from '../src/scenes/kaleidoscope.params'
+import { findSolo, soloCast } from './soloCast'
 
 export type Mode = 'presets' | 'bench'
 
@@ -257,6 +259,23 @@ const FALLBACK_INK: ImplId = 'fractal'
 
 const castNeedsGpu = (cast: Cast) => !cast.inks.some((id) => findStudy(id)?.impl === FALLBACK_INK)
 
+/** The picker's groups of single studies, in the order they are listed. */
+const STUDY_GROUPS = [
+  ['flow', 'Flows'],
+  ['ink', 'Inks'],
+  ['look', 'Looks'],
+] as const
+
+function CastOption({ cast, webGpuAvailable }: { cast: PinnedCast; webGpuAvailable: boolean }) {
+  const blocked = !webGpuAvailable && castNeedsGpu(cast)
+  return (
+    <option value={cast.id} disabled={blocked}>
+      {cast.name}
+      {blocked ? ' (requires WebGPU)' : ''}
+    </option>
+  )
+}
+
 /**
  * The two modes of the panel, presets and the study bench. It is the first
  * thing in either, so the choice sits above the preset picker and is in the
@@ -302,7 +321,9 @@ export function Controls({
   // Every edit below builds a new cast object, and an untouched one is still
   // the very entry `CASTS` holds, so identity is the whole check. It also
   // answers the question worth asking mid-tune: have I drifted from the file?
-  const shipped = pinned ? findCast(pinned.id) : undefined
+  // A solo has no file, so reset takes it back to the cast it was built as.
+  const file = pinned ? findCast(pinned.id) : undefined
+  const shipped = file ?? (pinned ? findSolo(pinned.id) : undefined)
   const edited = shipped !== undefined && shipped !== pinned
   const studies = (pinned ? castStudyIds(pinned) : [])
     .map((id) => findStudy(id))
@@ -360,23 +381,32 @@ export function Controls({
               return
             }
 
-            const found = findCast(event.target.value)
+            const found = findCast(event.target.value) ?? findSolo(event.target.value)
             if (found) onCast(found)
           }}
         >
           {/* Auto pins nothing: the director picks from the song. */}
-          <option value="auto" title="No pinned cast: the song chooses one">
-            Auto
-          </option>
-          {CASTS.map((entry) => (
-            <option
-              key={entry.id}
-              value={entry.id}
-              disabled={!webGpuAvailable && castNeedsGpu(entry)}
-            >
-              {entry.name}
-              {!webGpuAvailable && castNeedsGpu(entry) ? ' (requires WebGPU)' : ''}
+          <optgroup label="Auto">
+            <option value="auto" title="No pinned cast: the song chooses one">
+              Auto
             </option>
+          </optgroup>
+          <optgroup label="Presets">
+            {CASTS.map((entry) => (
+              <CastOption key={entry.id} cast={entry} webGpuAvailable={webGpuAvailable} />
+            ))}
+          </optgroup>
+          {/* Every study the director can choose, from the registry, each pinned as a solo. */}
+          {STUDY_GROUPS.map(([kind, label]) => (
+            <optgroup key={kind} label={label}>
+              {studiesOfKind(kind).map((study) => (
+                <CastOption
+                  key={study.id}
+                  cast={soloCast(study)}
+                  webGpuAvailable={webGpuAvailable}
+                />
+              ))}
+            </optgroup>
           ))}
         </select>
         <button
@@ -386,7 +416,7 @@ export function Controls({
           title={
             pinned
               ? edited
-                ? `Put ${pinned.name} back to the numbers in src/studies/casts/`
+                ? `Put ${pinned.name} back to the numbers ${file ? 'in src/studies/casts/' : 'it started with'}`
                 : `${pinned.name} is as it ships`
               : 'The song is choosing, so there is nothing here to reset'
           }

@@ -120,6 +120,87 @@ describe('tempo on synthesised drums', () => {
     expect(Math.max(...phases) - Math.min(...phases)).toBeLessThan(0.08)
   }, 60000)
 
+  // The bar, on the pattern the bar was built for. Four to the floor has the
+  // same kick on all four beats, so which of them is the downbeat is the
+  // fallback, four-beat counting from the first beat the tracker was sure of;
+  // what has to hold is that the bar is four beats long, wraps once through
+  // them, and wraps on a beat and not between two.
+  it('wraps the bar phase once every four beats, on the beat', () => {
+    const frameRate = 60
+    const packets = play([{ pattern: fourOnTheFloor(128, 0.15), seconds: 24 }], frameRate)
+    const beat = 60 / 128
+    const read = packets.map((packet, frame) => ({
+      seconds: frame / frameRate,
+      bar: packet[F.barPhase] ?? 0,
+      phase: packet[F.beatPhase] ?? 0,
+    }))
+
+    const late = read.filter((entry) => entry.seconds > 14)
+    const wraps: number[] = []
+    for (let at = 1; at < late.length; at++) {
+      const was = late[at - 1]?.bar ?? 0
+      const now = late[at]?.bar ?? 0
+      if (was - now > 0.5) wraps.push(late[at]?.seconds ?? 0)
+    }
+
+    // Nine seconds of 128 BPM is about nineteen beats, so four or five bars.
+    expect(wraps.length).toBeGreaterThanOrEqual(4)
+    expect(wraps.length).toBeLessThanOrEqual(5)
+    for (let at = 1; at < wraps.length; at++)
+      expect((wraps[at] ?? 0) - (wraps[at - 1] ?? 0)).toBeCloseTo(4 * beat, 1)
+    // A bar begins on a beat: the beat phase is at the start of one too.
+    for (const seconds of wraps) {
+      const entry = late.find((other) => other.seconds === seconds)
+      expect(entry?.phase ?? 1, `${seconds}s`).toBeLessThan(0.1)
+    }
+
+    // And it covers the whole of 0 to 1 across the four beats.
+    expect(Math.min(...late.map((entry) => entry.bar))).toBeLessThan(0.05)
+    expect(Math.max(...late.map((entry) => entry.bar))).toBeGreaterThan(0.95)
+  }, 60000)
+
+  // And with a low end that says which beat is the one, the bar lands on it.
+  // What the estimator can see is the low end firing and not how hard: the
+  // band levels are scaled by their own recent peak, so a louder kick among
+  // kicks barely reads louder, and a pattern whose low end lands only on the
+  // one is the case it is for. Four to the floor above is the other case, and
+  // gets the counting.
+  it('lands the bar on the beat the low end fires on', () => {
+    const frameRate = 60
+    const bpm = 128
+    const oneAndSnares: Pattern = {
+      bpm,
+      beats: 4,
+      hits: [
+        { drum: 'kick', at: 0, gain: 0.9 },
+        { drum: 'bass', at: 0, gain: 0.6 },
+        { drum: 'snare', at: 1, gain: 0.7 },
+        { drum: 'snare', at: 2, gain: 0.5 },
+        { drum: 'snare', at: 3, gain: 0.7 },
+        ...Array.from({ length: 8 }, (_, eighth) => ({
+          drum: 'hat' as const,
+          at: eighth / 2,
+          gain: eighth % 2 ? 0.2 : 0.35,
+        })),
+      ],
+      pad: 0.15,
+    }
+
+    const packets = play([{ pattern: oneAndSnares, seconds: 30 }], frameRate)
+    const beat = 60 / bpm
+    // The window ends fftSize samples in and a rise takes a few frames to
+    // show, which is the offset `lands the beat phase on the kick` measures;
+    // the same offset is used here so the reading is taken where the kick is.
+    const readings: number[] = []
+    for (let bar = 6; bar < 13; bar++) {
+      const seconds = bar * 4 * beat
+      const frame = Math.round((seconds - FFT_SIZE / SAMPLE_RATE) * frameRate) + 3
+      readings.push(packets[frame]?.[F.barPhase] ?? 1)
+    }
+
+    for (const reading of readings) expect(reading).toBeLessThan(0.1)
+  }, 60000)
+
   it('reads a two-step at a level of its metre, never the dotted figure', () => {
     // Nothing in a two-step plays on every beat: the kicks are a dotted
     // quarter apart and the snares a half bar. The half bar is a level of the

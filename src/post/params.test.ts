@@ -1,19 +1,28 @@
 import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
+import { AUDIO_FIELDS } from '../presets/knobs'
 import { paletteAt, visibleExtent } from '../scenes/fluid.params'
+import { carriedCanvas } from '../studies/cast'
 import { CASTS } from '../studies/casts/index'
-import { castFrame, resolveCast } from '../studies/resolve'
+import { castFrame, resolveCast, resolveLive } from '../studies/resolve'
 import {
   BLOOM_LEVELS,
   bloomLevelSize,
   bloomSourceSize,
+  canvasGain,
+  canvasKeep,
   defaultPostParams,
+  fadeKeep,
   feedbackStep,
   fillRibbonPoints,
   flowCover,
   freshWeight,
+  holdRuns,
+  MAX_SHARPEN,
+  measureSizes,
   mergePostParams,
+  MIN_CANVAS_GAIN,
   POST_LANES,
   POST_STAGES,
   POST_UNIFORM_FLOATS,
@@ -306,9 +315,10 @@ describe('carrying the history along a flow', () => {
     const after = write(carrying(), features, 1920, 1080, coverOf(1920, 1080))
     expect(Array.from(after.slice(0, 28))).toEqual(Array.from(before.slice(0, 28)))
     // The ribbon's two vec4s went on past the flow block and the floor, and
-    // the grade's went on past those and the gate weave's past that: thirteen
-    // vec4s, 208 bytes.
-    expect(POST_UNIFORM_FLOATS).toBe(52)
+    // the grade's went on past those, the gate weave's past that, and the
+    // canvas hold and what ages inside the loop past all of them: fifteen
+    // vec4s, 240 bytes.
+    expect(POST_UNIFORM_FLOATS).toBe(60)
   })
 
   it('makes the carry vanish with no flow, no carry or the stage off', () => {
@@ -743,5 +753,313 @@ describe('the grade stage', () => {
         }
       }
     })
+  })
+})
+
+/**
+ * The canvas as a loop, run forward on the CPU in exactly the order
+ * post.feedback.wgsl runs it: keep what is there, take the floor off, fade
+ * what is left of a dim pixel, hold it under the ceiling, and add what the
+ * inks drew weighted by `fresh`. Every pure piece of that is exported, so the
+ * only thing written twice is the ceiling's roll-off, which is four lines.
+ *
+ * It runs one grey pixel, since the hue turn and the channel offset are the
+ * only things in the pass that tell the channels apart and both are off in
+ * every case here. `cover` is the share of the frame that pixel stands for,
+ * which is what the hold measures: 1 is a constant filling the frame and a
+ * thin mark is near nothing, which is the whole difference between the case
+ * the hold has to catch and the case it must leave alone.
+ */
+type RunCanvas = {
+  fps: number
+  /** What the inks add at this pixel on one drawn frame, before `fresh`. */
+  input: number
+  /** The share of the frame this pixel's light stands for; what the hold sees. */
+  cover: number
+  seconds: number
+  from?: number
+}
+
+const rollCeiling = (peak: number, ceiling: number) => {
+  const knee = Math.max(ceiling, 1e-4) * 0.5
+  const over = Math.max(peak - knee, 0)
+  return Math.min(peak, knee) + (knee * over) / (over + knee)
+}
+
+const runCanvas = (
+  feedback: PostParams['feedback'],
+  { fps, input, cover, seconds, from = 0 }: RunCanvas,
+) => {
+  const step = feedbackStep(feedback, 1 / fps)
+  let value = from
+  let highest = from
+  for (let frame = 0; frame < Math.round(seconds * fps); frame++) {
+    const kept = canvasKeep(step, canvasGain(value * cover, step.hold))
+    let carried = Math.max(value * kept - step.floor, 0)
+    carried *= fadeKeep(carried, step.fade, step.frames)
+    value = rollCeiling(carried, feedback.ceiling) + step.fresh * input
+    highest = Math.max(highest, value)
+  }
+
+  return { value, highest }
+}
+
+/** The director's canvas, resolved at one packet, as the stack would see it. */
+const directorCanvas = (features: Float32Array) =>
+  resolveLive([], carriedCanvas(), features, features[F.tension] ?? 0, castFrame()).post.feedback
+
+/** Every field a mapping can read at one level, as the cast guards build one. */
+const filled = (level: number) => {
+  const out = new Float32Array(PACKET_LENGTH)
+  for (const field of AUDIO_FIELDS) if (field !== 'lowEnd') out[F[field]] = level
+  return out
+}
+
+describe('the canvas hold', () => {
+  const FULL = directorCanvas(filled(1))
+  const DECAYS = [0.97, 0.975, 0.98, 0.985]
+
+  it('is off by default and exactly off, so a pinned cast is the cast it was', () => {
+    const feedback = defaultPostParams().feedback
+    expect(feedback.hold).toBe(0)
+    expect(canvasGain(1000, feedback.hold)).toBe(1)
+    const step = feedbackStep(feedback, 1 / 144)
+    expect(canvasKeep(step, 1)).toBe(step.amount * step.decay)
+  })
+
+  it('never lets a constant filling the frame past the ceiling, at 60 and at 144', () => {
+    for (const fps of [60, 144]) {
+      for (const decay of DECAYS) {
+        const canvas = { ...FULL, decay }
+        const run = runCanvas(canvas, { fps, input: 1, cover: 1, seconds: 30 })
+        expect(run.highest, `${fps} Hz, decay ${decay}`).toBeLessThan(canvas.ceiling)
+        // And it settles at the hold that survived plus the frame just drawn,
+        // rather than anywhere near what the geometric sum would reach.
+        expect(run.value, `${fps} Hz, decay ${decay}`).toBeLessThan(canvas.hold * decay + 1.05)
+      }
+    }
+  })
+
+  it('settles in the same place at 60 and at 144, which is why it is not a plain multiply', () => {
+    for (const decay of DECAYS) {
+      const canvas = { ...FULL, decay }
+      const at60 = runCanvas(canvas, { fps: 60, input: 1, cover: 1, seconds: 30 }).value
+      const at144 = runCanvas(canvas, { fps: 144, input: 1, cover: 1, seconds: 30 }).value
+      // Two decimals and not more: the ceiling's roll-off is a per-frame
+      // squeeze, so a faster display meets it more often and settles a
+      // fraction of a percent lower. Everything else about the loop is exact.
+      expect(at144, `decay ${decay}`).toBeCloseTo(at60, 2)
+    }
+  })
+
+  it('is the whole reason the ceiling is not met: without it the same frame burns out', () => {
+    const canvas = { ...FULL, hold: 0 }
+    const run = runCanvas(canvas, { fps: 60, input: 1, cover: 1, seconds: 30 })
+    expect(run.value).toBeGreaterThan(canvas.ceiling)
+  })
+
+  it('leaves a thin mark alone: only the sum over the frame is held', () => {
+    // One frame of a thin mark lands at its own brightness whatever the canvas
+    // is doing, because nothing but the carried sum is ever scaled.
+    const thin = runCanvas(FULL, { fps: 60, input: 1, cover: 0.002, seconds: 1 / 60 })
+    expect(thin.value).toBeCloseTo(feedbackStep(FULL, 1 / 60).fresh, 9)
+    expect(canvasGain(1 * 0.002, FULL.hold)).toBe(1)
+  })
+
+  it('only ever takes light out, at any measurement', () => {
+    for (const mean of [0, 1e-6, 0.1, 0.35, 1, 40]) {
+      const gain = canvasGain(mean, 0.35)
+      expect(gain, `mean ${mean}`).toBeLessThanOrEqual(1)
+      expect(gain, `mean ${mean}`).toBeGreaterThanOrEqual(MIN_CANVAS_GAIN)
+    }
+
+    expect(canvasGain(Number.NaN, 0.35)).toBe(1)
+  })
+})
+
+describe('how long a mark lasts on the director’s canvas', () => {
+  const CALM = directorCanvas(filled(0))
+  /** A code value out of 255, which is the dimmest thing a screen shows at all. */
+  const VISIBLE = 1 / 255
+
+  /**
+   * A thin mark at full brightness, then nothing, for this many seconds. It
+   * starts at 1 at either rate rather than at one frame's worth of ink,
+   * because a frame's worth is not the same light at 60 and at 144 and never
+   * was: what has to read the same is how long a mark of a given brightness
+   * lasts, which is what this measures.
+   */
+  const mark = (feedback: PostParams['feedback'], fps: number, seconds: number) =>
+    runCanvas(feedback, { fps, input: 0, cover: 0.002, seconds, from: 1 }).value
+
+  it('is still there two seconds on and gone by eight, at 60 and at 144', () => {
+    for (const fps of [60, 144]) {
+      expect(mark(CALM, fps, 2), `${fps} Hz at two seconds`).toBeGreaterThan(VISIBLE)
+      expect(mark(CALM, fps, 8), `${fps} Hz at eight seconds`).toBeLessThan(VISIBLE)
+    }
+  })
+
+  // Within a twentieth of what is left rather than to the digit: the fade's
+  // gate reads the pixel as it was at the start of the step, so a coarser
+  // step takes a shade less out of a tail that is falling through the knee.
+  // It is about a percent at half a second and less after that, which no eye
+  // separates, and everything else in the loop agrees exactly.
+  it('lasts the same time at 60 and at 144', () => {
+    for (const seconds of [0.5, 1, 2, 4]) {
+      const at60 = mark(CALM, 60, seconds)
+      const at144 = mark(CALM, 144, seconds)
+      expect(Math.abs(at144 - at60) / Math.max(at60, 1e-6), `${seconds} s`).toBeLessThan(0.05)
+    }
+  })
+
+  it('is far longer than on the canvas that clipped its trails to black', () => {
+    // 0.93 a frame with a subtractive floor of 0.018 is what this canvas was,
+    // and the floor is what put a mark out in about half a second.
+    const was = { ...CALM, decay: 0.93, floor: 0.018, fade: 0, hold: 0 }
+    expect(mark(was, 60, 0.6)).toBe(0)
+    expect(mark(CALM, 60, 0.6)).toBeGreaterThan(VISIBLE)
+  })
+})
+
+describe('silence goes to true black', () => {
+  const CALM = directorCanvas(filled(0))
+  /** The smallest a half float holds, so anything under it is black on the GPU. */
+  const HALF_FLOAT_MIN = 6e-8
+
+  it('falls under what a half float can hold, at every rate', () => {
+    for (const fps of [30, 60, 144, 240])
+      expect(
+        runCanvas(CALM, { fps, input: 0, cover: 1, seconds: 4, from: 2 }).value,
+        `${fps} Hz`,
+      ).toBeLessThan(HALF_FLOAT_MIN)
+  })
+
+  it('cannot lift a canvas that is already black, however the hold is set', () => {
+    for (const hold of [0, 0.01, 0.35, 4])
+      expect(
+        runCanvas({ ...CALM, hold }, { fps: 60, input: 0, cover: 1, seconds: 4, from: 0 }).highest,
+        `hold ${hold}`,
+      ).toBe(0)
+  })
+})
+
+describe('what ages inside the loop', () => {
+  const REFERENCE = 1 / 60
+  const feedback = defaultPostParams().feedback
+  const living = { fade: 0.01, hold: 0.4, hue: 0.02, cool: 0.03, sharpen: 0.1 }
+
+  it('is exactly off at zero, every one of them', () => {
+    expect([feedback.fade, feedback.hold, feedback.hue, feedback.cool, feedback.sharpen]).toEqual([
+      0, 0, 0, 0, 0,
+    ])
+    for (const frames of [0.25, 1, 2, 6]) {
+      for (const peak of [0, 1e-9, 0.5, 40]) expect(fadeKeep(peak, 0, frames)).toBe(1)
+      const step = feedbackStep(feedback, frames / 60)
+      expect([step.hue, step.cool, step.sharpen, step.fade, step.hold]).toEqual([0, 0, 0, 0, 0])
+      // The keep at a gain of 1 is the keep the pass always had, to the bit.
+      expect(canvasKeep(step, 1)).toBe(step.amount * step.decay)
+    }
+  })
+
+  it('leaves every float the uniform already had exactly where it was', () => {
+    const features = packet({ dt: 1 / 144, time: 7.5, beatPulse: 0.4 })
+    const before = write(defaultPostParams(), features)
+    const after = write(mergePostParams(defaultPostParams(), { feedback: living }), features)
+    expect(Array.from(after.slice(0, 32))).toEqual(Array.from(before.slice(0, 32)))
+    expect(Array.from(after.slice(34, 52))).toEqual(Array.from(before.slice(34, 52)))
+  })
+
+  it('writes nothing at all with the stage off', () => {
+    const off = mergePostParams(mergePostParams(defaultPostParams(), { feedback: living }), {
+      feedback: { enabled: false },
+    })
+    const out = write(off, packet({ dt: REFERENCE }))
+    expect([out[33], out[54], out[56], out[57], out[58]]).toEqual([0, 0, 0, 0, 0])
+    // The step the two gates are raised to is 1 rather than 0, or a gate of 1
+    // would stop being 1.
+    expect(out[52]).toBe(1)
+  })
+
+  it('turns the hue and sharpens by time, and fades and cools by compounding', () => {
+    const moving = { ...feedback, fade: 0.01, cool: 0.02, hue: 0.004, sharpen: 0.05 }
+    const whole = feedbackStep(moving, REFERENCE)
+    const half = feedbackStep(moving, 1 / 120)
+    expect(half.hue).toBeCloseTo(whole.hue / 2, 12)
+    expect(half.sharpen).toBeCloseTo(whole.sharpen / 2, 12)
+    // The knee and the offset have no rate in them: the pass raises its gates
+    // to the step, so two half steps land where one whole one does.
+    expect(half.fade).toBe(whole.fade)
+    expect(half.cool).toBe(whole.cool)
+    expect(fadeKeep(0.2, 0.01, 0.5) ** 2).toBeCloseTo(fadeKeep(0.2, 0.01, 1), 12)
+  })
+
+  it('takes dim light out faster than bright, which is what a floor is for', () => {
+    expect(fadeKeep(40, 0.0015, 1)).toBeGreaterThan(0.999)
+    expect(fadeKeep(0.0015, 0.0015, 1)).toBeCloseTo(0.5, 9)
+    expect(fadeKeep(1e-5, 0.0015, 1)).toBeLessThan(0.01)
+    // And never clips: what is left is always some of what went in.
+    expect(fadeKeep(1e-5, 0.0015, 1)).toBeGreaterThan(0)
+  })
+
+  it('holds the sharpen so one long step cannot spend a second of it', () => {
+    expect(feedbackStep({ ...feedback, sharpen: 0.2 }, 0.1).sharpen).toBe(MAX_SHARPEN)
+    expect(feedbackStep({ ...feedback, sharpen: -1 }, REFERENCE).sharpen).toBe(0)
+  })
+
+  it('never keeps a channel backwards, whatever a row drives the offset to', () => {
+    for (const cool of [-40, -1, 0, 1, 40])
+      expect(Math.abs(feedbackStep({ ...feedback, cool }, REFERENCE).cool)).toBeLessThanOrEqual(1)
+  })
+
+  it('reads and writes as lanes', () => {
+    const params = defaultPostParams()
+    for (const [knob, value] of [
+      ['feedback.fade', 0.02],
+      ['feedback.hold', 0.5],
+      ['feedback.hue', 0.01],
+      ['feedback.cool', -0.02],
+      ['feedback.sharpen', 0.08],
+    ] as const) {
+      expect(POST_LANES[knob].read(params)).toBe(0)
+      POST_LANES[knob].write(params, value)
+      expect(POST_LANES[knob].read(params)).toBe(value)
+    }
+  })
+})
+
+describe('the ladder that measures the canvas', () => {
+  it('quarters each way and ends at one texel, on every shape', () => {
+    for (const [width = 1, height = 1] of [
+      [2560, 1440],
+      [3840, 2160],
+      [320, 320],
+      [1, 1],
+      [1920, 7],
+      [0, 0],
+    ]) {
+      const rungs = measureSizes(width, height)
+      expect(rungs.length, `${width} by ${height}`).toBeGreaterThan(0)
+      expect(rungs.at(-1), `${width} by ${height}`).toEqual({ width: 1, height: 1 })
+      let last = { width: Math.max(1, width), height: Math.max(1, height) }
+      for (const rung of rungs) {
+        expect(rung.width, `${width} by ${height}`).toBeGreaterThanOrEqual(1)
+        expect(rung.height, `${width} by ${height}`).toBeGreaterThanOrEqual(1)
+        expect(rung.width * rung.height, `${width} by ${height}`).toBeLessThanOrEqual(
+          last.width * last.height,
+        )
+        last = rung
+      }
+    }
+
+    // A 1440p frame reaches one texel in six passes of almost nothing.
+    expect(measureSizes(2560, 1440).length).toBe(6)
+  })
+
+  it('runs only when a cast asks the canvas to hold a mean', () => {
+    expect(holdRuns(defaultPostParams())).toBe(false)
+    const holding = mergePostParams(defaultPostParams(), { feedback: { hold: 0.35 } })
+    expect(holdRuns(holding)).toBe(true)
+    expect(holdRuns(mergePostParams(holding, { feedback: { enabled: false } }))).toBe(false)
+    expect(holdRuns(mergePostParams(holding, { enabled: false }))).toBe(false)
   })
 })

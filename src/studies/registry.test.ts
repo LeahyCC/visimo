@@ -7,6 +7,8 @@
  * - every flow and every ink says what tension does to it,
  * - no knob leaves the safe range for its implementation, at silence or at a
  *   full packet, with tension at either end,
+ * - nor at any frame of a packet that swings, which is where a shaped row is
+ *   at its worst: a spring passes its target only while the target moves,
  * - a full packet leaves the light and the colour at or under rest,
  * - its id, its excludes and its requires all name something real.
  *
@@ -44,6 +46,7 @@ import type {
 } from './impls'
 import { findStudy, STUDIES } from './registry'
 import { castFrame, resolveCast, resolveStudy } from './resolve'
+import type { RowState } from './resolve'
 import { STUDY_FIELDS, STUDY_KINDS } from './types'
 import type { Study } from './types'
 
@@ -79,11 +82,32 @@ const SAFE_POST: Record<PostKnob, readonly [number, number]> = {
   'ribbon.height': [0, 0.5],
   'ribbon.shape': [0, 1],
   'feedback.amount': [0, 1],
-  'feedback.decay': [0, 0.98],
+  // A canvas that holds its own mean can afford a long memory, and the
+  // director's does: 0.975 at rest and 0.983 when the music is loud. The top
+  // is what a cast may reach and not what one rests at, and past it the
+  // memory is measured in tens of seconds rather than seconds.
+  'feedback.decay': [0, 0.985],
   'feedback.zoom': [0.98, 1.05],
   'feedback.rotate': [-0.02, 0.02],
   'feedback.carry': [0, 2],
   'feedback.floor': [0, 0.1],
+  // The multiplicative floor's knee, in the same units as the floor above it
+  // and much smaller: it takes about its own size off anything bright every
+  // frame, and a knee near the floor's 0.018 would put a unit mark out in a
+  // second whatever the decay said.
+  'feedback.fade': [0, 0.02],
+  // The mean the canvas is held at. 0 is no holding and the top is a picture
+  // bright enough that the tonemap is already rolling most of it.
+  'feedback.hold': [0, 4],
+  // Radians a frame, either way. At the top a hue goes right round in about
+  // two seconds, which is faster than any trail lives.
+  'feedback.hue': [-0.05, 0.05],
+  // A whole channel's keep either way would be a trail that loses red or blue
+  // outright in a handful of frames; a twentieth is already a strong drift.
+  'feedback.cool': [-0.05, 0.05],
+  // It compounds every frame, so what reads as a crisp filament at rest is
+  // well under a half, and `MAX_SHARPEN` holds one long step besides.
+  'feedback.sharpen': [0, 0.25],
   'feedback.ceiling': [0.5, 64],
   'bloom.threshold': [0.4, 2],
   'bloom.knee': [0, 1],
@@ -307,9 +331,6 @@ const ALLOWED: Record<string, Record<string, string>> = {
       'the size of the cells; a live scale would zoom the whole pattern about the middle, which reads as the camera moving and not as light on water',
     hueSpread: 'how far the hues scatter round the ribbon’s, a setting of the look and not a level',
   },
-  'halo': {
-    hue: 'the offset from the ribbon’s colour at the key, a setting of the look for a cast to make and not a level',
-  },
   'beat-rings': {
     hueSpread: 'how far the hues step round the ribbon’s, a setting of the look and not a level',
   },
@@ -393,8 +414,55 @@ const driven = (study: Study, knob: string) =>
 
 const resting = (study: Study, knob: string) => study.knobs[knob] ?? 0
 
-const at = (study: Study, packet: Float32Array, tension: number) =>
-  resolveStudy(study, undefined, packet, tension, 1, {})
+const shaped = (study: Study) => study.mapping.some((row) => row.shape)
+
+// Four seconds of the packet held, for a study with a shaped row: a follower
+// and a spring have reached their signal, a total has been climbing and a
+// hold has had beats to sample on, so what the rules below read is where the
+// study settles and not where it started. A study with no shaped row is
+// resolved once, by the same call it always was, since nothing in it reads
+// the step.
+const SETTLE_SECONDS = 4
+const SETTLE_DT = 1 / 60
+
+const at = (study: Study, packet: Float32Array, tension: number) => {
+  const out: Record<string, number> = {}
+  if (!shaped(study)) return resolveStudy(study, undefined, packet, tension, 1, out)
+  const states: RowState[] = []
+  for (let frame = 0; frame < SETTLE_SECONDS / SETTLE_DT; frame += 1)
+    resolveStudy(study, undefined, packet, tension, 1, out, SETTLE_DT, states)
+  return out
+}
+
+/**
+ * A packet whose every field swings, so a shaped row is caught in motion. Two
+ * waves, because the two halves of the vocabulary want opposite things: the
+ * phases are ramps that wrap and everything else is a level, and a shape put
+ * on the wrong one of them is exactly the mistake this is looking for. The
+ * square is the hardest case for a spring, since a step is the input with the
+ * most overshoot in it, and the period is swept because a square at the
+ * spring's own frequency rings higher than one at any other.
+ */
+const swung = (
+  packet: Float32Array,
+  wave: 'square' | 'ramp',
+  period: number,
+  time: number,
+): Float32Array => {
+  const turn = (time % period) / period
+  const level = wave === 'square' ? (turn < 0.5 ? 0 : 1) : turn
+  for (const field of AUDIO_FIELDS) if (field !== 'lowEnd') packet[F[field]] = level
+  // The phases run the other way about, so each wave drives one half of the
+  // vocabulary with a ramp and the other with a step.
+  const phase = wave === 'square' ? turn : turn < 0.5 ? 0 : 1
+  packet[F.beatPhase] = phase
+  packet[F.barPhase] = phase
+  return packet
+}
+
+const SWING_PERIODS = [1 / 8, 1 / 5, 1 / 3, 1 / 2, 1]
+const SWING_RATES = [1 / 30, 1 / 60, 1 / 144]
+const SWING_SECONDS = 4
 
 describe('every study is well formed', () => {
   it('has a unique, kebab-case id', () => {
@@ -603,6 +671,70 @@ describe('every study stays inside a safe range', () => {
   }
 })
 
+describe('a shaped row cannot carry a knob out of range', () => {
+  // Only the studies that have one: for the rest this would be the same
+  // reading taken a few hundred times.
+  for (const study of STUDIES.filter(shaped)) {
+    it(`${study.name}: at every frame of a packet that swings, at any frame rate`, () => {
+      const packet = new Float32Array(PACKET_LENGTH)
+      for (const wave of ['square', 'ramp'] as const)
+        for (const period of SWING_PERIODS)
+          for (const dt of SWING_RATES)
+            for (const tension of [0, 1]) {
+              const out: Record<string, number> = {}
+              const states: RowState[] = []
+              for (let time = 0; time < SWING_SECONDS; time += dt) {
+                resolveStudy(
+                  study,
+                  undefined,
+                  swung(packet, wave, period, time),
+                  tension,
+                  1,
+                  out,
+                  dt,
+                  states,
+                )
+
+                for (const [knob, value] of Object.entries(out)) {
+                  const where = `${study.id} ${knob} on a ${wave} of ${period}s at ${dt}s, tension ${tension}`
+                  expect(Number.isFinite(value), where).toBe(true)
+                  const range = safeRange(study.impl, knob)
+                  if (!range) continue
+                  if (!MAY_RUN_UNDER[study.id]?.[knob])
+                    expect(value, where).toBeGreaterThanOrEqual(range[0])
+                  expect(value, where).toBeLessThanOrEqual(range[1])
+                }
+              }
+            }
+    })
+  }
+
+  // The cast parser holds a JSON row to these; a study def is TypeScript and
+  // nothing but this holds it to them, and a negative release is a follower
+  // that runs away rather than a slow one.
+  it('gives every shape numbers that mean something', () => {
+    for (const study of STUDIES)
+      for (const row of study.mapping) {
+        const shape = row.shape
+        if (!shape) continue
+        const where = `${study.id} ${row.from} to ${row.to}`
+        if (shape.kind === 'envelope') {
+          expect(shape.attackMs, `${where} attack`).toBeGreaterThanOrEqual(0)
+          expect(shape.releaseMs, `${where} release`).toBeGreaterThanOrEqual(0)
+        }
+
+        if (shape.kind === 'spring') {
+          expect(shape.frequency, `${where} frequency`).toBeGreaterThan(0)
+          // An undamped spring rings for ever and settles on nothing.
+          expect(shape.damping, `${where} damping`).toBeGreaterThan(0)
+        }
+
+        if (shape.kind === 'integrate' && shape.wrap !== undefined)
+          expect(shape.wrap, `${where} wrap`).toBeGreaterThan(0)
+      }
+  })
+})
+
 describe('every cast stays inside a safe range', () => {
   for (const cast of CASTS) {
     it(`${cast.name}: with its own rows on top, at every packet and tension`, () => {
@@ -634,7 +766,7 @@ describe('every cast stays inside a safe range', () => {
         expect(
           frame.post.feedback.amount * frame.post.feedback.decay,
           `${cast.name} feedback gain at ${entry.label}`,
-        ).toBeLessThan(0.98)
+        ).toBeLessThan(0.99)
       }
     })
   }

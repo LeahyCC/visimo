@@ -46,12 +46,15 @@
  * The section id itself is not here, for the reason the hits are not: a
  * scene reads it straight from the packet and chooses a layout with it.
  *
- * The last two are the beat as a clock. `beatPhase` runs from 0 on a beat to
+ * Then the beat as a clock. `beatPhase` runs from 0 on a beat to
  * 1 just before the next, predicted rather than reacted to, so with `invert`
  * it is a pulse that falls across the beat and lands on time.
  * `tempoConfidence` is how well the tracker's period fits; gate anything
  * built on the phase or the tempo with it, since a phase on a wrong tempo is
- * a steady rhythm in the wrong place.
+ * a steady rhythm in the wrong place. `barPhase` is the same clock one level
+ * up: 0 on the downbeat and 1 just before the next, across four beats, so a
+ * row on it changes once a bar rather than once a beat. It is the phase a
+ * `hold` of `bar` samples on.
  *
  * Last, the moment. Where the song is in its own shape rather than what kind
  * of song it is: `tension` is something winding up, `release` the payoff
@@ -95,6 +98,7 @@ export const AUDIO_FIELDS = [
   'release',
   'rest',
   'impact',
+  'barPhase',
 ] as const
 export type AudioField = (typeof AUDIO_FIELDS)[number]
 
@@ -104,6 +108,44 @@ export type AudioField = (typeof AUDIO_FIELDS)[number]
  */
 export const CURVES = ['linear', 'square', 'sqrt', 'invert'] as const
 export type Curve = (typeof CURVES)[number]
+
+export const SHAPES = ['envelope', 'spring', 'integrate', 'hold'] as const
+export type ShapeKind = (typeof SHAPES)[number]
+
+export const HOLD_PERIODS = ['beat', 'bar'] as const
+export type HoldPeriod = (typeof HOLD_PERIODS)[number]
+
+/**
+ * A stage with a memory, put between a row's signal and its gain. The four
+ * curves are stateless, so without one of these a knob can only ever drift
+ * with a level: nothing snaps on a hit and rings out, nothing accumulates,
+ * and nothing changes on the bar.
+ *
+ * Every one of them is stepped by the real `dt` and is the same curve at any
+ * frame rate, which is what `presets/shapes.ts` is for; the state itself
+ * lives in the resolver, one per study and row.
+ *
+ * - `envelope` follows its signal up over `attackMs` and lets go over
+ *   `releaseMs`. A fast attack and a slow release turn a band's pulse into a
+ *   kick-shaped swell.
+ * - `spring` pulls toward its signal at `frequency` hertz, damped by
+ *   `damping`: under 1 it overshoots and settles, at 1 and over it eases in
+ *   without passing the target. It rests exactly on its signal, so a row
+ *   that has settled is the row it would have been without the spring.
+ * - `integrate` adds `rate` times its signal every second, so the row
+ *   accumulates: a rotation that speeds up with the music rather than one
+ *   that sits at a speed. `wrap` folds the total back into 0 up to `wrap`,
+ *   which is what a phase or a turn of a colour wheel wants.
+ * - `hold` samples its signal on each beat or bar boundary and holds it
+ *   until the next, so the value steps on the music instead of sliding with
+ *   it. It reads `beatPhase` or `barPhase` and notices the wrap, so it lands
+ *   where the tracker predicts the beat and not where an onset was heard.
+ */
+export type Shape =
+  | { kind: 'envelope'; attackMs: number; releaseMs: number }
+  | { kind: 'spring'; frequency: number; damping: number }
+  | { kind: 'integrate'; rate: number; wrap?: number }
+  | { kind: 'hold'; per: HoldPeriod }
 
 /**
  * The fluid's numbers. `force` and `dye` are what the emitters trickle every

@@ -32,6 +32,7 @@ export const IMPL_IDS = [
   'rings',
   'spectrum',
   'sparks',
+  'lasers',
   'lightning',
   'look',
 ] as const
@@ -199,6 +200,28 @@ export const SPARKS_KNOBS = [
 export type SparksKnob = (typeof SPARKS_KNOBS)[number]
 
 /**
+ * The lasers' numbers. Their ranges and units are in `impls/lasers.params.ts`.
+ * `fans` is how many beams' origins stand along the edges and `beams` how many
+ * beams one fan carries, both counts; `spread` is the fan's opening in radians
+ * and `sweep` the swing amplitude, the beat clock driving the position; `flick`
+ * is how much one beam answers the treble.
+ */
+export const LASER_KNOBS = [
+  'fans',
+  'beams',
+  'spread',
+  'sweep',
+  'width',
+  'glow',
+  'intensity',
+  'flick',
+  'hue',
+  'rainbow',
+  'haze',
+] as const
+export type LaserKnob = (typeof LASER_KNOBS)[number]
+
+/**
  * The lightning's numbers. Their ranges and units are in
  * `impls/lightning.params.ts`. `rate` is strikes a second the bucket refills
  * at, and the bucket holds one on top, so the most bolts a second there can
@@ -296,6 +319,7 @@ export type ImplKnob =
   | RingsKnob
   | SpectrumKnob
   | SparksKnob
+  | LaserKnob
   | LightningKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
@@ -313,6 +337,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   rings: RINGS_KNOBS,
   spectrum: SPECTRUM_KNOBS,
   sparks: SPARKS_KNOBS,
+  lasers: LASER_KNOBS,
   lightning: LIGHTNING_KNOBS,
   look: LOOK_KNOBS,
 }

@@ -138,6 +138,9 @@ export class SyntheticBeat {
     // A Float32 rounds a phase a hair under 1 up to 1, which is the next beat
     // and not the end of this one.
     packet[F.beatPhase] = Math.min(this.beats - Math.floor(this.beats), PHASE_MAX)
+    // The bar the slots are laid out in, which is the eight eighths of `fire`.
+    const bars = this.beats / (SLOTS / 2)
+    packet[F.barPhase] = Math.min(bars - Math.floor(bars), PHASE_MAX)
     packet[F.swell] = 0.5
     return packet
   }

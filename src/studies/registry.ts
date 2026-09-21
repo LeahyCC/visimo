@@ -46,6 +46,7 @@ import { HALO } from './defs/halo'
 import { HARD_CLEAN } from './defs/hard-clean'
 import { IMPACT_FLASH } from './defs/impact-flash'
 import { IMPLODE } from './defs/implode'
+import { LASERS } from './defs/lasers'
 import { LAZY_FLUID } from './defs/lazy-fluid'
 import { LIGHTNING } from './defs/lightning'
 import { RADIAL_BURST } from './defs/radial-burst'
@@ -81,6 +82,7 @@ export const STUDIES: readonly Study[] = [
   BEAT_RINGS,
   SPECTRUM_RING,
   SPARKS,
+  LASERS,
   LIGHTNING,
   WARM_SOFT,
   CLEAN_GLASS,

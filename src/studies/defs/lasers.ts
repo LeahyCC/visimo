@@ -1,0 +1,112 @@
+import type { InkStudy } from '../types'
+
+/**
+ * Club laser fans sweeping through haze, for the groove and the drop of a
+ * steady, mid to high drive, fairly hard track: house, trance, techno. The
+ * beams are thrown from points just off the top and bottom edges and swung by
+ * the beat, so the study reads as light in the air of a room and not as a
+ * picture drawn on the frame. Its home is the measured middle of those
+ * tracks: FISHER's house reads 0.64 on drive at 0.92 steady and John Summit's
+ * tech house 0.53 at 0.68, so the home sits at a drive of 0.6, a steadiness
+ * of 0.75 and a hardness of 0.6, with a reach of 0.35: a house or a techno
+ * track is at home with it and a lo-fi one is not. The catalogue gives it the
+ * groove strongly, the drop at full and the build at half, and nothing else.
+ *
+ * A fan is a point origin and a spread of thin beams about a base direction
+ * into the frame. Origins alternate between the two edges and stand evenly
+ * along the x axis, so neighbours lean across each other. `energy` brings the
+ * fan count from 4 to 8 through a square root, so the first sound puts
+ * several fans up, and opens the spread and the swing amplitude, so a loud
+ * passage sweeps wider. `treble` fattens a fan from 5 beams to 11. The swing's
+ * position is the beat clock's, read from the packet the way the rings read
+ * it: the angle is `sweep x (0.5 - beatPhase)`, so every fan crosses the
+ * middle of its travel on the predicted beat, and even fans run backwards,
+ * crossing their neighbours twice a beat. `tempoConfidence` gates the light
+ * through `invert`, as it gates the rings: a track with no steady beat dims
+ * the fans out rather than sweeping them at a wrong tempo, and a silent
+ * packet takes the intensity to 0, which is the study's silence gate.
+ *
+ * Tension closes every fan to one beam, as the catalogue says: it takes the
+ * spread from 0.45 to 0 at full tension, so a build is a row of single beams
+ * sweeping, and lifts the intensity by only 0.02, so a build is narrower and
+ * not brighter. On the drop, `impact` throws the spread to the top of its
+ * range for its frame, which is the fans flung wide the moment the held-back
+ * beat lands.
+ *
+ * The treble answers one beam at a time. `flick` rests at 0 and `treblePulse`
+ * lifts it to near 1 on a hit, and while it is up the beam the beat clock
+ * selects in each fan carries twice its light, so a hit reads as single beams
+ * flashing and not as the fans brightening. The pulse decays as the packet's
+ * own pulse does, per second, and nothing in the study integrates per frame:
+ * there is no clock and no state, so the same song at 60 and at 144 frames a
+ * second draws the same frame.
+ *
+ * It is sparse by construction. At the worst there is, a full packet with six
+ * fans of six beams at full spread, each beam lights a band about 5 px wide
+ * (the core 1.5 px and the soft edge past it) across at most the frame's
+ * diagonal, and the beams cross in small groups, so the lit share of a 16:9
+ * frame stays around 8 percent (`lasersCoverage`, measured on a grid with
+ * every lit pixel counted once however many beams cross it), and a test holds
+ * it under 15 percent on a 16:9, a square and a tall canvas. That is the
+ * flash statement for WCAG 2.3.1: the lit area is a small share of the frame,
+ * the beams move continuously with the beat, and nothing toggles a large area
+ * of luminance on or off, so there is no strobe in the construction.
+ *
+ * Colour is the fans' own and not the shared palette's. The first build took
+ * the ribbon's colour and drew every beam one dull yellow, which is a line
+ * drawing of a rig and not a rig. Each fan now has a fully saturated hue,
+ * `rainbow` turns apart from its neighbour, starting from the key, so a key
+ * change turns the whole rig and `harmonicChange` and `swell` walk it
+ * between them. Only the very middle of a core goes white, the way a laser
+ * clips in a camera, and `haze` is the dim wide light a beam throws in the
+ * air, kept small: black between the fans is what makes the colour read, and
+ * at 0.07 the frame was a pastel wash with no black in it.
+ *
+ * The intensity rests above 1 on purpose (the canvas is half float and the
+ * bloom needs something over its threshold) and nothing loud raises it, which
+ * is the registry's rule. The beat lands in the `width` and the bass in the
+ * `haze` instead, so a kick fattens the beams and thickens the air without
+ * the light itself climbing. Tuned by eye on the adapter against photographs
+ * of club rigs; tune it again once the canvas's memory changes.
+ */
+export const LASERS: InkStudy = {
+  id: 'lasers',
+  kind: 'ink',
+  name: 'Lasers',
+  impl: 'lasers',
+  home: { drive: 0.6, weight: 0.35, tonality: 0.4, steadiness: 0.75, hardness: 0.6 },
+  reach: 0.35,
+  moments: { intro: 0, groove: 0.8, build: 0.5, drop: 1, rest: 0, outro: 0 },
+  knobs: {
+    fans: 4,
+    beams: 5,
+    spread: 0.5,
+    sweep: 0.3,
+    width: 1.0,
+    glow: 2.2,
+    intensity: 1.05,
+    flick: 0,
+    hue: 0,
+    rainbow: 0.14,
+    haze: 0.006,
+  },
+  mapping: [
+    { from: 'energy', to: 'fans', gain: 4, curve: 'sqrt' },
+    { from: 'treble', to: 'beams', gain: 6, curve: 'linear' },
+    { from: 'energy', to: 'spread', gain: 0.4, curve: 'linear' },
+    { from: 'tension', to: 'spread', gain: -0.5, curve: 'linear' },
+    { from: 'impact', to: 'spread', gain: 0.5, curve: 'linear' },
+    { from: 'energy', to: 'sweep', gain: 0.35, curve: 'linear' },
+    { from: 'energy', to: 'width', gain: 0.4, curve: 'linear' },
+    { from: 'hardness', to: 'glow', gain: -1.2, curve: 'linear' },
+    { from: 'tempoConfidence', to: 'intensity', gain: -1.05, curve: 'invert' },
+    { from: 'beatPulse', to: 'width', gain: 0.5, curve: 'linear' },
+    { from: 'treblePulse', to: 'flick', gain: 0.9, curve: 'linear' },
+    { from: 'harmonicChange', to: 'hue', gain: 0.12, curve: 'linear' },
+    { from: 'swell', to: 'hue', gain: 0.2, curve: 'linear' },
+    { from: 'harmonicChange', to: 'rainbow', gain: 0.1, curve: 'linear' },
+    { from: 'energy', to: 'haze', gain: 0.01, curve: 'linear' },
+    { from: 'bassPulse', to: 'haze', gain: 0.025, curve: 'linear' },
+  ],
+  cost: 'cheap',
+}

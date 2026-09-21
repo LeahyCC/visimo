@@ -23,6 +23,7 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import {
   defaultPostParams,
   feedbackStep,
+  mergePostParams,
   POST_KNOBS,
   POST_LANES,
   POST_STAGES,
@@ -32,7 +33,7 @@ import type { PostParams } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import type { AudioField } from '../presets/knobs'
 import { glintLevel, kaleidoscopeParams } from '../scenes/kaleidoscope.params'
-import { CANVAS_KNOBS, castStudyIds, parseCast } from './cast'
+import { CANVAS_KNOBS, castStudyIds, defaultCanvas, parseCast } from './cast'
 import { castOrDefault, CASTS, DEFAULT_CAST_ID, findCast, stepCast } from './casts/index'
 import melt from './casts/melt.json'
 import plume from './casts/plume.json'
@@ -63,12 +64,14 @@ const FRAMES = frames as unknown as readonly PresetFrame[]
  * What the preset path resolved to, as a whole stack. A stage that arrived
  * after the capture is at the stack's own default, which is off and neutral:
  * the preset path had no such stage, so that is what it did, and it is what
- * the shipped casts must still do.
+ * the shipped casts must still do. The merge is per stage rather than a
+ * spread over the whole object, so a knob added to a stage the capture does
+ * record, as the canvas hold and its company were to the feedback, reads the
+ * stack's default for it and not `undefined`. Every one of those defaults is
+ * exactly off, which is why the pinned casts need no compatibility path.
  */
-const expectedPost = (golden: PresetFrame): PostParams => ({
-  ...defaultPostParams(),
-  ...golden.post,
-})
+const expectedPost = (golden: PresetFrame): PostParams =>
+  mergePostParams(defaultPostParams(), golden.post)
 
 /**
  * The moment rows. The frames were captured before these existed, so a packet
@@ -420,11 +423,17 @@ describe('Plume, the three fluid casts folded into one', () => {
         ).toBe(true)
     }
 
-    for (const knob of CANVAS_KNOBS)
+    // Only the knobs Plume moved off the stack's own defaults: a knob it
+    // leaves where the stack rests it is a knob it has not set, and the ones
+    // that arrived with the canvas hold are all off there.
+    const rest = defaultCanvas().knobs
+    for (const knob of CANVAS_KNOBS) {
+      if (plume.canvas.knobs[knob] === rest[knob]) continue
       expect(
         plume.canvas.mapping.some((row) => row.to === knob),
         `the canvas sets ${knob} and no row moves it`,
       ).toBe(true)
+    }
   })
 
   // The light knobs sit at their resting values at a silent packet, and no row
@@ -547,5 +556,152 @@ describe('parseCast', () => {
 
   it('refuses a key that is not part of a cast', () => {
     expect(() => parseCast({ ...plume, scene: 'fluid' }, 'bad')).toThrow(/scene is not part/)
+  })
+
+  it('refuses a key that is not part of a row, so a misspelt shape is not ignored', () => {
+    const rows = (row: Record<string, unknown>) => ({ 'dye-plumes': { mapping: [row] } })
+    expect(() =>
+      parseCast(
+        { ...plume, overrides: rows({ from: 'energy', to: 'dye', gain: 1, shappe: {} }) },
+        'bad',
+      ),
+    ).toThrow(/shappe is not part of a row/)
+  })
+})
+
+/**
+ * The two optional halves of a row. A cast file is a wall of numbers, so
+ * every message has to name the path and say what was expected there; these
+ * are the mistakes the shapes make easy, a number with the wrong sign and a
+ * key that belongs to another shape.
+ */
+describe('parseCast on a row’s scale and shape', () => {
+  const withRow = (row: Record<string, unknown>) => ({
+    ...plume,
+    overrides: { 'dye-plumes': { mapping: [{ from: 'energy', to: 'dye', gain: 1, ...row }] } },
+  })
+
+  const rowOf = (row: Record<string, unknown>) =>
+    parseCast(withRow(row), 'good').overrides['dye-plumes']?.mapping?.[0]
+
+  it('reads a scale, with a curve of its own or without', () => {
+    expect(rowOf({ scale: { from: 'beatPulse' } })?.scale).toEqual({
+      from: 'beatPulse',
+      curve: 'linear',
+    })
+
+    expect(rowOf({ scale: { from: 'beatPulse', curve: 'square' } })?.scale).toEqual({
+      from: 'beatPulse',
+      curve: 'square',
+    })
+  })
+
+  it('refuses a scale with no field, a field that is not one, and a stray key', () => {
+    expect(() => parseCast(withRow({ scale: {} }), 'bad')).toThrow(
+      /scale\.from is missing; a scale reads a field/,
+    )
+
+    expect(() => parseCast(withRow({ scale: { from: 'vibe' } }), 'bad')).toThrow(
+      /scale\.from is not a field/,
+    )
+
+    expect(() => parseCast(withRow({ scale: { from: 'energy', gain: 2 } }), 'bad')).toThrow(
+      /scale\.gain is not part of a scale/,
+    )
+
+    expect(() => parseCast(withRow({ scale: 'energy' }), 'bad')).toThrow(
+      /scale expected an object, got "energy"/,
+    )
+  })
+
+  it('reads all four shapes', () => {
+    expect(rowOf({ shape: { kind: 'envelope', attackMs: 5, releaseMs: 300 } })?.shape).toEqual({
+      kind: 'envelope',
+      attackMs: 5,
+      releaseMs: 300,
+    })
+
+    expect(rowOf({ shape: { kind: 'spring', frequency: 8, damping: 0.5 } })?.shape).toEqual({
+      kind: 'spring',
+      frequency: 8,
+      damping: 0.5,
+    })
+
+    expect(rowOf({ shape: { kind: 'integrate', rate: -0.5 } })?.shape).toEqual({
+      kind: 'integrate',
+      rate: -0.5,
+    })
+
+    expect(rowOf({ shape: { kind: 'integrate', rate: 1, wrap: 1 } })?.shape).toEqual({
+      kind: 'integrate',
+      rate: 1,
+      wrap: 1,
+    })
+
+    expect(rowOf({ shape: { kind: 'hold', per: 'bar' } })?.shape).toEqual({
+      kind: 'hold',
+      per: 'bar',
+    })
+  })
+
+  it('refuses a kind that is not a shape, and says what they are', () => {
+    expect(() => parseCast(withRow({ shape: { kind: 'wobble' } }), 'bad')).toThrow(
+      /shape\.kind is not a shape; they are envelope, spring, integrate, hold/,
+    )
+  })
+
+  it('refuses a key that belongs to another shape, and names the right ones', () => {
+    expect(() =>
+      parseCast(withRow({ shape: { kind: 'spring', frequency: 8, releaseMs: 300 } }), 'bad'),
+    ).toThrow(/shape\.releaseMs is not part of a spring; it takes frequency, damping/)
+
+    expect(() =>
+      parseCast(
+        withRow({ shape: { kind: 'envelope', attackMs: 5, releaseMs: 300, damping: 1 } }),
+        'bad',
+      ),
+    ).toThrow(/shape\.damping is not part of an envelope; it takes attackMs, releaseMs/)
+  })
+
+  it('refuses a number whose sign means nothing', () => {
+    expect(() =>
+      parseCast(withRow({ shape: { kind: 'envelope', attackMs: -5, releaseMs: 300 } }), 'bad'),
+    ).toThrow(/shape\.attackMs is -5; it must be 0 or more/)
+
+    expect(() =>
+      parseCast(withRow({ shape: { kind: 'spring', frequency: 0, damping: 0.5 } }), 'bad'),
+    ).toThrow(/shape\.frequency is 0; it must be more than 0/)
+
+    expect(() =>
+      parseCast(withRow({ shape: { kind: 'spring', frequency: 8, damping: 0 } }), 'bad'),
+    ).toThrow(/shape\.damping is 0; it must be more than 0/)
+
+    expect(() =>
+      parseCast(withRow({ shape: { kind: 'integrate', rate: 1, wrap: 0 } }), 'bad'),
+    ).toThrow(/shape\.wrap is 0; it must be more than 0/)
+  })
+
+  it('refuses a missing number and a period that is not one', () => {
+    expect(() => parseCast(withRow({ shape: { kind: 'envelope', attackMs: 5 } }), 'bad')).toThrow(
+      /shape\.releaseMs expected a finite number, got undefined/,
+    )
+
+    expect(() => parseCast(withRow({ shape: { kind: 'hold', per: 'bap' } }), 'bad')).toThrow(
+      /shape\.per is not a period; they are beat, bar/,
+    )
+  })
+
+  // The canvas has no presence and nothing fades it, so there is nowhere for a
+  // row of its own to keep a memory that is dropped when something leaves.
+  it('refuses a scale or a shape on a canvas row, and says where they belong', () => {
+    for (const key of ['scale', 'shape']) {
+      const canvas = {
+        mapping: [{ from: 'energy', to: 'feedback.decay', gain: 0.01, [key]: {} }],
+      }
+
+      expect(() => parseCast({ ...plume, canvas }, 'bad')).toThrow(
+        new RegExp(`${key} is not part of a canvas row; the canvas keeps no memory of its own`),
+      )
+    }
   })
 })

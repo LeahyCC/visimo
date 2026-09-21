@@ -62,26 +62,37 @@ export { FEEDBACK_KEEP, SETTLE } from './caustics.params'
 export const HALO_UNIFORM_FLOATS = 12
 
 /**
- * What a director-built canvas holds its ceiling at when the music is full: the
- * canvas rests at 1.8 and `energy`, `swell` and `hardness` each take a square
- * of their own off it, 0.25, 0.15 and 0.15. `halo.test.ts` reads it back from
- * that canvas, so a change there fails there and not silently here.
+ * What a director-built canvas holds its ceiling at when the music is full.
+ * It is the resting 1.8 and nothing else now: the three rows that took a
+ * square of `energy`, `swell` and `hardness` off it are gone, because dimming
+ * the picture whenever the music got loud is what made the loudest moments the
+ * dullest, and `feedback.hold` controls the sum instead. `halo.test.ts` reads
+ * it back from that canvas, so a change there fails there and not silently
+ * here.
  */
-export const CEILING_AT_FULL_PACKET = 1.25
+export const CEILING_AT_FULL_PACKET = 1.8
 
 /** Where the feedback pass starts bending light: half its ceiling. */
 export const KNEE = CEILING_AT_FULL_PACKET / 2
 
 /**
- * What a director-built canvas takes off every pixel on every frame, its
- * `feedback.floor` at rest. It is what keeps a long trail from settling into a
- * haze, and it is why the sum is not simply `SETTLE x intensity`: a glow only
- * builds on what it adds over the floor. The first numbers here left it out.
- * They put the resting glow at 0.028 a frame and expected it to settle near
- * 0.4; with a floor of 0.018 under it, it settled near 0.14, and on a real
- * adapter it read as almost nothing at a quiet level and could not be found
- * at all beside the ribbon. `halo.test.ts` reads the floor back from that
- * canvas, so a change there fails there.
+ * What the canvas takes off every pixel on every frame, as it stood when this
+ * ink and the three beside it were budgeted. It is why the sum is not simply
+ * `SETTLE x intensity`: a glow only builds on what it adds over the floor. The
+ * first numbers here left it out. They put the resting glow at 0.028 a frame
+ * and expected it to settle near 0.4; with a floor of 0.018 under it, it
+ * settled near 0.14, and on a real adapter it read as almost nothing at a
+ * quiet level and could not be found at all beside the ribbon.
+ *
+ * **This and `FEEDBACK_KEEP` are a record, not a reading.** The director's
+ * canvas has moved under them: it keeps 0.975 a frame rather than 0.93 and
+ * fades dim light away rather than subtracting a fixed amount, so a still core
+ * sums several times higher than this budget allows for. Re-budgeting the four
+ * inks that carry it (this one, the rings, the spectrum ring and the caustics)
+ * wants a real adapter and their intensity rows opened up, which is a pass of
+ * its own; see docs/open-leads.md. Until then the numbers they were written
+ * against are pinned here and in their own tests, so the drift is visible
+ * rather than silent.
  */
 export const CANVAS_FLOOR = 0.018
 

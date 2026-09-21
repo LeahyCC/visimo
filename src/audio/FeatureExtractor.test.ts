@@ -113,7 +113,7 @@ describe('FeatureExtractor', () => {
   const make = (fftSize = FFT_SIZE) => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize })
 
   it('has the documented packet length and indices', () => {
-    expect(PACKET_LENGTH).toBe(52)
+    expect(PACKET_LENGTH).toBe(53)
     expect(F.treble).toBe(4)
     expect(F.tempoBpm).toBe(21)
     expect(F.dt).toBe(23)
@@ -131,6 +131,7 @@ describe('FeatureExtractor', () => {
     expect(F.rest).toBe(49)
     expect(F.impact).toBe(50)
     expect(F.grit).toBe(51)
+    expect(F.barPhase).toBe(52)
     expect(make().packet).toHaveLength(PACKET_LENGTH)
   })
 

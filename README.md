@@ -61,6 +61,8 @@ element.addEventListener('play', async () => {
 
 `attachAudio` takes one element and one only. A `MediaElementSource` can be built just once per element, and on media served without CORS headers the browser silences it permanently, so the host has to pick the element it knows is same-origin. A second element is refused rather than broken. Call `resumeAudio()` when the page becomes visible again; browsers suspend the context behind a hidden tab.
 
+**The picture does not depend on the volume.** A media element's source comes out after the element's own volume, so the graph takes the volume back off before the analyser and puts it back on after it (`volumeGains`), following `volumechange`. Without that a listener who turned the player down got a different picture: on the same ten seconds of a drop the treble band read 13 hits and a level of 0.77 at full volume and no hits and 0.16 at a volume of 0.08, because the top bands are the quietest in any mix and fall under the detectors' floor first. It holds down to a volume of 0.01. A muted element, or one at a volume of nothing, is exact silence and nothing brings it back, so a host that wants the picture with the sound off should route its own mute after the graph.
+
 Then the stage:
 
 ```tsx

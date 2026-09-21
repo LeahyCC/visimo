@@ -11,7 +11,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { INK_BLEND } from '../scenes/Impl'
 import shader from '../shaders/lightning.wgsl?raw'
-import { LightningInk } from './LightningInk'
 import {
   LIGHTNING_DEFAULTS,
   LIGHTNING_POOL,
@@ -19,6 +18,7 @@ import {
   SEGMENT_FLOATS,
   STRIKE_SEGMENTS,
 } from './lightning.params'
+import { LightningInk } from './LightningInk'
 
 vi.stubGlobal('GPUBufferUsage', { UNIFORM: 1, STORAGE: 2, COPY_DST: 4 })
 vi.stubGlobal('GPUShaderStage', { VERTEX: 1, FRAGMENT: 2 })
@@ -201,7 +201,12 @@ let ink: LightningInk
 /** Steps the ink through `frames` frames after the strike, rendering each. */
 function play(target: LightningInk, encoder: GPUCommandEncoder, frames: number, presence = 1) {
   for (let frame = 0; frame < frames; frame += 1) {
-    target.update(frame === 0 ? strikePacket() : new Float32Array(PACKET_LENGTH), 1 / 60, LIGHTNING_DEFAULTS, presence)
+    target.update(
+      frame === 0 ? strikePacket() : new Float32Array(PACKET_LENGTH),
+      1 / 60,
+      LIGHTNING_DEFAULTS,
+      presence,
+    )
     target.render(encoder, view)
   }
 }
@@ -367,9 +372,11 @@ describe('the shader against the buffers it reads', () => {
     expect(shader).toMatch(/half_width \+ view\.edge/)
     expect(shader).toMatch(/1\.0 - smoothstep\(ramp_start, ramp_end, abs\(in\.across\)\)/)
     expect(shader).toMatch(/let core_half = half_width \* 0\.45/)
+    // The body carries the colour, the core adds white on top.
     expect(shader).toMatch(
-      /in\.colour \* \(body \+ view\.core \* core\) \* in\.light, 1\.0/,
+      /let glow = in\.colour \* body \+ vec3<f32>\(1\.0\) \* \(view\.core \* core\)/,
     )
+    expect(shader).toMatch(/vec4<f32>\(glow \* in\.light, 1\.0\)/)
   })
 
   it('has the entry points the pipeline names, and writes alpha as 1 with the light in rgb, which the blend leaves alone', () => {

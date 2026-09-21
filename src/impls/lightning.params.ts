@@ -31,11 +31,14 @@
  * bolts for as long as the ink lives.
  *
  * The bolt stands still, unlike a ring, so its core does sum on the canvas
- * while it lives: see the study doc for the sum and the ceiling. That is why
- * the intensity only ever falls with loudness, never rises.
+ * while it lives, and the canvas now remembers for seconds: it keeps 0.975 of
+ * itself a frame and holds its own mean, so a bolt's afterglow outlives the
+ * bolt by far. The bolt is therefore brief and bright rather than long and
+ * careful: near white at the core, a saturated glow around it that turns with
+ * the key hue, and true black on every side. See the study doc for the sum
+ * and the ceiling.
  */
 import { F } from '../audio/FeatureExtractor'
-import { peakPaletteAt, RIBBON_TINT } from '../post/params'
 import { LIGHTNING_KNOBS } from '../studies/impls'
 import type { LightningKnob } from '../studies/impls'
 
@@ -51,6 +54,9 @@ export const STRIKE_SEGMENTS = 96
 
 /** Floats one segment is uploaded as: the two ends, then the colour, then the light. */
 export const SEGMENT_FLOATS = 8
+
+/** Floats one segment is kept as inside a strike: the two ends, then the hue offset. */
+const SEGMENT_STORED_FLOATS = 5
 
 /**
  * Floats in the uniform: the aspect, the height, the width and edge in
@@ -100,8 +106,11 @@ const EDGE_SHARE = 0.55
 /** How far an edge start sits in from the wall, in frame heights. */
 const EDGE_INSET = 0.02
 
-/** How much of the key hue the white carries. */
-const TINT = 0.35
+/** The glow's saturation: a real bolt reads as one hard colour, not a pastel. */
+const GLOW_SATURATION = 0.85
+
+/** How far a fork's hue sits from the main channel's, one step per fork depth. */
+const FORK_HUE_STEP = 0.045
 
 /** The flicker of the light over the life, in buckets a second, keyed on the age. */
 const FLICKER_HZ = 80
@@ -140,16 +149,14 @@ export const LIGHTNING_DEFAULTS: Record<LightningKnob, number> = {
   forks: 2,
   length: 0.45,
   width: 2.2,
-  life: 0.12,
-  intensity: 0.9,
+  life: 0.08,
+  intensity: 1.05,
 }
 
 export type LightningParams = Record<LightningKnob, number>
 
 /** The resolved knobs a tuning turned into: defaults where unnamed, clamped. */
-export function lightningParams(
-  knobs: Readonly<Partial<Record<string, number>>>,
-): LightningParams {
+export function lightningParams(knobs: Readonly<Partial<Record<string, number>>>): LightningParams {
   const params = { ...LIGHTNING_DEFAULTS }
   for (const name of LIGHTNING_KNOBS) {
     const value = knobs[name]
@@ -192,7 +199,7 @@ export type BoltSegment = {
 
 /** A strike: the segments built at birth, when, and how long it lives. */
 export type Strike = {
-  /** The segments, fixed at birth. */
+  /** The segments, fixed at birth, five floats each: the two ends, then the hue offset. */
   segments: Float32Array
   /** How many of the first slots of `segments` are live. */
   count: number
@@ -201,24 +208,50 @@ export type Strike = {
   life: number
   /** The seed the bolt was built from, so the flicker can be replayed. */
   seed: number
-  red: number
-  green: number
-  blue: number
+  /** The key hue the bolt was built at, the colour's starting point. */
+  key: number
 }
 
 const emptyStrike = (): Strike => ({
-  segments: new Float32Array(STRIKE_SEGMENTS * 4),
+  segments: new Float32Array(STRIKE_SEGMENTS * SEGMENT_STORED_FLOATS),
   count: 0,
   born: 0,
   life: 0,
   seed: 0,
-  red: 0,
-  green: 0,
-  blue: 0,
+  key: 0,
 })
 
 /** One strike slot, for the pool and for tests that build a bolt on its own. */
 export const newStrike = (): Strike => emptyStrike()
+
+/**
+ * The colour of a bolt at one hue, as rgb in 0 to 1: full value, hard
+ * saturation, the way the glow around a real strike reads. The hue wraps, so
+ * a fork's step past 1 lands next door rather than off the wheel.
+ */
+export function boltColour(hue: number): [number, number, number] {
+  const sector = (((hue % 1) + 1) % 1) * 6
+  const which = Math.floor(sector)
+  const rising = sector - which
+  const low = 1 - GLOW_SATURATION
+  // One channel falls across a sector while the next rises.
+  const falling = 1 - GLOW_SATURATION * rising
+  const climbing = 1 - GLOW_SATURATION * (1 - rising)
+  switch (which % 6) {
+    case 0:
+      return [1, climbing, low]
+    case 1:
+      return [falling, 1, low]
+    case 2:
+      return [low, 1, climbing]
+    case 3:
+      return [low, falling, 1]
+    case 4:
+      return [climbing, low, 1]
+    default:
+      return [1, low, falling]
+  }
+}
 
 /**
  * Midpoint displacement between two points: the returned array holds
@@ -251,10 +284,7 @@ export function displace(
       // happen from the generator's spacing, and a zero kick is a safe answer.
       const scale = length > 0 ? ROUGHNESS * length : 0
       const kick = (pick(channelFrom + at) - 0.5) * 2 * scale
-      next.push(
-        { x: midX - (dy / (length || 1)) * kick, y: midY + (dx / (length || 1)) * kick },
-        b,
-      )
+      next.push({ x: midX - (dy / (length || 1)) * kick, y: midY + (dx / (length || 1)) * kick }, b)
     }
 
     points = next
@@ -265,13 +295,15 @@ export function displace(
 }
 
 /**
- * Builds a strike's segments and colour into `strike`. `strength` is how hard
+ * Builds a strike's segments into `strike`. `strength` is how hard
  * the thing that fired it hit: 1 for an impact, the hit row's own value for a
  * hit. The fork levels are `params.forks` at a full hit and shallower below,
  * so the biggest hits carry the deepest forks, and the length has a strike's
  * own variance on top of the knob, so two bolts in a row are never the same
  * size. Every number here is a hash of `seed` and a channel, so a strike is
- * itself wherever the frames fell around it.
+ * itself wherever the frames fell around it. The colour is not chosen here:
+ * each segment keeps a hue offset from the key hue and the pool turns it into
+ * colour when it fills the buffer, so the whole bolt turns with the song.
  */
 export function buildBolt(
   strike: Strike,
@@ -322,13 +354,14 @@ export function buildBolt(
   }
 
   let written = 0
-  const pushSegment = (a: { x: number; y: number }, b: { x: number; y: number }) => {
+  const pushSegment = (a: { x: number; y: number }, b: { x: number; y: number }, hue: number) => {
     if (written >= STRIKE_SEGMENTS) return
-    const at = written * 4
+    const at = written * SEGMENT_STORED_FLOATS
     strike.segments[at] = a.x
     strike.segments[at + 1] = a.y
     strike.segments[at + 2] = b.x
     strike.segments[at + 3] = b.y
+    strike.segments[at + 4] = hue
     written += 1
   }
 
@@ -345,7 +378,7 @@ export function buildBolt(
   for (let at = 0; at + 1 < main.length; at += 1) {
     const a = main[at]
     const b = main[at + 1]
-    if (a && b) pushSegment(a, b)
+    if (a && b) pushSegment(a, b, 0)
   }
 
   const forks = 2 + Math.round(strength * (params.forks - 2))
@@ -356,6 +389,8 @@ export function buildBolt(
     parentLength: number,
   ) => {
     if (depth > forks || written >= STRIKE_SEGMENTS) return
+    // Each depth carries the hue one more step from the main channel's.
+    const hue = depth * FORK_HUE_STEP
     const at = Math.max(1, Math.floor(pick(channelFrom) * (parent.length - 2)))
     const base = parent[at]
     const before = parent[at - 1]
@@ -376,7 +411,7 @@ export function buildBolt(
       for (let piece = 0; piece + 1 < path.length; piece += 1) {
         const a = path[piece]
         const b = path[piece + 1]
-        if (a && b) pushSegment(a, b)
+        if (a && b) pushSegment(a, b, hue)
       }
 
       forkFrom(path, depth + 1, channelFrom + 20 + branch * 40, reach)
@@ -386,12 +421,7 @@ export function buildBolt(
   forkFrom(main, 1, 200, length)
 
   strike.count = written
-  const [red, green, blue] = peakPaletteAt(key + RIBBON_TINT + (pick(90) - 0.5) * 0.06)
-  // Near white: the key's colour let in only as far as TINT, so the bolt reads
-  // as the key's light and not as a coloured wire.
-  strike.red = 1 - TINT + red * TINT
-  strike.green = 1 - TINT + green * TINT
-  strike.blue = 1 - TINT + blue * TINT
+  strike.key = key
 }
 
 /** How much of its light a strike has left at an age. Full, then gone: a strike, not a glow. */
@@ -434,7 +464,10 @@ export function boltLight(distance: number, width: number, edge: number): number
   const coreHalf = half * CORE_SHARE
   const coreFrom = Math.max(coreHalf - edge, 0)
   const coreTo = coreHalf + edge
-  const coreAt = Math.min(Math.max((Math.abs(distance) - coreFrom) / (coreTo - coreFrom || 1), 0), 1)
+  const coreAt = Math.min(
+    Math.max((Math.abs(distance) - coreFrom) / (coreTo - coreFrom || 1), 0),
+    1,
+  )
   const core = 1 - coreAt * coreAt * (3 - 2 * coreAt)
   return body + CORE_LIFT * core
 }
@@ -532,25 +565,27 @@ export class LightningPool {
    * Write every segment of every live strike into `out` as `SEGMENT_FLOATS`
    * each and say how many. The light is the intensity times the fade and the
    * flicker of the strike's own age, so a bolt is drawn the same at any frame
-   * rate: everything here is a function of seconds, nothing of frames.
+   * rate: everything here is a function of seconds, nothing of frames. The
+   * colour is the strike's key hue plus the hue offset the segment was built
+   * with, so a fork arrives already carrying its neighbouring hue.
    */
   fill(out: Float32Array, params: LightningParams): number {
     let count = 0
     for (const strike of this.strikes) {
       const age = this.time - strike.born
       if (strike.life <= 0 || age < 0 || age >= strike.life) continue
-      const light =
-        params.intensity * boltFade(age, strike.life) * boltFlicker(strike.seed, age)
+      const light = params.intensity * boltFade(age, strike.life) * boltFlicker(strike.seed, age)
       for (let at = 0; at < strike.count; at += 1) {
-        const from = at * 4
+        const from = at * SEGMENT_STORED_FLOATS
         const to = count * SEGMENT_FLOATS
+        const [red, green, blue] = boltColour(strike.key + (strike.segments[from + 4] ?? 0))
         out[to] = strike.segments[from] ?? 0
         out[to + 1] = strike.segments[from + 1] ?? 0
         out[to + 2] = strike.segments[from + 2] ?? 0
         out[to + 3] = strike.segments[from + 3] ?? 0
-        out[to + 4] = strike.red
-        out[to + 5] = strike.green
-        out[to + 6] = strike.blue
+        out[to + 4] = red
+        out[to + 5] = green
+        out[to + 6] = blue
         out[to + 7] = light
         count += 1
       }
@@ -593,7 +628,7 @@ export function lightningCoverage(
   buildBolt(probe, 1, 1, params, 0)
   let length = 0
   for (let at = 0; at < probe.count; at += 1) {
-    const from = at * 4
+    const from = at * SEGMENT_STORED_FLOATS
     length += Math.hypot(
       (probe.segments[from + 2] ?? 0) - (probe.segments[from] ?? 0),
       (probe.segments[from + 3] ?? 0) - (probe.segments[from + 1] ?? 0),
@@ -601,6 +636,7 @@ export function lightningCoverage(
   }
 
   const shortSide = Math.min(width, height)
-  const band = 2 * boltReach(boltWidthPixels(params.width, width, height), boltEdgePixels(width, height))
+  const band =
+    2 * boltReach(boltWidthPixels(params.width, width, height), boltEdgePixels(width, height))
   return (strikes * length * shortSide * band) / (width * height)
 }

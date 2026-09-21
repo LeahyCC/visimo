@@ -228,14 +228,7 @@ export type LaserKnob = (typeof LASER_KNOBS)[number]
  * ever be is one above the top of this range, which is the flash rule held in
  * the range itself.
  */
-export const LIGHTNING_KNOBS = [
-  'rate',
-  'forks',
-  'length',
-  'width',
-  'life',
-  'intensity',
-] as const
+export const LIGHTNING_KNOBS = ['rate', 'forks', 'length', 'width', 'life', 'intensity'] as const
 export type LightningKnob = (typeof LIGHTNING_KNOBS)[number]
 
 /**

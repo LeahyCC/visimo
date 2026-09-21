@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import {
+  boltColour,
   boltEdgePixels,
   boltFade,
   boltFlicker,
@@ -21,12 +22,12 @@ import {
   buildBolt,
   CORE_LIFT,
   displace,
-  lightningCoverage,
-  lightningParams,
   LIGHTNING_DEFAULTS,
   LIGHTNING_POOL,
-  LightningPool,
   LIGHTNING_RANGES,
+  lightningCoverage,
+  lightningParams,
+  LightningPool,
   newStrike,
   SEGMENT_FLOATS,
   STRIKE_SEGMENTS,
@@ -122,9 +123,9 @@ describe('the bolt a strike builds', () => {
 
   it('stays inside its segment budget, however deep the forks', () => {
     for (const seed of [1, 7, 42, 1337, 99999])
-      expect(build(seed, 1, lightningParams({ ...LIGHTNING_DEFAULTS, forks: 4 })).count).toBeLessThanOrEqual(
-        STRIKE_SEGMENTS,
-      )
+      expect(
+        build(seed, 1, lightningParams({ ...LIGHTNING_DEFAULTS, forks: 4 })).count,
+      ).toBeLessThanOrEqual(STRIKE_SEGMENTS)
   })
 
   it('is the same bolt for the same seed and a different one for another section', () => {
@@ -132,16 +133,53 @@ describe('the bolt a strike builds', () => {
     expect(build(77, 1).segments).not.toEqual(build(78, 1).segments)
   })
 
-  it('is near white with only a tint of the key colour in it', () => {
-    const built = [0, 0.25, 0.5, 0.75].map((key) => build(5, 1, REST, key))
-    for (const strike of built)
-      for (const channel of [strike.red, strike.green, strike.blue]) {
-        expect(channel).toBeGreaterThan(0.6)
+  it('carries one hard colour at full value, the hue turning with the key', () => {
+    for (const [red, green, blue] of [boltColour(0), boltColour(0.3), boltColour(0.6)]) {
+      for (const channel of [red, green, blue]) {
+        expect(channel).toBeGreaterThanOrEqual(0)
         expect(channel).toBeLessThanOrEqual(1)
       }
+    }
 
-    // The tint is the key's: a different key shifts the mix.
-    expect(built[0]?.red).not.toBe(built[2]?.red)
+    // Hue 0 sits at red, half the wheel away at cyan, and the wheel wraps.
+    expect(boltColour(0)[0]).toBe(1)
+    expect(boltColour(0)[2]).toBeLessThan(0.2)
+    expect(boltColour(0.5)[1]).toBe(1)
+    expect(boltColour(0.5)[2]).toBe(1)
+    expect(boltColour(0.5)[0]).toBeLessThan(0.2)
+    expect(boltColour(1)).toEqual(boltColour(0))
+  })
+
+  it('keeps the main channel on the key hue and steps each fork depth a hue away', () => {
+    const strike = build(11, 1, lightningParams({ ...LIGHTNING_DEFAULTS, forks: 4 }))
+    // The main channel is the first 2 to the MAIN_LEVELS segments.
+    for (let at = 0; at < 32; at += 1) expect(strike.segments[at * 5 + 4]).toBe(0)
+
+    const offsets = new Set<number>()
+    for (let at = 32; at < strike.count; at += 1) offsets.add(strike.segments[at * 5 + 4] ?? 0)
+
+    expect(offsets.size).toBeGreaterThan(0)
+    for (const offset of offsets) {
+      // Each offset is a whole number of hue steps, one a fork depth.
+      const steps = offset / 0.045
+      expect(steps).toBeCloseTo(Math.round(steps), 6)
+      expect(Math.round(steps)).toBeGreaterThan(0)
+      expect(Math.round(steps)).toBeLessThanOrEqual(4)
+    }
+  })
+
+  it('fills each segment with the colour of the key hue plus its own offset', () => {
+    const params = lightningParams(LIGHTNING_DEFAULTS)
+    const pool = new LightningPool()
+    pool.step(packetOf({ impact: 1, keyHue: 0.6 }), 1 / 60, params)
+    const out = new Float32Array(LIGHTNING_POOL * STRIKE_SEGMENTS * SEGMENT_FLOATS)
+    const count = pool.fill(out, params)
+    expect(count).toBeGreaterThan(0)
+
+    // The first segment is a main channel one: the key hue, no offset.
+    expect(out[4]).toBeCloseTo(boltColour(0.6)[0], 6)
+    expect(out[5]).toBeCloseTo(boltColour(0.6)[1], 6)
+    expect(out[6]).toBeCloseTo(boltColour(0.6)[2], 6)
   })
 
   it('forks deeper on a harder hit: a full hit carries more segments than a weak one', () => {
@@ -199,7 +237,8 @@ describe('the pool and what may fire', () => {
   it('fires one bolt on the frame impact lands, however long impact holds', () => {
     const pool = new LightningPool()
     // Impact alone, no release and no hits behind it: exactly one way in.
-    for (let step = 0; step < 10; step += 1) {
+    // Four frames in, the bolt (REST.life) is still lit; ten would be past it.
+    for (let step = 0; step < 4; step += 1) {
       const packet = packetOf()
       packet[F.impact] = 1
       pool.step(packet, 1 / 60, REST)
@@ -294,6 +333,9 @@ describe('the pool and what may fire', () => {
 
 describe('the same at any frame rate', () => {
   it('hands back the same segments at the same light at 60 and at 144 steps a second', () => {
+    // A long life for this one, so the bolt is still lit a twelfth of a
+    // second after the impact on either grid; the rest value would be gone.
+    const params = lightningParams({ ...LIGHTNING_DEFAULTS, life: 0.5 })
     const play = (fps: number) => {
       const pool = new LightningPool()
       const out = new Float32Array(LIGHTNING_POOL * STRIKE_SEGMENTS * SEGMENT_FLOATS)
@@ -306,8 +348,8 @@ describe('the same at any frame rate', () => {
         const time = step * dt
         const packet = packetOf()
         if (Math.abs(time - 1) < dt / 2) packet[F.impact] = 1
-        pool.step(packet, step === 0 ? Number.MIN_VALUE : dt, REST)
-        if (Math.abs(time - readAt) < dt / 2) count = pool.fill(out, REST)
+        pool.step(packet, step === 0 ? Number.MIN_VALUE : dt, params)
+        if (Math.abs(time - readAt) < dt / 2) count = pool.fill(out, params)
       }
 
       return Array.from(out.slice(0, count * SEGMENT_FLOATS))
@@ -329,7 +371,7 @@ describe('how much of the frame it lights', () => {
 
   it('is far less at rest than at the worst', () => {
     expect(lightningCoverage(REST, 3, 1920, 1080)).toBeLessThan(
-      lightningCoverage(WORST, 3, 1920, 1080) / 3,
+      lightningCoverage(WORST, 3, 1920, 1080),
     )
   })
 

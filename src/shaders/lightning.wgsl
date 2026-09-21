@@ -13,7 +13,9 @@
 //
 // The light across the line is a transcription of `boltLight` in
 // lightning.params.ts, which says what it is and why; keep the two in step,
-// the tests measure the TypeScript.
+// the tests measure the TypeScript. What that sum is made of differs a
+// little: here the body carries the segment's colour and the core adds
+// white, so the two read independently on screen.
 
 struct View {
   // The canvas width over its height, and its height in pixels.
@@ -81,15 +83,20 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Quad 
 fn fs(in: Quad) -> @location(0) vec4<f32> {
   let half_width = view.width * 0.5;
   // The body: full inside the width, a smoothstep across the soft edge and
-  // exactly zero at the quad's own edge. A line thinner than its edge starts
-  // falling at the middle line, so its peak stays 1.
+  // exactly zero at the quad's own edge, so the frame around the bolt stays
+  // true black. A line thinner than its edge starts falling at the middle
+  // line, so its peak stays 1.
   let ramp_start = max(half_width - view.edge, 0.0);
   let ramp_end = half_width + view.edge;
   let body = 1.0 - smoothstep(ramp_start, ramp_end, abs(in.across));
-  // The hot core: the same profile at a narrower width, lifted by `core`,
-  // which is what makes the middle of the line read white hot.
+  // The hot core: the same profile at a narrower width, lifted by `core` and
+  // white whatever the body carries, which is what makes the middle of the
+  // line read white hot the way a real strike does.
   let core_half = half_width * 0.45;
   let core = 1.0 - smoothstep(max(core_half - view.edge, 0.0), core_half + view.edge, abs(in.across));
-  // Additive, and the blend leaves alpha alone, so this is light and nothing else.
-  return vec4<f32>(in.colour * (body + view.core * core) * in.light, 1.0);
+  // The body carries the bolt's colour, the core adds white on top, and the
+  // light the strike's own age worked out. Additive, and the blend leaves
+  // alpha alone, so this is light and nothing else.
+  let glow = in.colour * body + vec3<f32>(1.0) * (view.core * core);
+  return vec4<f32>(glow * in.light, 1.0);
 }

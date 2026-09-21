@@ -13,19 +13,19 @@ import { HARDSTYLE, LOFI } from '../director/song.fixture'
 import {
   buildBolt,
   LIGHTNING_DEFAULTS,
+  LIGHTNING_POOL,
+  LIGHTNING_RANGES,
   lightningCoverage,
   lightningParams,
   LightningPool,
-  LIGHTNING_POOL,
-  LIGHTNING_RANGES,
   newStrike,
   SEGMENT_FLOATS,
   STRIKE_SEGMENTS,
 } from '../impls/lightning.params'
+import { carriedCanvas } from './cast'
 import { LIGHTNING_KNOBS } from './impls'
 import { findStudy, sceneOf } from './registry'
 import { castFrame, resolveLive, resolveStudy } from './resolve'
-import { carriedCanvas } from './cast'
 
 const study = findStudy('lightning')
 if (!study) throw new Error('Expected the lightning study')
@@ -79,7 +79,7 @@ describe('what tension does to the lightning', () => {
     }
   })
 
-  it('never lifts the light: a full packet is dimmer than rest, with and without a build', () => {
+  it('a full packet leaves the intensity at rest, and only tension takes it down', () => {
     const filled = () => {
       const out = new Float32Array(PACKET_LENGTH)
       for (const field of ['energy', 'swell', 'hardness', 'pace', 'impact'] as const)
@@ -87,15 +87,20 @@ describe('what tension does to the lightning', () => {
       return out
     }
 
-    expect(at(filled()).intensity).toBeLessThan(study.knobs.intensity ?? 0)
-    expect(at(filled(), 1).intensity).toBeLessThan(at(filled()).intensity ?? 0)
+    // Loud never dims a bolt and never brightens one: the holdback is the
+    // only row on the intensity.
+    expect(at(filled()).intensity).toBe(study.knobs.intensity ?? 0)
+    expect(at(filled(), 1).intensity).toBeCloseTo((study.knobs.intensity ?? 0) - 0.15, 9)
   })
 
   it('dims the bolt on screen by the same amount, and leaves the bolt alone', () => {
     const drawn = (tension: number) => {
       const params = lightningParams(at(silent(), tension))
       const pool = new LightningPool()
-      for (let step = 0; step < 12; step += 1) {
+      // Read the light while both bolts are still lit. Tension takes the life
+      // to 0.05 s, so the wound bolt is dead by the third frame; the second
+      // frame puts both at the same age, a thirtieth of a second in.
+      for (let step = 0; step < 2; step += 1) {
         const packet = silent()
         if (step === 0) packet[F.impact] = 1
         pool.step(packet, 1 / 60, params)
@@ -109,7 +114,19 @@ describe('what tension does to the lightning', () => {
     const calm = drawn(0)
     const wound = drawn(1)
     expect(wound.count).toBe(calm.count)
-    expect(wound.first).toEqual(calm.first)
+    // Tension shortens the bolt, so the endpoints differ; the direction of
+    // the first segment is the seeded shape, which tension leaves alone.
+    const dir = (ends: number[]) => {
+      const dx = (ends[2] ?? 0) - (ends[0] ?? 0)
+      const dy = (ends[3] ?? 0) - (ends[1] ?? 0)
+      const len = Math.hypot(dx, dy)
+      return [dx / len, dy / len]
+    }
+
+    const calmDir = dir(calm.first)
+    const woundDir = dir(wound.first)
+    expect(woundDir[0]).toBeCloseTo(calmDir[0] ?? 0, 6)
+    expect(woundDir[1]).toBeCloseTo(calmDir[1] ?? 0, 6)
     expect(wound.light).toBeLessThan(calm.light)
   })
 })

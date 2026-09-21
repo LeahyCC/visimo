@@ -6,15 +6,36 @@ same push as any change of plan.
 ## What it draws
 
 Branching bolts on the biggest hits. A bolt is a jagged main channel with two
-to four levels of forked branches, drawn as thin additive line quads with a hot
-core, near white and tinted by the key hue. A bolt lives about 120 ms and is
-gone; the canvas trails carry the afterglow, so the ink itself never sums.
+to four levels of forked branches, drawn as thin additive line quads: near
+white at the core, a saturated glow around it that turns with the key hue,
+and true black on every side. A bolt lives about 80 ms and is gone; the
+canvas's own long memory is what carries the afterglow, so the ink itself
+never sums for longer than that.
 
-A bolt starts at an edge or the centre, seeded per strike: a strike is built on
-the CPU by midpoint displacement, and its every choice (which edge, which
+A bolt starts at an edge or the centre, seeded per strike: a strike is built
+on the CPU by midpoint displacement, and its every choice (which edge, which
 direction, every midpoint offset, every branch point and angle) is a hash of
 the section id and the strike count, never `Math.random`. The same song gives
 the same bolts for as long as the ink lives.
+
+## What the photographs teach
+
+Three references stood out while picking the look:
+
+- A night-sky shot of branching bolts over silhouetted trees (Unsplash,
+  sCrqMG2f6qo): what makes it striking is the near-white core against a
+  true-black sky, with the branches readable as structure, not glow.
+- The storm photographers' consensus (Stu Short's guide): a successful bolt
+  photo has a bright central channel with a colourful, vibrant aura, and the
+  branches carry all manner of neighbouring hues, blues into violets. That is
+  the fork hue step.
+- The working advice repeated everywhere (Chris Bray, Gary Hart): it is all
+  contrast. The darker the sky, the better the bolt stands out; cooler hues
+  read better than warm ones; and the glow stays tight around the channel.
+
+So: white core, one hard saturated colour that turns with the key, a small
+step of hue per fork depth, zero light past the line's own reach, and a
+palette of the ink's own rather than one borrowed from the ribbon.
 
 ## When it fires
 
@@ -25,9 +46,10 @@ Two ways in, and only two:
   least half a second apart whatever fires `impact`.
 - a strong hit in the low end or the mids (sub, bass, low mid, high mid) while
   `release` is still high fires one bolt at the hit's strength. A token bucket
-  holds one strike and refills at the `rate` knob, capped at two a second, so
-  with the banked one no song can fire more than three bolts a second. That is
-  the WCAG 2.3.1 line held by construction, the same way the shards hold it.
+  holds one strike and refills at the `rate` knob, capped at one and a half a
+  second, so with the banked one no song can fire more than three bolts a
+  second. That is the WCAG 2.3.1 line held by construction, the same way the
+  shards hold it.
 
 Nothing else fires. A groove, a build, an intro draw nothing at all: the pool
 is empty, no buffer is uploaded, no pass is encoded. Silence is black because
@@ -36,11 +58,12 @@ there is nothing to fire and no standing light.
 ## Tension
 
 Tension holds the study back so the drop lands. It takes the strike rate down,
-the bolt length down a little, the life down a little and the intensity down by
-up to a quarter, so through a build the bolts that do fire are fewer, shorter,
-briefer and dimmer, and what they held back is released with the drop. It draws
+the bolt length down a little, the life down a little and the intensity down
+by 0.15, so through a build the bolts that do fire are fewer, shorter, briefer
+and dimmer, and what they held back is released with the drop. It draws
 nothing through a build on its own account: there is no standing light to wind
-in. The rows are the whole of it; there is no tension shape change.
+in. The rows are the whole of it; there is no tension shape change. Loudness
+never moves the intensity either way.
 
 ## Knobs
 
@@ -48,20 +71,21 @@ All six live in the study definition (`src/studies/defs/lightning.ts`); the
 params file (`src/impls/lightning.params.ts`) only clamps them to their safe
 ranges. None of them is a per-frame number; all time is seconds.
 
-| Knob        | Rest  | Range    | Moves with                                      |
-| ----------- | ----- | -------- | ----------------------------------------------- |
-| `rate`      | 0.8   | 0 to 2   | `pace` up, `tension` down, `impact` up           |
-| `forks`     | 2     | 2 to 4   | `energy` up (the biggest hits fork deepest)      |
-| `length`    | 0.45  | 0.1 to 1 | `energy` up, `tension` down, short sides          |
-| `width`     | 2.2   | 0 to 8   | `energy` up, pixels at a 1080 high canvas         |
-| `life`      | 0.12  | 0.05 to 0.5 | `tension` down, seconds                        |
-| `intensity` | 0.9   | 0 to 2   | `energy`, `swell`, `hardness`, `tension`, all down |
+| Knob        | Rest | Range       | Moves with                                  |
+| ----------- | ---- | ----------- | ------------------------------------------- |
+| `rate`      | 0.8  | 0 to 1.5    | `pace` up, `tension` down, `impact` up      |
+| `forks`     | 2    | 2 to 4      | `energy` up (the biggest hits fork deepest) |
+| `length`    | 0.45 | 0.1 to 1    | `energy` up, `tension` down, short sides    |
+| `width`     | 2.2  | 0 to 8      | `energy` up, pixels at a 1080 high canvas   |
+| `life`      | 0.08 | 0.05 to 0.5 | `tension` down, seconds                     |
+| `intensity` | 1.05 | 0 to 2      | `tension` down, and nothing else            |
 
-The tint toward the key hue, the roughness of the midpoint displacement, the
-hot core width and the edge softness are shapes, not levels: they live in the
-params file as constants, the way the other inks keep their shapes.
+The saturation of the glow, the fork hue step, the roughness of the midpoint
+displacement, the hot core width and the edge softness are shapes, not
+levels: they live in the params file as constants, the way the other inks
+keep their shapes.
 
-## Coverage and the flash rule
+## Coverage, the flash rule and the canvas sum
 
 The worst the study's own mapping reaches is a loud, hard drop at full
 release: length 0.7 short sides, width 3.2 px, forks 4, three bolts alive
@@ -72,14 +96,28 @@ WCAG 2.3.1 counts a flash by a large area, ten percent of the frame at the
 small end; a bolt is far under that, so the rate cap of three a second is a
 second guard and not the only one.
 
-A bolt stands still, unlike a ring, so its core does sum on the canvas while
-it lives: the canvas keeps 0.93 of itself and takes its floor off, and a line
-that does not move settles near `intensity / (1 - 0.93)`. That is why the core
-is meant to saturate to white and why the intensity only falls with loudness,
-never rises: the resting 0.9 is held to `boltPeak` settling under the canvas
-ceiling away from the bolt, and the bolt itself is a thin white-hot filament
-that the trails then smear. The dimming rows are the wash-out guard: a full
-packet resolves 0.72, a full packet at full tension 0.57.
+A bolt stands still, unlike a ring, so its light does sum on the canvas while
+it lives, and the canvas changed since this plan was first written: it keeps
+0.975 of itself a frame (about a second and a half to a tenth and four and a
+half to a thousandth, against the third of a second the old 0.93 gave), it
+holds its own mean at 0.13 so the long memory cannot burn out, and a pixel is
+capped at 1.8 as a backstop. Read against that:
+
+- The afterglow outlives the bolt by far, and that is the canvas's design,
+  not a fault: the bolt is the strike, the canvas is the glow. The life can
+  be short, 80 ms, because nothing about the look depends on the ink holding
+  light.
+- At the resting intensity of 1.05 the middle of the line writes about 2.6 a
+  frame (the colour body plus the white core lifted by 1.5), so the canvas
+  settles the core at its 1.8 ceiling within two frames. That is the hot core
+  the bloom stage catches, and resting above 1 is what lets it.
+- The hold scales only the carried mean, so a single hot filament is left
+  alone; only a frame that lights most of its pixels is pulled down.
+- Past the line's reach the profile is exactly zero and nothing else stands
+  lit, so the frame around a bolt stays true black while the trail decays.
+
+The tension-only dimming is the wash-out guard now: at a full packet the
+intensity resolves 1.05, at a full packet at full tension 0.90.
 
 ## Home and moments
 
@@ -103,9 +141,9 @@ but the study exists for the drop.
 ## Doubts
 
 The intensity is the number to trust least, as it was for the rings and the
-halo before it: it was reasoned from the canvas sum, not set from a capture.
-If the bolts read faint beside the shards on the adapter, raise the resting
-intensity first; if the afterglow reads as a wash, lower the life before the
-intensity. Whether 120 ms is the right life for the feel of a strike, and
-whether the edge-origin share should rise above about half, are both for the
-screen, not the tests.
+halo before it: it was reasoned from the canvas arithmetic, not set from a
+capture. If the bolts read faint beside the shards on the adapter, raise the
+resting intensity before anything else; if the afterglow reads as a wash,
+shorten the life before touching the intensity. Whether 80 ms is the right
+life for the feel of a strike, and whether the edge-origin share should rise
+above about half, are both for the screen, not the tests.

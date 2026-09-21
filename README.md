@@ -1344,22 +1344,22 @@ The analytic flow was measured separately, on Windows in headless Edge against a
 
 | Study             | Kind | Before, percent | After, percent |
 | ----------------- | ---- | --------------- | -------------- |
-| `lazy-fluid`      | flow | 11.3            | 2.9            |
+| `lazy-fluid`      | flow | 11.3            | 8.8            |
 | `turbulent-fluid` | flow | 7.9             | 7.9            |
 | `implode`         | flow | 16.7            | 16.7           |
 | `radial-burst`    | flow | 10.8            | 2.5            |
-| `curl-drift`      | flow | 50.0            | 50.0           |
+| `curl-drift`      | flow | 50.0            | 44.2           |
 | `beat-pump`       | flow | 0.8             | 17.5           |
 | `tunnel`          | flow | 2.5             | 2.5            |
-| `dye-plumes`      | ink  | 12.1            | 4.6            |
-| `ribbon`          | ink  | 50.0            | 16.7           |
+| `dye-plumes`      | ink  | 12.1            | 10.4           |
+| `ribbon`          | ink  | 50.0            | 17.9           |
 | `fractal-glints`  | ink  | 14.6            | 26.3           |
 | `riser-streaks`   | ink  | 16.7            | 16.7           |
 | `shards`          | ink  | 2.5             | 10.4           |
-| `dust`            | ink  | 40.4            | 40.4           |
-| `caustics`        | ink  | 41.3            | 41.3           |
-| `halo`            | ink  | 60.0            | 53.3           |
-| `beat-rings`      | ink  | 19.2            | 32.1           |
+| `dust`            | ink  | 40.4            | 42.5           |
+| `caustics`        | ink  | 41.3            | 43.3           |
+| `halo`            | ink  | 60.0            | 42.1           |
+| `beat-rings`      | ink  | 19.2            | 32.5           |
 | `spectrum-ring`   | ink  | 16.7            | 8.3            |
 | `sparks`          | ink  | 5.4             | 27.5           |
 | `warm-soft`       | look | 16.7            | 16.7           |
@@ -1369,7 +1369,11 @@ The analytic flow was measured separately, on Windows in headless Edge against a
 | `impact-flash`    | look | 16.3            | 7.9            |
 | `film`            | look | 37.5            | 37.5           |
 
-The Ribbon was in exactly half: every groove, build and drop, for every track and at every stage of the reading. It now has a home with the steady, fairly hard, mid-drive end of the twenty (the house, tech house, drum and bass and dubstep tracks), a reach of 0.4, and moments of 0.5 for the groove, 1 for the build and 0.7 for the drop, so it is cast for a build on sixteen of the twenty tracks, for a drop on four, and for a groove on none, where a groove has spectrum ring, beat rings, sparks and the glints that suit it better. Everything else that moved is the opening: with every study placed alike, the moment decides it, so the studies that had been beaten there by a wide reach (beat pump, sparks, beat rings, shards, the glints) get it, and the halo, the spectrum ring and the dye lose it. Above 40 percent now, and left alone here: `curl-drift` at 50 (it takes the flow of every intro, rest and outro, which are half the moments: its middle home and reach of 1 beat lazy fluid's narrower one for most tracks when the character is known, and it wins the tie on id when it is not), `halo` at 53.3 (every moment at a half, the middle of the space, a reach of 1: the argument the Ribbon had), `caustics` at 41.3 and `dust` at 40.4 (each is a quiet-end ink, and three of the six moments are quiet). `fractal-glints` is at 26.3, up from 14.6: 12.5 to 19.2 percent of the casts for a known track, mostly the grooves and drops the Ribbon no longer takes a slot in, and 16.7 to 33.3 of the opening, where it now ranks on the moment. It has not been retuned; new rivals are coming.
+The Ribbon was in exactly half: every groove, build and drop, for every track and at every stage of the reading. It now has a home with the steady, fairly hard, mid-drive end of the twenty (the house, tech house, drum and bass and dubstep tracks), a reach of 0.4, and moments of 0.5 for the groove, 1 for the build and 0.7 for the drop, so it is cast for a build on seventeen of the twenty tracks, for a drop on six, and for a groove on none, where a groove has spectrum ring, beat rings, sparks and the glints that suit it better. Everything else that moved is the opening: with every study placed alike, the moment decides it, so the studies that had been beaten there by a wide reach (beat pump, sparks, beat rings, shards, the glints) get it, and the spectrum ring and the dye lose it.
+
+The halo was the same fault, and the last ink over 45 percent: the middle of the space, a reach of 1 and a half for every moment, in 60 percent of casts before and 53 after the opening changed. It now has a home at the soft, tonal, slower end (drive 0.25, weight 0.75, tonality 0.7, steadiness 0.35, hardness 0.05), a reach of 0.3, and moments of 1 for intro, rest and outro, 0.4 for groove and build and 0.15 for drop. For a known track it is cast in the outro of all twenty, the intro and the rest of ten each (the soft half) and one build. Home and reach did the work and the fit did not: a first try at a reach of 0.45 and a fit of 0.8 left it in half of all casts, since only three inks suit a quiet moment and an ink needs only 0.4 of the best one's score for a slot, so a quiet cast filled with all three on any track. A reach of 0.3 and a home further out on weight and steadiness is what took it out of the casts for the hard tracks.
+
+Above 40 percent now, and left alone: `curl-drift` at 44.2 (it takes the flow of every intro, rest and outro, which are half the moments: its middle home and reach of 1 beat lazy fluid's narrower one for most tracks when the character is known, and it wins the tie on id when it is not), `caustics` at 43.3, `dust` at 42.5 and `halo` at 42.1. The last three are the quiet end's inks, three of the six moments are quiet, and the quiet end of the library is thin: soft studies still to come are what bring them down, so the fairness test's cap of 45 sits above them until then. `fractal-glints` is at 26.3, up from 14.6: 12.5 to 19.2 percent of the casts for a known track (five of the twenty grooves and eighteen of the drops), mostly the slots the Ribbon and the halo no longer take, and 16.7 to 33.3 of the opening, where it now ranks on the moment. It has not been retuned; new rivals are coming.
 
 Not checked: a mid-range desktop GPU, and the fluid on a software rasteriser, which the reduced grid and sweep counts are written for but no machine here can run.
 

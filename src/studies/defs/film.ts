@@ -64,4 +64,6 @@ export const FILM: LookStudy = {
   ],
   cost: 'cheap',
   stages: ['bloom', 'tonemap', 'grain', 'grade'],
+  // Faded stock has one tint and a range of values, which is what mono gold is.
+  palette: 'mono-gold',
 }

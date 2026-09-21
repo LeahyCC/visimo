@@ -11,6 +11,7 @@
  * here touches the GPU. `impls.ts` names the implementations and the knobs
  * each of them accepts; `defs/` holds the studies themselves and `registry.ts` lists them.
  */
+import type { PaletteId } from '../palettes/palette'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import type { AudioField, Curve } from '../presets/knobs'
 import type { ImplId, ImplKnob, LookStage } from './impls'
@@ -114,8 +115,17 @@ export type InkStudy = Shape & { kind: 'ink' }
  * stages it switches on. Feedback and the ribbon are deliberately not among
  * them. The feedback is the canvas itself and belongs to the cast, and the
  * ribbon is an ink that happens to be drawn by the post stack.
+ *
+ * It also names the palette the picture is coloured in. The director already
+ * chooses the look by the song's character and the moment, so the colour comes
+ * with it: a look owns how the picture is shown, and colour is part of that.
+ * When two looks are live the palettes cross-fade by presence, as the looks do.
  */
-export type LookStudy = Shape & { kind: 'look'; stages: readonly LookStage[] }
+export type LookStudy = Shape & {
+  kind: 'look'
+  stages: readonly LookStage[]
+  palette: PaletteId
+}
 
 export type Study = FlowStudy | InkStudy | LookStudy
 

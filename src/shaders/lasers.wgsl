@@ -66,10 +66,10 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     // The swing is centred on the beat and even fans run it backwards: the
     // triangle of |phase - 0.5| lands every fan at 0 on the beat and at the
     // far side of its travel half way to the next one.
-    let swing = params.shape.w * (abs(params.screen.z - 0.5) - 0.5);
-    swing = swing * select(-1.0, 1.0, top);
+    let swing =
+      params.shape.w * (abs(params.screen.z - 0.5) - 0.5) * select(-1.0, 1.0, top);
     // The beam the treble answers this beat, a different one of each fan.
-    let flick_at = (f + u32(params.screen.z * params.shape.y)) % beams;
+    let flick_at = (f + u32(params.screen.z * params.shape.y)) % max(beams, 1u);
 
     for (var b = 0u; b < MAX_BEAMS; b = b + 1u) {
       if (b >= beams) {

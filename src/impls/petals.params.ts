@@ -78,10 +78,17 @@ export const OUTLINE_ROUND = 0.85
  * halo the soft light thrown outside it. The rim is where a backlit petal is
  * brightest and the only thing that reaches past 1, so the bloom finds the
  * outline and leaves the fill alone.
+ *
+ * The body and the halo are small on purpose, a tenth and a twentieth of the
+ * rim. A petal that holds a chord holds still, and a still light settles on
+ * the canvas at about forty times what one frame adds, so a body at half the
+ * rim's strength did not read as a translucent fill: it built to a fog that
+ * covered the frame and left no black between the petals. What is drawn is
+ * thin, and the canvas is what fills it in.
  */
-export const BODY = 0.5
+export const BODY = 0.1
 export const RIM = 1.6
-export const HALO = 0.45
+export const HALO = 0.06
 /** The rim's width in pixels at the reference height. */
 export const RIM_PIXELS = 1.8
 /** How much brighter the rim is at the tip, where the light gathers. */

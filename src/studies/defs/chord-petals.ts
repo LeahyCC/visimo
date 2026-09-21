@@ -60,7 +60,12 @@ const petal = (from: StudyField, to: PetalKnob): StudyMapping => ({
  * its note, so twelve petals are twelve colours and a chord is three of them.
  * The intensity rests at 1.3, above 1 on purpose, so the rim clears the bloom's
  * threshold while the body does not, and nothing loud raises it, which is the
- * registry's rule. `docs/studies/chord-petals.md` says what it was built to.
+ * registry's rule. The body and the halo are a tenth and a twentieth of the
+ * rim's light for a reason the first build found: the canvas keeps 0.975 of
+ * itself a frame, so a petal that holds still settles at about forty times what
+ * a frame adds, and a body at half the rim's strength filled the frame with a
+ * red and blue fog with no black left in it. The fresh light is thin and the
+ * canvas thickens it, which is what a flower that holds a chord for a bar wants. `docs/studies/chord-petals.md` says what it was built to.
  *
  * It is sparse by construction. Measured on a grid at the top of every row
  * that adds to the shape (`petalsCoverage`, with tests that hold it): a triad

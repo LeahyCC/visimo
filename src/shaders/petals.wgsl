@@ -51,9 +51,9 @@ const HALF_SECTOR = 0.27;
 const WIDEST_AT = 0.6;
 const OUTLINE_SKEW = 1.4;
 const OUTLINE_ROUND = 0.85;
-const BODY = 0.5;
+const BODY = 0.1;
 const RIM = 1.6;
-const HALO = 0.45;
+const HALO = 0.06;
 const TIP_GAIN = 1.2;
 const NOTE_MIN = 0.01;
 // How far a petal's light reaches past its edge, in glow widths.

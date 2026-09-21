@@ -217,27 +217,27 @@ describe('how much of the frame it lights', () => {
   // A scale, seven neighbours on the circle of fifths.
   const SCALE = [0, 7, 2, 9, 4, 11, 5]
 
-  it('lights about a seventh of a 16:9 frame for a loud triad and a quarter for a scale', () => {
-    expect(petalsCoverage(flower(C_MAJOR, LOUD), 1920, 1080)).toBeLessThan(0.2)
-    expect(petalsCoverage(flower(SCALE, LOUD), 1920, 1080)).toBeLessThan(0.3)
+  it('lights about 7 percent of a 16:9 frame for a loud triad and 15 for a scale', () => {
+    expect(petalsCoverage(flower(C_MAJOR, LOUD), 1920, 1080)).toBeLessThan(0.1)
+    expect(petalsCoverage(flower(SCALE, LOUD), 1920, 1080)).toBeLessThan(0.2)
   })
 
   // All twelve at once is what the extractor's flat-chroma gate stops from
   // ever being read, so this is a ceiling and not a case.
-  it('lights under 40 percent of a 16:9 frame with every note at once at the top of the mapping', () => {
-    expect(petalsCoverage(flower(ALL, LOUD), 1920, 1080)).toBeLessThan(0.4)
+  it('lights under 30 percent of a 16:9 frame with every note at once at the top of the mapping', () => {
+    expect(petalsCoverage(flower(ALL, LOUD), 1920, 1080)).toBeLessThan(0.3)
   })
 
   it('holds the same share of the short side on a square frame and a tall one', () => {
     // A square frame is a smaller area for the same flower, so it is a larger share.
-    expect(petalsCoverage(flower(C_MAJOR, LOUD), 1000, 1000)).toBeLessThan(0.32)
-    expect(petalsCoverage(flower(SCALE, LOUD), 1000, 1000)).toBeLessThan(0.5)
-    expect(petalsCoverage(flower(SCALE, LOUD), 1080, 1920)).toBeLessThan(0.3)
+    expect(petalsCoverage(flower(C_MAJOR, LOUD), 1000, 1000)).toBeLessThan(0.16)
+    expect(petalsCoverage(flower(SCALE, LOUD), 1000, 1000)).toBeLessThan(0.32)
+    expect(petalsCoverage(flower(SCALE, LOUD), 1080, 1920)).toBeLessThan(0.2)
   })
 
-  it('lights only a few percent at rest, for an ordinary chord of three notes', () => {
+  it('lights about 2 percent at rest, for an ordinary chord of three notes', () => {
     const rest = { open: 0.5, layer: 0.1, glow: 10 }
-    expect(petalsCoverage(flower(C_MAJOR, rest), 1920, 1080)).toBeLessThan(0.06)
+    expect(petalsCoverage(flower(C_MAJOR, rest), 1920, 1080)).toBeLessThan(0.03)
   })
 
   it('lights nothing at all when the gate is closed', () => {

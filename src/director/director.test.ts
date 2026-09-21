@@ -365,20 +365,46 @@ describe('Director', () => {
     expect(one.length).toBeGreaterThan(3)
   })
 
-  it('opens on the widest welcome and drifts into the track’s own', () => {
+  // Until the character is known the moment alone ranks the studies. The stray
+  // ink fits the groove best and is a poor match for the track once it is
+  // known; the own ink has the better welcome (it used to win the opening on
+  // that) and is the track's own.
+  it('opens on the best fit for the moment and drifts into the track’s own', () => {
     const track: Character = { ...NEUTRAL, hardness: 0.95, drive: 0.9 }
     const elsewhere: Character = { ...NEUTRAL, hardness: 0.05, drive: 0.1 }
-    const wide = ink('wide-ink', moments({ groove: 1 }), { reach: 1, home: elsewhere })
-    const near = ink('near-ink', moments({ groove: 1 }), { reach: 0.2, home: track })
-    const studies = [GROOVE_FLOW, ONE_LOOK, wide, near]
+    const stray = ink('stray-ink', moments({ groove: 1 }), { reach: 0.2, home: elsewhere })
+    const own = ink('own-ink', moments({ groove: 0.9 }), { reach: 0.5, home: track })
+    const studies = [GROOVE_FLOW, ONE_LOOK, stray, own]
     const director = new Director({ studies, budget: 4 })
     const early = sounding(packet({ section: 1 }), track)
     run(director, early, 4)
-    expect(director.cast?.inks).toEqual(['wide-ink'])
+    expect(director.cast?.inks).toEqual(['stray-ink'])
     run(director, early, 60)
     // Settled, and a boundary to act on it.
     run(director, sounding(packet({ section: 2 }), track), 2)
-    expect(director.cast?.inks).toEqual(['near-ink'])
+    expect(director.cast?.inks).toEqual(['own-ink'])
+  })
+
+  // The same two studies with the ids the other way round. Nothing but the
+  // moment and the tie-break may decide the opening, and a reach is neither.
+  it('does not open on a study for having the widest reach', () => {
+    const track: Character = { ...NEUTRAL, hardness: 0.95, drive: 0.9 }
+    const elsewhere: Character = { ...NEUTRAL, hardness: 0.05, drive: 0.1 }
+    for (const [narrow, wide] of [
+      ['a-narrow', 'z-wide'],
+      ['z-narrow', 'a-wide'],
+    ] as const) {
+      const studies = [
+        GROOVE_FLOW,
+        ONE_LOOK,
+        ink(narrow, moments({ groove: 1 }), { reach: 0.2, home: elsewhere }),
+        ink(wide, moments({ groove: 1 }), { reach: 1, home: track }),
+      ]
+      const director = new Director({ studies, budget: 4 })
+      run(director, sounding(packet({ section: 1 }), track), 4)
+      // Alike in everything, so the id decides, whichever way round it falls.
+      expect(director.cast?.inks).toEqual([[narrow, wide].sort()[0]])
+    }
   })
 
   // Heard on a real metal track: one section, no impact and no novelty spike
@@ -387,14 +413,14 @@ describe('Director', () => {
   it('asks again when the character is first known, with no boundary to prompt it', () => {
     const track: Character = { ...NEUTRAL, hardness: 0.95, drive: 0.9 }
     const elsewhere: Character = { ...NEUTRAL, hardness: 0.05, drive: 0.1 }
-    const wide = ink('wide-ink', moments({ groove: 1 }), { reach: 1, home: elsewhere })
-    const near = ink('near-ink', moments({ groove: 1 }), { reach: 0.2, home: track })
-    const director = new Director({ studies: [GROOVE_FLOW, ONE_LOOK, wide, near], budget: 4 })
+    const stray = ink('stray-ink', moments({ groove: 1 }), { reach: 0.2, home: elsewhere })
+    const own = ink('own-ink', moments({ groove: 0.9 }), { reach: 0.5, home: track })
+    const director = new Director({ studies: [GROOVE_FLOW, ONE_LOOK, stray, own], budget: 4 })
     const steady = sounding(packet({ section: 1, recall: 0.9 }), track)
     run(director, steady, 4)
-    expect(director.cast?.inks).toEqual(['wide-ink'])
+    expect(director.cast?.inks).toEqual(['stray-ink'])
     run(director, steady, 60)
-    expect(director.cast?.inks).toEqual(['near-ink'])
+    expect(director.cast?.inks).toEqual(['own-ink'])
   })
 
   it('does not ask again when it was handed the character to begin with', () => {

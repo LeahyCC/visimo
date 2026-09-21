@@ -3,7 +3,15 @@ import { describe, expect, it } from 'vitest'
 import { MOMENTS } from '../studies/types'
 import type { Character, InkStudy, Moments } from '../studies/types'
 import type { MomentWeights } from './moment'
-import { characterDistance, closeness, falloff, momentFit, place, scoreStudy } from './score'
+import {
+  characterDistance,
+  closeness,
+  falloff,
+  momentFit,
+  place,
+  scoreStudy,
+  UNHEARD_PLACE,
+} from './score'
 import { HARDSTYLE, HOUSE, LOFI } from './song.fixture'
 
 const NOTHING: MomentWeights = { intro: 0, groove: 0, build: 0, drop: 0, rest: 0, outro: 0 }
@@ -130,14 +138,35 @@ describe('scoreStudy', () => {
     )
   })
 
-  // The first half minute: the character is a guess, so the widest welcome
-  // stands in for it and the reading takes over as it settles.
-  it('reads the reach in place of the character until the character has settled', () => {
-    expect(place(SHARDS, LOFI, 0)).toBeCloseTo(SHARDS.reach)
+  // The first half minute: the character is a guess, so nobody is placed
+  // better than anybody else and the reading takes over as it settles.
+  it('places every study alike until the character has settled', () => {
+    expect(place(SHARDS, LOFI, 0)).toBe(UNHEARD_PLACE)
     expect(place(SHARDS, LOFI, 1)).toBeCloseTo(closeness(SHARDS, LOFI))
     const half = place(SHARDS, LOFI, 0.5)
     expect(half).toBeGreaterThan(place(SHARDS, LOFI, 1))
     expect(half).toBeLessThan(place(SHARDS, LOFI, 0))
+  })
+
+  // The old rule read the reach here, which handed the opening of every track
+  // to the study with the widest welcome.
+  it('does not favour a wide reach before the character has settled', () => {
+    const narrow = ink('narrow', SHARDS.home, 0.2, ANY_MOMENT)
+    const wide = ink('wide', SHARDS.home, 1, ANY_MOMENT)
+    const at = weights({ groove: 1 })
+    for (const character of [LOFI, HOUSE, HARDSTYLE]) {
+      expect(place(wide, character, 0)).toBe(place(narrow, character, 0))
+      expect(scoreStudy(wide, character, at, 0)).toBe(scoreStudy(narrow, character, at, 0))
+    }
+  })
+
+  // With the place alike, the moment is all that is left to rank the opening.
+  it('ranks by the moment alone before the character has settled', () => {
+    const at = weights({ build: 1 })
+    for (const character of [LOFI, HOUSE, HARDSTYLE])
+      expect(scoreStudy(RISER, character, at, 0)).toBeGreaterThan(
+        scoreStudy(SPECTRUM, character, at, 0),
+      )
   })
 })
 

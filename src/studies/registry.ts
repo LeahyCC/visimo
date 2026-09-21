@@ -436,18 +436,29 @@ const DYE_PLUMES: InkStudy = {
 
 /**
  * The waveform as a line or a circle, drawn under the feedback so the trails
- * turn it into sheets. Any song has a waveform, so its home is the middle of
- * the space and its reach is the whole of it. Tension thins the line and
- * shrinks the circle.
+ * turn it into sheets. Tension thins the line and shrinks the circle.
+ *
+ * It first had the middle of the space and a reach of 1, on the argument that
+ * any song has a waveform. That mistook what a study can draw for where it is
+ * wanted. The director reads `home` and `reach` as the second, so a study at
+ * the middle with the whole space for a welcome was a fair fit for every track
+ * there is, and with a fit of 1 for groove, build and drop it was in nearly
+ * every cast. The waveform is at its best on a clear, steady, punchy signal,
+ * where the line is a crisp shape the trails can turn into sheets; on a soft
+ * or a chaotic mix it is a smear. So it sits with the electro, house and
+ * techno end of `tracks.fixture.ts` (steady, fairly hard, mid drive) and a
+ * reach of 0.4, in the range the other inks use. The build is what it is best
+ * at, since a thin line drawing tight is the tension made visible, and a
+ * groove has plenty of inks that suit it as well or better.
  */
 const RIBBON: InkStudy = {
   id: 'ribbon',
   kind: 'ink',
   name: 'Ribbon',
   impl: 'ribbon',
-  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.5 },
-  reach: 1,
-  moments: { intro: 0, groove: 1, build: 1, drop: 1, rest: 0, outro: 0 },
+  home: { drive: 0.55, weight: 0.4, tonality: 0.5, steadiness: 0.75, hardness: 0.6 },
+  reach: 0.4,
+  moments: { intro: 0, groove: 0.5, build: 1, drop: 0.7, rest: 0, outro: 0 },
   knobs: {
     'ribbon.intensity': 0.15,
     'ribbon.width': 2.5,
@@ -789,13 +800,21 @@ const CAUSTICS: InkStudy = {
 }
 
 /**
- * One central glow that breathes with the music: the ink the director can
- * always fall back on. It suits every moment and every character, and that is
- * exactly why it has to be modest everywhere: it is a companion to other inks
- * and never the whole picture. Its fit is a middling 0.5 in every moment, so a
- * study written for a moment beats it there and it wins only where nothing
- * else has a claim, and its home is the middle of the space with the widest
- * reach.
+ * One central glow that breathes with the music. It is modest everywhere: a
+ * companion to other inks and never the whole picture.
+ *
+ * It was first written as the ink the director can always fall back on, with
+ * a fit of 0.5 in every moment, the middle of the space and the whole of it
+ * for a reach. That is the ribbon's mistake (see there): a study that is a
+ * fair fit for every track and every moment is in most casts, and it was
+ * still taking the last slot where studies written for the moment had a
+ * claim, at 53 percent of the casts the twenty measured tracks can be given.
+ * One glow at the middle is at its best under music that leaves it room, soft,
+ * tonal and slower (the ambient, downtempo, folk and orchestral end of
+ * `tracks.fixture.ts`), where a single breathing shape anchors the picture
+ * and does not sit on top of a busy one. So it has a home there, a reach of
+ * 0.45, a full fit for intro, rest and outro, less for a groove, and little
+ * for a drop, where a glow at the middle is a smaller thing than the hit.
  *
  * It breathes, and it is written so that silence draws nothing. `energy` sets
  * the radius, through a square root, so the first sound lets a small glow in
@@ -853,9 +872,9 @@ const HALO: InkStudy = {
   kind: 'ink',
   name: 'Halo',
   impl: 'halo',
-  home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.5 },
-  reach: 1,
-  moments: { intro: 0.5, groove: 0.5, build: 0.5, drop: 0.5, rest: 0.5, outro: 0.5 },
+  home: { drive: 0.25, weight: 0.75, tonality: 0.7, steadiness: 0.35, hardness: 0.05 },
+  reach: 0.3,
+  moments: { intro: 1, groove: 0.4, build: 0.4, drop: 0.15, rest: 1, outro: 1 },
   knobs: {
     radius: 0,
     hollow: 0.15,

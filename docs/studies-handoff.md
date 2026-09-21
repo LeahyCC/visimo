@@ -181,7 +181,7 @@ A starting list, deliberately long. It is a menu, not a contract: build the ones
 | Study          | What it draws                                              | Moments | Character      | Tension does                        |
 | -------------- | ---------------------------------------------------------- | ------- | -------------- | ----------------------------------- |
 | dye plumes     | today's Plume emitters, one per band                       | I G R   | soft to mid    | dye thins                           |
-| ribbon         | the waveform, line or circle (built)                       | G B D   | any            | circle shrinks, line thins          |
+| ribbon         | the waveform, line or circle (built)                       | g B d   | steady, hard   | circle shrinks, line thins          |
 | fractal glints | Prism's raymarched ridges, bright parts only, half size    | G D     | hard, tonal    | zoom sweeps in                      |
 | shards         | flat sharp polygons thrown on hits                         | D       | hard           | none; held back, released on impact |
 | sparks         | particles off treble hits that ride the flow               | G D     | bright, fast   | rate climbs                         |

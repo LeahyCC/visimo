@@ -37,18 +37,20 @@ export const DEFAULT_LEVEL = 0.7
 const COST_ORDER = { cheap: 0, medium: 1, heavy: 2 } as const
 
 /**
- * Studies that win a tie on cost and welcome. The ribbon and the halo are both
- * cheap and welcome everywhere, but only the ribbon draws across the frame, so
- * it is the ink that gives a flow something to carry when the bench opens or a
- * flow is soloed. A halo sits at the middle and would show a flow very little.
+ * Studies that come first whatever they cost or reach. Only the ribbon draws
+ * across the frame, so it is the ink that gives a flow something to carry when
+ * the bench opens or a flow is soloed. A halo is one glow at the middle and
+ * would show a flow very little.
  */
 const PREFERRED = ['ribbon']
 
 /**
- * The studies of one kind, plainest first: cheapest, then the widest welcome,
- * which is the one with the least opinion about what song it is drawing. A
- * tie goes to a preferred study, then to the id, so the order never depends on
- * how the registry happens to be written.
+ * The studies of one kind, plainest first: a preferred study, then cheapest,
+ * then the widest welcome, then the id, so the order never depends on how the
+ * registry happens to be written. The preferred list leads because reach no
+ * longer says which study is plainest: it used to, when the ribbon and the
+ * halo both sat at the middle with a reach of 1, and giving each a real home
+ * took that away.
  */
 export function plainest(kind: StudyKind, studies: readonly Study[] = STUDIES): Study[] {
   const preferred = (study: Study) => (PREFERRED.includes(study.id) ? 0 : 1)
@@ -56,9 +58,9 @@ export function plainest(kind: StudyKind, studies: readonly Study[] = STUDIES): 
     .filter((study) => study.kind === kind)
     .sort(
       (a, b) =>
+        preferred(a) - preferred(b) ||
         COST_ORDER[a.cost] - COST_ORDER[b.cost] ||
         b.reach - a.reach ||
-        preferred(a) - preferred(b) ||
         (a.id < b.id ? -1 : 1),
     )
 }

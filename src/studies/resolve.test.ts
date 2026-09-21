@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { defaultPostParams, POST_LANES, POST_STAGES } from '../post/params'
 import type { PostParams } from '../post/params'
+import { defaultCanvas } from './cast'
 import type { CastCanvas } from './cast'
 import { LOOK_KNOBS } from './impls'
 import { findStudy } from './registry'
@@ -88,19 +89,8 @@ const bare = (): PostParams => {
   return out
 }
 
-const STILL: CastCanvas = {
-  enabled: false,
-  knobs: {
-    'feedback.amount': 0.22,
-    'feedback.decay': 0.72,
-    'feedback.zoom': 1.012,
-    'feedback.rotate': 0.002,
-    'feedback.carry': 0,
-    'feedback.floor': 0,
-    'feedback.ceiling': 16,
-  },
-  mapping: [],
-}
+/** The stack's own feedback numbers, switched off: a look is what is measured here. */
+const STILL: CastCanvas = { ...defaultCanvas(), enabled: false }
 
 const FEATURES = packet({ energy: 0.5, treble: 0.5 })
 

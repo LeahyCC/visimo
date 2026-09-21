@@ -79,11 +79,32 @@ const SAFE_POST: Record<PostKnob, readonly [number, number]> = {
   'ribbon.height': [0, 0.5],
   'ribbon.shape': [0, 1],
   'feedback.amount': [0, 1],
-  'feedback.decay': [0, 0.98],
+  // A canvas that holds its own mean can afford a long memory, and the
+  // director's does: 0.975 at rest and 0.983 when the music is loud. The top
+  // is what a cast may reach and not what one rests at, and past it the
+  // memory is measured in tens of seconds rather than seconds.
+  'feedback.decay': [0, 0.985],
   'feedback.zoom': [0.98, 1.05],
   'feedback.rotate': [-0.02, 0.02],
   'feedback.carry': [0, 2],
   'feedback.floor': [0, 0.1],
+  // The multiplicative floor's knee, in the same units as the floor above it
+  // and much smaller: it takes about its own size off anything bright every
+  // frame, and a knee near the floor's 0.018 would put a unit mark out in a
+  // second whatever the decay said.
+  'feedback.fade': [0, 0.02],
+  // The mean the canvas is held at. 0 is no holding and the top is a picture
+  // bright enough that the tonemap is already rolling most of it.
+  'feedback.hold': [0, 4],
+  // Radians a frame, either way. At the top a hue goes right round in about
+  // two seconds, which is faster than any trail lives.
+  'feedback.hue': [-0.05, 0.05],
+  // A whole channel's keep either way would be a trail that loses red or blue
+  // outright in a handful of frames; a twentieth is already a strong drift.
+  'feedback.cool': [-0.05, 0.05],
+  // It compounds every frame, so what reads as a crisp filament at rest is
+  // well under a half, and `MAX_SHARPEN` holds one long step besides.
+  'feedback.sharpen': [0, 0.25],
   'feedback.ceiling': [0.5, 64],
   'bloom.threshold': [0.4, 2],
   'bloom.knee': [0, 1],
@@ -634,7 +655,7 @@ describe('every cast stays inside a safe range', () => {
         expect(
           frame.post.feedback.amount * frame.post.feedback.decay,
           `${cast.name} feedback gain at ${entry.label}`,
-        ).toBeLessThan(0.98)
+        ).toBeLessThan(0.99)
       }
     })
   }

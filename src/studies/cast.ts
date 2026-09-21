@@ -43,6 +43,11 @@ export const CANVAS_KNOBS = [
   'feedback.rotate',
   'feedback.carry',
   'feedback.floor',
+  'feedback.fade',
+  'feedback.hold',
+  'feedback.hue',
+  'feedback.cool',
+  'feedback.sharpen',
   'feedback.ceiling',
 ] as const satisfies readonly PostKnob[]
 export type CanvasKnob = (typeof CANVAS_KNOBS)[number]
@@ -104,6 +109,11 @@ const defaultCanvasKnobs = (): Record<CanvasKnob, number> => ({
   'feedback.rotate': DEFAULT_POST_PARAMS.feedback.rotate,
   'feedback.carry': DEFAULT_POST_PARAMS.feedback.carry,
   'feedback.floor': DEFAULT_POST_PARAMS.feedback.floor,
+  'feedback.fade': DEFAULT_POST_PARAMS.feedback.fade,
+  'feedback.hold': DEFAULT_POST_PARAMS.feedback.hold,
+  'feedback.hue': DEFAULT_POST_PARAMS.feedback.hue,
+  'feedback.cool': DEFAULT_POST_PARAMS.feedback.cool,
+  'feedback.sharpen': DEFAULT_POST_PARAMS.feedback.sharpen,
   'feedback.ceiling': DEFAULT_POST_PARAMS.feedback.ceiling,
 })
 
@@ -122,42 +132,95 @@ export const defaultCanvas = (): CastCanvas => ({
 /**
  * The canvas a chosen cast draws on, which has no file to read numbers from:
  * the one persistent picture of docs/canvas-plan.md. It keeps nearly all of
- * itself, reads the last frame back along whatever flow is live, and holds a
- * floor and a ceiling so long trails neither haze nor burn.
+ * itself, reads the last frame back along whatever flow is live, holds its own
+ * mean brightness so it can do that without burning out, and ages the light it
+ * keeps.
  *
  * It used to be `defaultCanvas`, whose carry is 0, and under the director no
  * flow moved the picture at all: the fluid showed only through its dye, and
  * a flow that draws nothing, as implode and radial burst do, did nothing.
  *
- * The numbers are Drift's (a cast since folded into Plume, whose canvas rests
- * at them when the music is calm), which were tuned by eye on real tracks
- * for a dye ink and the ribbon, the cast the director reaches for most. One
- * row is added: tension shortens the trails, so a build tightens the picture
- * as well as whatever its studies do, and the drop opens it again.
+ * It then kept 0.93 a frame with a subtractive floor of 0.018, which put a
+ * mark out in about half a second: no flow had time to shape anything, and the
+ * only reason the decay was that low was that nothing controlled the sum, so a
+ * longer memory went white. Three rows took the ceiling down as the music got
+ * loud, which made the loudest moments the dullest. `feedback.hold` is what
+ * replaced all of it, and the numbers here are what a canvas with a gain
+ * control can afford:
+ *
+ * - 0.975 a reference frame, which is a memory of about two thirds of a
+ *   second to a tenth and two and a half seconds to a thousandth, against the
+ *   0.36 of a second 0.93 gave. That is long enough for the carry to fold a
+ *   mark into a shape rather than merely smearing it.
+ * - a `fade` of 0.0005 in place of the 0.018 floor. The floor was the haze
+ *   control as well as the tail's shape, and took a mark out in half a second
+ *   doing it; the hold is the haze control now, so the knee only has to shape
+ *   the tail. Well above it a pixel decays as the decay says; at it a pixel
+ *   loses half its light a frame; under it the last of a trail collapses and
+ *   is never clipped, so the trail ends rather than stopping.
+ * - `hold` at 0.13, rising to 0.23 when the music is full: the mean the whole
+ *   canvas settles at. A frame of constant white then settles near a quarter
+ *   rather than at forty times what was drawn, and a thin fresh mark still
+ *   lands at full brightness, because only the carried sum is scaled. The
+ *   number was found by looking, on the reference track's second drop at 1:54
+ *   on a real adapter: at 0.44 the middle of the frame was a pale mass with
+ *   the ring lost in it, and at 0.22 the same moment has black in it, the
+ *   fluid's filaments read, and the spectrum ring's bars stand out of the dye.
+ * - the three negative ceiling rows are gone, and the ceiling rests at 1.8
+ *   as a per-pixel backstop.
+ * - the trail cools, turns its hue with the harmony and keeps a little of its
+ *   own detail, all gently. Light that lasts two seconds has time to change,
+ *   which is most of what a long memory is for.
+ *
+ * The rest are Drift's (a cast since folded into Plume), tuned by eye on real
+ * tracks for a dye ink and the ribbon, the cast the director reaches for most.
+ * The rows on the decay are much smaller than they were for one reason: near
+ * 1 the decay is highly levered, and the 0.02 that moved 0.93 to 0.95 would
+ * take 0.975 past 0.99 and the canvas would never let go of anything. They are
+ * scaled by what they do to the memory's length instead, so tension still
+ * shortens the trails by about a third through a build and the drop opens them
+ * again.
  */
 export const carriedCanvas = (): CastCanvas => ({
   enabled: true,
   knobs: {
     'feedback.amount': 1,
-    'feedback.decay': 0.93,
+    'feedback.decay': 0.975,
     'feedback.zoom': 1.0015,
     'feedback.rotate': 0,
     'feedback.carry': 1,
-    'feedback.floor': 0.018,
+    // The subtractive floor is off: the fade beside it does the same job
+    // without a cliff at the bottom of a trail.
+    'feedback.floor': 0,
+    'feedback.fade': 0.0005,
+    'feedback.hold': 0.13,
+    'feedback.hue': 0.006,
+    'feedback.cool': 0.004,
+    'feedback.sharpen': 0.03,
     'feedback.ceiling': 1.8,
   },
   mapping: [
-    { from: 'energy', to: 'feedback.decay', gain: 0.02, curve: 'linear' },
-    { from: 'swell', to: 'feedback.decay', gain: 0.02, curve: 'linear' },
-    { from: 'tension', to: 'feedback.decay', gain: -0.04, curve: 'linear' },
+    { from: 'energy', to: 'feedback.decay', gain: 0.004, curve: 'linear' },
+    { from: 'swell', to: 'feedback.decay', gain: 0.004, curve: 'linear' },
+    { from: 'tension', to: 'feedback.decay', gain: -0.012, curve: 'linear' },
     { from: 'beatPhase', to: 'feedback.zoom', gain: 0.003, curve: 'invert' },
     { from: 'harmonicChange', to: 'feedback.rotate', gain: 0.0015, curve: 'linear' },
     { from: 'energy', to: 'feedback.carry', gain: 0.4, curve: 'linear' },
-    { from: 'energy', to: 'feedback.floor', gain: 0.001, curve: 'linear' },
-    { from: 'swell', to: 'feedback.floor', gain: 0.001, curve: 'linear' },
-    { from: 'energy', to: 'feedback.ceiling', gain: -0.25, curve: 'square' },
-    { from: 'swell', to: 'feedback.ceiling', gain: -0.15, curve: 'square' },
-    { from: 'hardness', to: 'feedback.ceiling', gain: -0.15, curve: 'square' },
+    // A loud passage may hold a brighter canvas, and a build a dimmer one, so
+    // the hold is what the old ceiling rows were reaching for and could not
+    // say: it eases the whole picture rather than clipping what is carried.
+    { from: 'energy', to: 'feedback.hold', gain: 0.1, curve: 'linear' },
+    { from: 'tension', to: 'feedback.hold', gain: -0.08, curve: 'linear' },
+    // The trail thins toward black a little faster when the music is loud,
+    // which is where the most light is landing in it.
+    { from: 'energy', to: 'feedback.fade', gain: 0.0005, curve: 'linear' },
+    // A chord change spins the hue of everything already on the canvas, so
+    // the harmony is visible in light that was drawn seconds ago.
+    { from: 'harmonicChange', to: 'feedback.hue', gain: 0.012, curve: 'linear' },
+    // A build drains the warmth out of what is left and picks out its
+    // filaments, so the picture tightens as well as shortening.
+    { from: 'tension', to: 'feedback.cool', gain: 0.012, curve: 'linear' },
+    { from: 'tension', to: 'feedback.sharpen', gain: 0.04, curve: 'linear' },
   ],
 })
 

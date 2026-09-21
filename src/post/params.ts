@@ -67,20 +67,85 @@ export type FeedbackParams = {
    */
   floor: number
   /**
+   * The multiplicative floor: the brightness below which light stops being
+   * light and fades away. Where `floor` takes a fixed amount off every pixel
+   * and so clips a dim one to black in steps, this scales the history by
+   * `peak / (peak + fade)`, which is 1 for anything far above the knee and
+   * falls away smoothly under it. Bright light keeps its own decay, a dim
+   * tail collapses faster the dimmer it gets, and nothing is ever clipped, so
+   * a trail ends rather than stopping.
+   *
+   * For light well above the knee the two are the same thing: the gate takes
+   * about `fade` off a pixel each frame, so a knee reads like a floor of the
+   * same size. Under the knee they part company, which is the whole point.
+   * 0 is off and is exactly off: the gate is 1 everywhere.
+   */
+  fade: number
+  /**
+   * The mean brightness the whole canvas is held at, 0 for no holding at all.
+   * This is the gain control inside the loop, and it is what lets the decay
+   * run long. Inks only ever add, so with a keep near 1 a frame that lights
+   * most of its pixels sums toward `fresh / (1 - keep)` and goes to white;
+   * the old answer was to shorten the memory whenever the music got loud,
+   * which made the loudest moments the dullest.
+   *
+   * Instead the stack measures the last frame's mean on the GPU (see
+   * `PostStack`, which reduces it to one texel and never reads it back) and
+   * scales what survives by `hold / mean` whenever the mean is over the hold.
+   * Only the carried sum is scaled. The frame the inks just drew is added at
+   * its own weight whatever the canvas is doing, so a thin fresh mark reads at
+   * full brightness on the frame it lands and the picture still gets brighter
+   * when the music does. What is bounded is how much of the past may pile up
+   * under it.
+   */
+  hold: number
+  /**
+   * Radians the surviving light's hue turns each frame, 0 for none. Old light
+   * shifts colour as it ages, so a trail reads as a run of hues rather than
+   * one smeared colour, which is the thing a long memory makes possible and a
+   * short one never could. It is a rotation about the grey axis, so it moves
+   * a hue and leaves its brightness alone, and 0 is the identity exactly.
+   */
+  hue: number
+  /**
+   * How differently the three channels decay, 0 for not at all. Positive
+   * cools the trail, holding red back so what is left of it drifts blue;
+   * negative warms it the same way with blue. Green is the reference and is
+   * never touched, and neither channel is ever kept more than the decay
+   * keeps, so this can only ever take light out.
+   */
+  cool: number
+  /**
+   * How hard the history is sharpened on its way back, 0 for not at all. A
+   * long trail read back through a linear sampler loses a little detail every
+   * frame and after a second it is mush; a small unsharp against a four-tap
+   * cross puts the filaments back. It compounds, so it is held to
+   * `MAX_SHARPEN` once the step has scaled it, and the result is floored at
+   * zero, so the overshoot either side of an edge cannot go negative.
+   */
+  sharpen: number
+  /**
    * The most light one frame may carry back from the history. A trail near
    * gain 1 sums without bound otherwise, and half floats reach 65504 before
    * anything stops them. Below half of this nothing changes; above it the
    * brightest channel bends toward the ceiling and never reaches it, and the
    * other two follow it, because limiting each channel on its own bleaches
    * the colour toward white.
+   *
+   * It is a per-pixel limit and `hold` is a whole-frame one: the ceiling says
+   * how bright one carried pixel may be and the hold says how bright the sum
+   * of all of them may be, so a canvas that holds its mean may still carry a
+   * core far above it.
    */
   ceiling: number
 }
-// The first four numbers above, and `floor`, are what one frame does at 60
-// frames a second. `feedbackStep` converts them by the real step, so a trail
-// lasts and travels the same number of seconds on any display. `carry` is per
-// second already, since the velocity it scales is, and `ceiling` is a
-// brightness and has no rate in it at all.
+// The first four numbers above, `floor`, `hue` and `sharpen` are what one
+// frame does at 60 frames a second, and so are `fade` and `cool`, which are
+// keep factors the pass raises to the step. `feedbackStep` converts all of
+// them by the real step, so a trail lasts, travels, turns and cools the same
+// number of seconds on any display. `carry` is per second already, since the
+// velocity it scales is, and `ceiling` and `hold` are brightnesses and have no
+// rate in them at all.
 
 export type BloomParams = {
   enabled: boolean
@@ -200,10 +265,18 @@ export const DEFAULT_POST_PARAMS: PostParams = {
     zoom: 1.012,
     rotate: 0.002,
     // Off: the pass is the zoom and turn it always was. Nothing is taken off
-    // the history, and the ceiling sits far above anything a scene draws, so
-    // the shipped presets meet neither.
+    // the history, nothing holds its mean, nothing ages its colour or its
+    // detail, and the ceiling sits far above anything a scene draws, so the
+    // shipped casts meet none of it. Every one of these is exactly off at its
+    // default, which is why the pinned casts draw what they always drew
+    // without a compatibility path of their own.
     carry: 0,
     floor: 0,
+    fade: 0,
+    hold: 0,
+    hue: 0,
+    cool: 0,
+    sharpen: 0,
     ceiling: 16,
   },
   bloom: {
@@ -254,6 +327,97 @@ export type FeedbackStep = {
   floor: number
   /** Weight on the frame the scene just drew, 1 at the reference rate. */
   fresh: number
+  /** This drawn frame in reference frames, which the pass raises its gates to. */
+  frames: number
+  /**
+   * The lever the canvas hold pulls on, `keep / (1 - keep)` at the reference
+   * rate. See `canvasKeep` for what it is doing there; it is worked out here
+   * because the reference keep is a CPU number and the hold's own factor is
+   * not.
+   */
+  pull: number
+  /** The knee of the multiplicative floor, which has no rate in it. */
+  fade: number
+  /** The mean the canvas is held at, which has no rate in it either. */
+  hold: number
+  /** Radians of hue turned on this drawn frame. */
+  hue: number
+  /** How differently the channels decay, per reference frame. */
+  cool: number
+  /** Unsharp on this drawn frame, held to `MAX_SHARPEN`. */
+  sharpen: number
+}
+
+/**
+ * The most unsharp one drawn frame may apply. The pass adds `k x (history -
+ * its own blur)` back, so the most a pixel can gain is `1 + k` of itself and
+ * the ringing beside an edge is the same size. At a half that is a visible
+ * crispening and still well short of the halo that a sharpen near 1 draws,
+ * and since the amount compounds every frame a long step must not be allowed
+ * to spend a second's worth of it at once.
+ */
+export const MAX_SHARPEN = 0.5
+
+/**
+ * How far the canvas hold may cut what survives in one reference frame. It is
+ * a guard and not a taste: the hold divides by the measured mean, and a frame
+ * that is twenty times the hold would otherwise leave nothing of the past at
+ * all for as long as it lasts.
+ */
+export const MIN_CANVAS_GAIN = 0.05
+
+/** The smallest `1 - keep` the pull is worked out over, so it stays finite. */
+const MIN_KEEP_SLACK = 1e-3
+
+/**
+ * What the canvas hold asks of the history this frame: 1 for leave it alone,
+ * and `hold / mean` once the last frame's mean brightness is over the hold.
+ * It only ever takes light out, which is what keeps silence exactly black: a
+ * hold that could push a gain above 1 would amplify whatever the last frame
+ * had left in it, and an empty canvas would grow its own noise.
+ *
+ * The pass computes this from a texel the GPU measured, and this states the
+ * same arithmetic so the loop can be tested without one.
+ */
+export function canvasGain(measured: number, hold: number): number {
+  if (!(hold > 0) || !Number.isFinite(measured) || measured <= hold) return 1
+  return Math.min(Math.max(hold / measured, MIN_CANVAS_GAIN), 1)
+}
+
+/**
+ * What one drawn frame keeps of the history once the hold has had its say.
+ *
+ * The obvious thing, multiplying the step's keep by the gain, is wrong at any
+ * rate but the reference one: the fresh frame's weight is normalised against
+ * the keep the CPU knows about and not against the gain the GPU found, so a
+ * 144 Hz display would settle somewhere else than a 60 Hz one, by a fifth at
+ * the far end. The fix is to ask what per-reference-frame keep the gain means
+ * (`keep x gain`) and then take the step that lands on the same settled level,
+ * which works out as a straight line in `1 - keep ^ frames`:
+ *
+ *   kept = base - (1 - base) x pull x (1 - gain),   pull = keep / (1 - keep)
+ *
+ * At one reference frame `base` is `keep` and this is `keep x gain` exactly;
+ * at a gain of 1 the second term is exactly zero, so a canvas with no hold
+ * keeps precisely what it always kept. `settled` in the tests is what proves
+ * both ends of that.
+ */
+export function canvasKeep(step: FeedbackStep, gain: number): number {
+  const base = step.amount * step.decay
+  return Math.min(Math.max(base - (1 - base) * step.pull * (1 - gain), 0), 1)
+}
+
+/**
+ * What the multiplicative floor leaves of a pixel whose brightest channel is
+ * `peak`, over a step of `frames` reference frames. Far above the knee it is
+ * 1 and the pixel decays as it always did; at the knee it is a half; under it
+ * the pixel is taken out in a hurry and smoothly, never clipped. A knee of 0
+ * is exactly 1, with no division by zero at a black pixel.
+ */
+export function fadeKeep(peak: number, fade: number, frames: number): number {
+  if (!(fade > 0)) return 1
+  const light = Math.max(peak, 0)
+  return (light / (light + fade)) ** frames
 }
 
 /**
@@ -297,6 +461,23 @@ export function feedbackStep(feedback: FeedbackParams, dt: number): FeedbackStep
     amount,
     decay,
     fresh,
+    frames,
+    // The reference keep is what the hold's own factor is turned into a step
+    // against; see `canvasKeep`. Held clear of 1 so the lever stays finite,
+    // which costs nothing because a keep of 1 is a canvas that never fades.
+    pull: gain / Math.max(1 - gain, MIN_KEEP_SLACK),
+    // A knee and a mean, both brightnesses: the pass raises the first to the
+    // step and compares the second against what it measured, so neither has a
+    // rate of its own to convert here.
+    fade: Math.max(feedback.fade, 0),
+    hold: Math.max(feedback.hold, 0),
+    // Radians and an unsharp, both linear in time the way the rotation is.
+    hue: feedback.hue * frames,
+    sharpen: Math.min(Math.max(feedback.sharpen, 0) * frames, MAX_SHARPEN),
+    // A keep offset per reference frame, which the pass raises to the step
+    // alongside the decay. Held inside a whole channel either way, since past
+    // that a channel would be kept backwards rather than merely dropped.
+    cool: Math.min(Math.max(feedback.cool, -1), 1),
     // The shader divides by the zoom, so it never reaches zero or goes negative.
     zoom: Math.max(feedback.zoom, 0.001) ** frames,
     rotate: feedback.rotate * frames,
@@ -317,8 +498,8 @@ export function freshWeight(params: PostParams, features: Float32Array): number 
   return feedbackStep(params.feedback, features[F.dt] ?? 0).fresh
 }
 
-/** Floats in the shared uniform, thirteen vec4s; PostParams in post.common.wgsl must match. */
-export const POST_UNIFORM_FLOATS = 52
+/** Floats in the shared uniform, fifteen vec4s; PostParams in post.common.wgsl must match. */
+export const POST_UNIFORM_FLOATS = 60
 
 /**
  * Points along the ribbon. A few hundred is a smooth line at 4K, and the
@@ -689,6 +870,36 @@ export const POST_LANES = {
       p.feedback.floor = value
     },
   },
+  'feedback.fade': {
+    read: (p: PostParams) => p.feedback.fade,
+    write: (p: PostParams, value: number) => {
+      p.feedback.fade = value
+    },
+  },
+  'feedback.hold': {
+    read: (p: PostParams) => p.feedback.hold,
+    write: (p: PostParams, value: number) => {
+      p.feedback.hold = value
+    },
+  },
+  'feedback.hue': {
+    read: (p: PostParams) => p.feedback.hue,
+    write: (p: PostParams, value: number) => {
+      p.feedback.hue = value
+    },
+  },
+  'feedback.cool': {
+    read: (p: PostParams) => p.feedback.cool,
+    write: (p: PostParams, value: number) => {
+      p.feedback.cool = value
+    },
+  },
+  'feedback.sharpen': {
+    read: (p: PostParams) => p.feedback.sharpen,
+    write: (p: PostParams, value: number) => {
+      p.feedback.sharpen = value
+    },
+  },
   'feedback.ceiling': {
     read: (p: PostParams) => p.feedback.ceiling,
     write: (p: PostParams, value: number) => {
@@ -795,6 +1006,43 @@ export const bloomLevelSize = (width: number, height: number, level: number) => 
 })
 
 /**
+ * How far each rung of the measuring ladder shrinks the one above it. Four
+ * bilinear taps average a 4 by 4 block exactly, so quartering each way is the
+ * most one pass can do without leaving texels unread, and it takes a 4K frame
+ * to one texel in seven passes of almost nothing.
+ */
+const MEASURE_STEP = 4
+
+/**
+ * The rungs of the ladder that measures the canvas, largest first and one
+ * texel last. Pure, so the ladder can be checked without a GPU: every rung is
+ * smaller than the one before it, the list ends at one texel, and a canvas
+ * with no area still gets the single rung the pass has to read.
+ */
+export function measureSizes(
+  width: number,
+  height: number,
+): readonly { width: number; height: number }[] {
+  const out: { width: number; height: number }[] = []
+  let w = Math.max(1, Math.floor(width))
+  let h = Math.max(1, Math.floor(height))
+  do {
+    w = Math.max(1, Math.ceil(w / MEASURE_STEP))
+    h = Math.max(1, Math.ceil(h / MEASURE_STEP))
+    out.push({ width: w, height: h })
+  } while (w > 1 || h > 1)
+  return out
+}
+
+/**
+ * Whether the canvas hold runs this frame. With it off the ladder is not
+ * encoded at all and the pass reads a zeroed texel, so a cast that does not
+ * ask for the hold pays nothing for it.
+ */
+export const holdRuns = (params: PostParams) =>
+  stageEnabled(params, 'feedback') && params.feedback.hold > 0
+
+/**
  * The texture a level's horizontal blur reads. Every level but the first
  * reads the level above and halves it on the way in; the first reads what the
  * bright pass already wrote at its own size. The taps are spaced by this
@@ -880,9 +1128,10 @@ export function writePostUniform(
   out[31] = scale[1]
 
   // The floor wants a vec4 of its own, the flow one being full. Off is zero,
-  // which takes nothing off the history.
+  // which takes nothing off the history, and so is the knee beside it, which
+  // leaves the multiplicative floor's gate at 1 for every pixel.
   out[32] = trails ? step.floor : 0
-  out[33] = 0
+  out[33] = trails ? step.fade : 0
   out[34] = 0
   out[35] = 0
 
@@ -923,5 +1172,23 @@ export function writePostUniform(
   out[49] = weave.offset[1]
   out[50] = weave.shrink[0]
   out[51] = weave.shrink[1]
+
+  // The canvas hold, in a vec4 of its own past every float the uniform
+  // already had. `frames` is the step the pass raises its two gates to, and
+  // it is 1 rather than 0 with the stage off so a gate of 1 stays 1. A hold
+  // of 0 is off, and the pass then never divides by what it measured.
+  out[52] = trails ? step.frames : 1
+  out[53] = trails ? step.pull : 0
+  out[54] = trails ? step.hold : 0
+  // The floor on the hold's own factor rides along rather than being written
+  // twice, so `canvasGain` and the pass cannot drift apart.
+  out[55] = MIN_CANVAS_GAIN
+
+  // What ages inside the loop: the turn of the hue, how far the channels part
+  // and the unsharp, all zero with the stage off and all exactly off at zero.
+  out[56] = trails ? step.hue : 0
+  out[57] = trails ? step.cool : 0
+  out[58] = trails ? step.sharpen : 0
+  out[59] = 0
   return out
 }

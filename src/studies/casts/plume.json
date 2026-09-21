@@ -5,31 +5,59 @@
   "inks": ["dye-plumes"],
   "look": "warm-soft",
   "canvas": {
-    "knobs": { "feedback.decay": 0.69, "feedback.zoom": 1.01 },
+    "knobs": {
+      "feedback.amount": 1,
+      "feedback.decay": 0.9,
+      "feedback.zoom": 1.0015,
+      "feedback.rotate": 0,
+      "feedback.carry": 1,
+      "feedback.floor": 0.018,
+      "feedback.ceiling": 1.8
+    },
     "mapping": [
-      { "from": "swell", "to": "feedback.decay", "gain": 0.06 },
-      { "from": "beatPhase", "to": "feedback.zoom", "gain": 0.004, "curve": "invert" },
+      { "from": "energy", "to": "feedback.amount", "gain": -0.7 },
+      { "from": "energy", "to": "feedback.decay", "gain": -0.23 },
+      { "from": "rest", "to": "feedback.decay", "gain": 0.03 },
+      { "from": "swell", "to": "feedback.decay", "gain": 0.02 },
+      { "from": "energy", "to": "feedback.zoom", "gain": 0.0013 },
+      { "from": "beatPhase", "to": "feedback.zoom", "gain": 0.003, "curve": "invert" },
       { "from": "harmonicChange", "to": "feedback.rotate", "gain": 0.002 },
-      { "from": "energy", "to": "feedback.carry", "gain": 0.4 }
+      { "from": "energy", "to": "feedback.carry", "gain": -0.6 },
+      { "from": "energy", "to": "feedback.floor", "gain": 0.001 },
+      { "from": "swell", "to": "feedback.floor", "gain": 0.001 },
+      { "from": "energy", "to": "feedback.ceiling", "gain": -0.25, "curve": "square" },
+      { "from": "swell", "to": "feedback.ceiling", "gain": -0.15, "curve": "square" },
+      { "from": "hardness", "to": "feedback.ceiling", "gain": -0.15, "curve": "square" }
     ]
   },
   "overrides": {
     "lazy-fluid": {
-      "mapping": [{ "from": "energy", "to": "velocityDecay", "gain": 0.07 }]
+      "knobs": { "velocityDecay": 0.12, "vorticity": 18, "viscosity": 0.24 },
+      "mapping": [
+        { "from": "energy", "to": "vorticity", "gain": 8 },
+        { "from": "energy", "to": "viscosity", "gain": -0.03 },
+        { "from": "energy", "to": "orbitSpeed", "gain": -0.08 }
+      ]
     },
     "dye-plumes": {
+      "knobs": {
+        "dyeDecay": 0.45,
+        "intensity": 0.8,
+        "dye": 0.8,
+        "hitDye": 0.55,
+        "colourShift": 0.5,
+        "eventDye": 1.2
+      },
       "mapping": [
         { "from": "swell", "to": "dyeDecay", "gain": -0.18 },
         { "from": "energy", "to": "dyeDecay", "gain": 0.45 },
-        { "from": "energy", "to": "dye", "gain": 0.9 },
+        { "from": "energy", "to": "dye", "gain": 1.7 },
         { "from": "harmonicChange", "to": "dye", "gain": 2 },
         { "from": "lowEnd", "to": "hitDye", "gain": 1 },
         { "from": "novelty", "to": "hitDye", "gain": 1 },
+        { "from": "energy", "to": "eventDye", "gain": 1.3 },
+        { "from": "lowEnd", "to": "colourShift", "gain": 0.25, "curve": "square" },
         { "from": "keyClarity", "to": "saturation", "gain": 0.3 },
-        { "from": "beatPulse", "to": "intensity", "gain": 0.2 },
-        { "from": "energy", "to": "intensity", "gain": -0.08, "curve": "square" },
-        { "from": "swell", "to": "intensity", "gain": -0.06, "curve": "square" },
-        { "from": "hardness", "to": "intensity", "gain": -0.06, "curve": "square" },
         { "from": "energy", "to": "saturation", "gain": -0.04, "curve": "square" },
         { "from": "swell", "to": "saturation", "gain": -0.01, "curve": "square" },
         { "from": "hardness", "to": "saturation", "gain": -0.01, "curve": "square" }

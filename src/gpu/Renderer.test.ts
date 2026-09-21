@@ -10,7 +10,8 @@
  * does to what is built, and that two plays of it are the same picture.
  *
  * And the numbers. `casts/preset-frames.json` is what the preset path
- * resolved to before it was deleted, and these tests drive real frames and
+ * resolved to before it was deleted (Plume's frames are the folded cast's,
+ * see `studies/cast.test.ts`), and these tests drive real frames and
  * compare what each implementation and the post stack are handed against it.
  * The cast tests prove the studies layer lands on those numbers; this proves
  * the renderer hands each of them to the right implementation.
@@ -652,15 +653,17 @@ describe('renderer attachment lifetime', () => {
     await expect(renderer.attach(element, canvas(), vi.fn())).resolves.toBe('ok')
     expect(impls.built.fluid).toBe(1)
     expect(impls.built.dye).toBe(1)
-    // Wash is the same solver and the same ink at other numbers.
+    // Melt is another flow on the same solver, and puts a fractal and the
+    // ribbon where the dye was.
+    renderer.setPreset(castOrDefault('melt'))
+    expect(impls.built.fluid).toBe(1)
+    expect(impls.disposed.fluid).toBe(0)
+    expect(impls.built.ribbon).toBe(1)
+    // An id that was folded into Plume is Plume: nothing is rebuilt for it.
     renderer.setPreset(castOrDefault('wash'))
     expect(impls.built.fluid).toBe(1)
-    expect(impls.built.dye).toBe(1)
     expect(impls.disposed.fluid).toBe(0)
-    // Drift adds the ribbon and keeps the rest.
-    renderer.setPreset(castOrDefault('drift'))
-    expect(impls.built.fluid).toBe(1)
-    expect(impls.built.ribbon).toBe(1)
+    expect(renderer.presetId).toBe('plume')
   })
 
   it('releases every implementation with everything else the device owned', async () => {
@@ -944,8 +947,8 @@ describe('a pinned cast reaches its implementations unchanged', () => {
   })
 
   it('draws the inks in cast order, once each, into a cleared target', async () => {
-    await drawWith('drift', 0.3, 0.5)
-    expect(impls.drawn).toEqual(['dye', 'ribbon'])
+    await drawWith('melt', 0.3, 0.5)
+    expect(impls.drawn).toEqual(['fractal', 'ribbon'])
     expect(stack.cleared).toBe(1)
     // The uniform before any ink, because the ribbon ink reads it.
     expect(stack.prepared).toBe(1)
@@ -966,6 +969,17 @@ describe('a pinned cast reaches its implementations unchanged', () => {
     const element = await drawWith('plume', 0.3, 0.5)
     expect(element.dataset.scene).toBe('fluid')
     expect(element.dataset.cast).toBe('lazy-fluid dye-plumes warm-soft')
+  })
+
+  // Wash and Drift were folded into Plume, and a host that pins either by id
+  // is handed Plume. What it reads back off the canvas is the cast's own id, so
+  // a test written against `data-preset` sees `plume` and never the old name.
+  it('prints plume for an id that was folded into it', async () => {
+    for (const id of ['wash', 'drift']) {
+      const element = await drawWith(id, 0.3, 0.5)
+      expect(element.dataset.preset, id).toBe('plume')
+      expect(element.dataset.cast, id).toBe('lazy-fluid dye-plumes warm-soft')
+    }
   })
 })
 

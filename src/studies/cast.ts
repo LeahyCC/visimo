@@ -129,10 +129,11 @@ export const defaultCanvas = (): CastCanvas => ({
  * flow moved the picture at all: the fluid showed only through its dye, and
  * a flow that draws nothing, as implode and radial burst do, did nothing.
  *
- * The numbers are Drift's, which were tuned by eye on real tracks for a dye
- * ink and the ribbon, the cast the director reaches for most. One row is
- * added: tension shortens the trails, so a build tightens the picture as
- * well as whatever its studies do, and the drop opens it again.
+ * The numbers are Drift's (a cast since folded into Plume, whose canvas rests
+ * at them when the music is calm), which were tuned by eye on real tracks
+ * for a dye ink and the ribbon, the cast the director reaches for most. One
+ * row is added: tension shortens the trails, so a build tightens the picture
+ * as well as whatever its studies do, and the drop opens it again.
  */
 export const carriedCanvas = (): CastCanvas => ({
   enabled: true,

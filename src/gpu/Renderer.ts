@@ -34,6 +34,7 @@ import type { MomentWeights, Playhead } from '../director/moment'
 import { Hud } from '../hud/Hud'
 import { AnalyticFlow } from '../impls/analytic'
 import { CausticsInk } from '../impls/CausticsInk'
+import { CymaticsInk } from '../impls/CymaticsInk'
 import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
@@ -683,6 +684,7 @@ class Renderer {
     if (impl === 'petals') return new PetalsInk()
     if (impl === 'lightning') return new LightningInk()
     if (impl === 'grid') return new GridInk()
+    if (impl === 'cymatics') return new CymaticsInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

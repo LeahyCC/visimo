@@ -37,6 +37,7 @@ export const IMPL_IDS = [
   'petals',
   'lightning',
   'grid',
+  'cymatics',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -377,6 +378,38 @@ export const GRID_KNOBS = [
 export type GridKnob = (typeof GRID_KNOBS)[number]
 
 /**
+ * The plate's numbers. Their ranges and units are in `impls/cymatics.params.ts`.
+ * `mode0` to `mode11` are how strongly each pitch class is ringing the plate,
+ * one per note from C to B, each fed by that note's own row of the packet;
+ * `layer` is how far the finer partner modes have come up beside them; `sharp`
+ * is how thin and tight the line is drawn, 0 to 1; `width` and `glow` are the
+ * line's half width and the glow's reach in pixels on a 1080 high canvas;
+ * `strike` is how hard the plate has just been hit, which the study reaches
+ * through a spring so the line rings and settles.
+ */
+export const CYMATICS_KNOBS = [
+  'mode0',
+  'mode1',
+  'mode2',
+  'mode3',
+  'mode4',
+  'mode5',
+  'mode6',
+  'mode7',
+  'mode8',
+  'mode9',
+  'mode10',
+  'mode11',
+  'layer',
+  'sharp',
+  'width',
+  'glow',
+  'strike',
+  'intensity',
+] as const
+export type CymaticsKnob = (typeof CYMATICS_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -461,6 +494,7 @@ export type ImplKnob =
   | PetalKnob
   | LightningKnob
   | GridKnob
+  | CymaticsKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -482,6 +516,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   petals: PETAL_KNOBS,
   lightning: LIGHTNING_KNOBS,
   grid: GRID_KNOBS,
+  cymatics: CYMATICS_KNOBS,
   look: LOOK_KNOBS,
 }
 

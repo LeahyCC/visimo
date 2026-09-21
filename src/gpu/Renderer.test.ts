@@ -465,6 +465,26 @@ vi.mock('../impls/PetalsInk', () => ({
   },
 }))
 
+vi.mock('../impls/CymaticsInk', () => ({
+  CymaticsInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.cymatics = (impls.built.cymatics ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('cymatics', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('cymatics')
+    }
+    dispose() {
+      impls.disposed.cymatics = (impls.disposed.cymatics ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/LightningInk', () => ({
   LightningInk: class {
     readonly detail = ''

@@ -39,6 +39,7 @@ import { CAUSTICS } from './defs/caustics'
 import { CHORD_PETALS } from './defs/chord-petals'
 import { CLEAN_GLASS } from './defs/clean-glass'
 import { CURL_DRIFT } from './defs/curl-drift'
+import { CYMATICS } from './defs/cymatics'
 import { DUST } from './defs/dust'
 import { DYE_PLUMES } from './defs/dye-plumes'
 import { FILM } from './defs/film'
@@ -90,6 +91,7 @@ export const STUDIES: readonly Study[] = [
   LIGHTNING,
   GRID_3D,
   SHAPE_MORPH,
+  CYMATICS,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

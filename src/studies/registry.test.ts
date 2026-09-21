@@ -20,11 +20,10 @@ import { describe, expect, it } from 'vitest'
 import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { ANALYTIC_RANGES } from '../impls/analytic.params'
 import { CAUSTICS_RANGES } from '../impls/caustics.params'
-import { DUST_RANGES } from '../impls/dust.params'
 import { HALO_RANGES } from '../impls/halo.params'
+import { DUST_RANGES, SPARK_RANGES } from '../impls/particles.params'
 import { RING_RANGES } from '../impls/rings.params'
 import { SHARD_RANGES } from '../impls/shards.params'
-import { SPARK_RANGES } from '../impls/sparks.params'
 import { SPECTRUM_RANGES } from '../impls/spectrum.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
 import { MAX_WEAVE, POST_KNOBS, POST_LANES } from '../post/params'
@@ -328,6 +327,8 @@ const ALLOWED: Record<string, Record<string, string>> = {
   },
   'dust': {
     size: 'the grain of the dust; a size that moved would pulse every speck at once, which is what the twinkle is for',
+    curlScale:
+      'how broad the swirl the specks drift on is, the shape of the field and not its strength, which is the curl',
     hueSpread: 'how far the hues scatter round the ribbon’s, a setting of the look and not a level',
   },
   'caustics': {
@@ -344,6 +345,8 @@ const ALLOWED: Record<string, Record<string, string>> = {
       'how far the palette runs from the ring’s sub pole to its treble one, a setting of the look and not a level',
   },
   'sparks': {
+    count:
+      'the slots the pool holds, which is a budget and never the picture: the throw and the shimmer are what fill it',
     hueSpread: 'how far the hues scatter round the ribbon’s, a setting of the look and not a level',
   },
   'fractal-glints': {

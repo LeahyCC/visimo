@@ -405,6 +405,26 @@ vi.mock('../impls/LasersInk', () => ({
   },
 }))
 
+vi.mock('../impls/GridInk', () => ({
+  GridInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.grid = (impls.built.grid ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('grid', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('grid')
+    }
+    dispose() {
+      impls.disposed.grid = (impls.disposed.grid ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/PetalsInk', () => ({
   PetalsInk: class {
     readonly detail = ''

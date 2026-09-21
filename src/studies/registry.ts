@@ -43,6 +43,7 @@ import { DUST } from './defs/dust'
 import { DYE_PLUMES } from './defs/dye-plumes'
 import { FILM } from './defs/film'
 import { FRACTAL_GLINTS } from './defs/fractal-glints'
+import { GRID_3D } from './defs/grid-3d'
 import { HALO } from './defs/halo'
 import { HARD_CLEAN } from './defs/hard-clean'
 import { IMPACT_FLASH } from './defs/impact-flash'
@@ -86,6 +87,7 @@ export const STUDIES: readonly Study[] = [
   LASERS,
   CHORD_PETALS,
   LIGHTNING,
+  GRID_3D,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

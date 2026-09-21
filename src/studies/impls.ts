@@ -35,6 +35,7 @@ export const IMPL_IDS = [
   'lasers',
   'petals',
   'lightning',
+  'grid',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -324,6 +325,30 @@ export const LIGHTNING_KNOBS = ['rate', 'forks', 'length', 'width', 'life', 'int
 export type LightningKnob = (typeof LIGHTNING_KNOBS)[number]
 
 /**
+ * The grid's numbers. Their ranges and units are in `impls/grid.params.ts`.
+ * `speed` is world units a second the camera flies and a cell is one unit;
+ * `height` and `valley` shape the ground the lines lie on (how tall the relief
+ * is, and how far out the valley floor runs before the hills start as a share
+ * of the field's half width); `width` and `glow` are a line's half width and
+ * its glow in pixels on a 1080 high canvas; `pulse` is 1 on the frame of an
+ * impact and starts the bright band racing in from the horizon; `hue` is added
+ * to the key; `horizon` is how far the horizon's glow reaches above the line, in
+ * half-heights of the frame, which is the width and never the light.
+ */
+export const GRID_KNOBS = [
+  'speed',
+  'height',
+  'valley',
+  'width',
+  'glow',
+  'intensity',
+  'pulse',
+  'hue',
+  'horizon',
+] as const
+export type GridKnob = (typeof GRID_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -406,6 +431,7 @@ export type ImplKnob =
   | LaserKnob
   | PetalKnob
   | LightningKnob
+  | GridKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -425,6 +451,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   lasers: LASER_KNOBS,
   petals: PETAL_KNOBS,
   lightning: LIGHTNING_KNOBS,
+  grid: GRID_KNOBS,
   look: LOOK_KNOBS,
 }
 

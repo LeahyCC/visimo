@@ -941,11 +941,14 @@ describe('a pinned cast reaches its implementations unchanged', () => {
       expect(post.enabled).toBe(expected.enabled)
       for (const stage of POST_STAGES)
         expect(post[stage].enabled, `${golden.preset} ${stage}`).toBe(expected[stage].enabled)
+      // The two knobs the wide bloom added are the looks' to move and are
+      // pinned in studies/cast.test.ts; the captures never had them.
       for (const knob of POST_KNOBS)
-        expect(POST_LANES[knob].read(post), `${golden.preset} ${knob}`).toBeCloseTo(
-          POST_LANES[knob].read(expected),
-          10,
-        )
+        if (knob !== 'bloom.radius' && knob !== 'bloom.tint')
+          expect(POST_LANES[knob].read(post), `${golden.preset} ${knob}`).toBeCloseTo(
+            POST_LANES[knob].read(expected),
+            10,
+          )
     })
   }
 

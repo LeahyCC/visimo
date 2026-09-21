@@ -495,10 +495,11 @@ describe('the flock and its grid', () => {
 
   it('skips both grid dispatches when no steering term is live', () => {
     // Each of the two ways of switching the grid off: no reach, and no rule.
-    for (const off of [
+    const ways: Record<string, number>[] = [
       { neighbourhood: 0 },
       { separation: 0, alignment: 0, cohesion: 0 },
-    ] as const) {
+    ]
+    for (const off of ways) {
       build(MURMURATION_PROFILE)
       field.update(groove(), 1 / 60, resolved(off), 1)
       field.render(gpu.encoder, view)

@@ -256,7 +256,8 @@ describe('the grid ink', () => {
       const seen: number[] = []
       for (let step = 0; step < Math.round(2 * fps); step += 1) {
         const pulse = step === 0 ? 1 : step < 0.4 * fps ? 0.6 : 0
-        one.update(sounding(), 1 / fps, { ...GROOVE, pulse }, 1)
+        const knobs: Record<string, number> = { ...GROOVE, pulse }
+        one.update(sounding(), 1 / fps, knobs, 1)
         seen.push(
           local.calls.writes.filter((write) => write.label === 'Grid look').at(-1)?.data[11] ?? 0,
         )

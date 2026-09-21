@@ -49,8 +49,11 @@ const REST = {
 describe('the knobs', () => {
   it('holds every knob to its range and takes a missing or broken one from the fallback', () => {
     const params = gridParams({ speed: 900, height: -3, valley: 4, width: Number.NaN, glow: -1 })
-    for (const [knob, [low, high]] of Object.entries(GRID_RANGES))
+    for (const [knob, [low, high]] of Object.entries(GRID_RANGES)) {
       expect(params[knob as keyof typeof params]).toBeGreaterThanOrEqual(low)
+      expect(params[knob as keyof typeof params]).toBeLessThanOrEqual(high)
+    }
+
     expect(params.speed).toBe(GRID_RANGES.speed[1])
     expect(params.height).toBe(0)
     expect(params.valley).toBe(GRID_RANGES.valley[1])

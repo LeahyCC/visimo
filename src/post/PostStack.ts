@@ -1,9 +1,9 @@
 /**
  * The post stack: everything between the inks and the swap chain.
  *
- *   clear ──► inks, ribbon among them ──► history[current] ──► bright ──► blur x3 ──► composite ──► canvas
- *                                               ▲  add                                   ▲
- *                                               └── history[other], zoomed and decayed ───┘
+ *   clear ──► inks, ribbon among them ──► history[current] ──► bright ──► down x N ──► up x N ──► composite ──► canvas
+ *                                               ▲  add                                               ▲
+ *                                               └── history[other], zoomed and decayed ───────────────┘
  *
  * The inks draw into one of two floating-point history textures instead of
  * the canvas, so their brightest pixels survive past 1 and the tonemap in the
@@ -27,18 +27,18 @@
 import { F } from '../audio/FeatureExtractor'
 import { levelWaveform } from '../audio/waveform'
 import type { Flow } from '../scenes/Scene'
-import blur from '../shaders/post.blur.wgsl?raw'
 import bright from '../shaders/post.bright.wgsl?raw'
 import common from '../shaders/post.common.wgsl?raw'
 import composite from '../shaders/post.composite.wgsl?raw'
+import down from '../shaders/post.down.wgsl?raw'
 import feedback from '../shaders/post.feedback.wgsl?raw'
 import reduce from '../shaders/post.reduce.wgsl?raw'
 import ribbon from '../shaders/post.ribbon.wgsl?raw'
+import up from '../shaders/post.up.wgsl?raw'
+import { bloomActiveLevels, bloomLevelCount, bloomWeights } from './bloom'
 import type { FlowCover } from './params'
 import {
-  BLOOM_LEVELS,
   bloomLevelSize,
-  bloomSourceSize,
   defaultPostParams,
   fillRibbonPoints,
   freshWeight,
@@ -61,20 +61,21 @@ import type { PostParams, PostPatch } from './params'
  * scene as well.
  */
 export const SCENE_FORMAT: GPUTextureFormat = 'rgba16float'
-const BLUR_STEP_BYTES = 16
 const BLACK: GPUColor = { r: 0, g: 0, b: 0, a: 1 }
 
 type Target = { texture: GPUTexture; view: GPUTextureView }
 type Pair<T> = readonly [T, T]
 
+/**
+ * One level of the bloom chain. Level 0 is written by the bright pass, so it
+ * has nothing above it to read; the last has nothing below it to add.
+ */
 type Level = {
   target: Target
-  temp: Target
-  /** Reads the level above into this level's temp, halving it. */
-  horizontal: GPUBindGroup
-  /** Reads this level's temp back into the level. */
-  vertical: GPUBindGroup
-  steps: Pair<GPUBuffer>
+  /** Reads the level above and halves it into this one; absent on level 0. */
+  down: GPUBindGroup | null
+  /** Reads the level below and adds it into this one; absent on the last. */
+  up: GPUBindGroup | null
 }
 
 type Gear = {
@@ -88,6 +89,13 @@ type Gear = {
    * read; see "Adding a scene" in the README for what that cost last time.
    */
   feedbackLayout: GPUBindGroupLayout
+  /**
+   * The bright, down and up passes' one group: the uniform, the sampler and
+   * the texture to read. Named, so the three pipelines share it and every group
+   * built per resize fits any of them; only the bright pass reads the uniform,
+   * and a layout derived from the down shader would leave it out.
+   */
+  bloomLayout: GPUBindGroupLayout
   /** One zero texel, bound as the flow when the scene offers none. */
   still: GPUTextureView
   stillTexture: GPUTexture
@@ -100,7 +108,15 @@ type Gear = {
   /** The waveform's points, `RIBBON_POINTS` floats, sized once. */
   ribbonPoints: GPUBuffer
   bright: GPURenderPipeline
-  blur: GPURenderPipeline
+  /** Halves a level into the next. Replaces what is there. */
+  down: GPURenderPipeline
+  /**
+   * The same shader, for the last level the chain runs: the blend scales it by
+   * what that level is worth, since nothing is added to it to do that later.
+   */
+  downScaled: GPURenderPipeline
+  /** Adds a level into the one above it, keeping a share of what that one held. */
+  up: GPURenderPipeline
   composite: GPURenderPipeline
 }
 
@@ -109,8 +125,17 @@ type Sized = {
   height: number
   history: Pair<Target>
   levels: Level[]
+  /** What each level is worth this frame, worked out into this array. */
+  weights: Float32Array
   bright: Pair<GPUBindGroup>
   composite: Pair<GPUBindGroup>
+  /**
+   * The feedback group for each history texture it can read, keyed by the two
+   * views that alternate under it: the flow and the measured mean. Built the
+   * first frame each pairing is seen and never after, so a frame allocates
+   * nothing; it is the size's, since the history views are.
+   */
+  feedback: Pair<WeakMap<GPUTextureView, WeakMap<GPUTextureView, GPUBindGroup>>>
   /** The measuring ladder, quartering each way until one texel is left. */
   measure: Measure
 }
@@ -180,6 +205,29 @@ export class PostStack {
         { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture },
       ],
     })
+
+    const bloomLayout = device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture },
+      ],
+    })
+
+    // The chain's weights are applied by the blend, so each pass carries the
+    // constant it needs and no uniform is written for them. The last level's
+    // scale is `constant * source`; every other level is scaled where it is
+    // added into, `source + constant * destination`, which is the level's own
+    // weight and never over 1, so the constant is always one a blend may hold.
+    const replace: GPUBlendComponent = { srcFactor: 'one', dstFactor: 'zero', operation: 'add' }
+    const scaled: GPUBlendState = {
+      color: { srcFactor: 'constant', dstFactor: 'zero', operation: 'add' },
+      alpha: replace,
+    }
+    const added: GPUBlendState = {
+      color: { srcFactor: 'one', dstFactor: 'constant', operation: 'add' },
+      alpha: replace,
+    }
 
     // The measuring ladder reads no uniform: a rung takes its source's size
     // from the texture itself, so one pipeline covers every rung and the two
@@ -282,8 +330,11 @@ export class PostStack {
         ],
       }),
       ribbonPoints,
-      bright: pipeline(bright, { format: SCENE_FORMAT }),
-      blur: pipeline(blur, { format: SCENE_FORMAT }),
+      bloomLayout,
+      bright: pipeline(bright, { format: SCENE_FORMAT }, bloomLayout),
+      down: pipeline(down, { format: SCENE_FORMAT }, bloomLayout),
+      downScaled: pipeline(down, { format: SCENE_FORMAT, blend: scaled }, bloomLayout),
+      up: pipeline(up, { format: SCENE_FORMAT, blend: added }, bloomLayout),
       composite: pipeline(composite, { format }),
     }
   }
@@ -401,37 +452,106 @@ export class PostStack {
       // in its place. It measures history[other], which is exactly what the
       // pass reads back, so the hold answers this frame and not the last.
       const measured = this.measure(encoder, sized, other)
-      // One bind group a frame, because the flow alternates and the history
-      // it reads does too. It is five bindings and no allocation on the GPU,
-      // which is well under what the pass itself costs.
-      const group = gear.device.createBindGroup({
-        layout: gear.feedbackLayout,
-        entries: [
-          { binding: 0, resource: { buffer: gear.uniform } },
-          { binding: 1, resource: gear.sampler },
-          { binding: 2, resource: sized.history[other].view },
-          { binding: 3, resource: flow?.view ?? gear.still },
-          { binding: 4, resource: measured },
-        ],
-      })
-      draw(encoder, gear.feedback, group, into, 'load', fresh)
+      draw(
+        encoder,
+        gear.feedback,
+        this.feedbackGroup(gear, sized, other, flow?.view ?? gear.still, measured),
+        into,
+        'load',
+        fresh,
+      )
     }
 
-    if (stageEnabled(this.settings, 'bloom')) {
-      const first = sized.levels[0]
-      if (first) {
-        draw(encoder, gear.bright, sized.bright[this.current], first.target.view, 'clear')
-        for (const level of sized.levels) {
-          draw(encoder, gear.blur, level.horizontal, level.temp.view, 'clear')
-          draw(encoder, gear.blur, level.vertical, level.target.view, 'clear')
-        }
-      }
-    }
+    if (stageEnabled(this.settings, 'bloom')) this.bloom(encoder, gear, sized)
 
     draw(encoder, gear.composite, sized.composite[this.current], view, 'clear')
     // The frame just drawn becomes next frame's history.
     this.current = other
     this.historyReady = true
+  }
+
+  /**
+   * The feedback pass's group for this pairing of flow and measured mean. Both
+   * alternate frame to frame, and the history it reads does too, so there is a
+   * handful of pairings in all and each is built once, the first frame it is
+   * seen. The cache holds the flow's view weakly, so a rebuilt fluid's views
+   * are not kept alive here.
+   */
+  private feedbackGroup(
+    gear: Gear,
+    sized: Sized,
+    which: 0 | 1,
+    flow: GPUTextureView,
+    measured: GPUTextureView,
+  ): GPUBindGroup {
+    const byFlow = sized.feedback[which]
+    let byMeasured = byFlow.get(flow)
+    if (!byMeasured) {
+      byMeasured = new WeakMap()
+      byFlow.set(flow, byMeasured)
+    }
+
+    let group = byMeasured.get(measured)
+    if (!group) {
+      group = gear.device.createBindGroup({
+        layout: gear.feedbackLayout,
+        entries: [
+          { binding: 0, resource: { buffer: gear.uniform } },
+          { binding: 1, resource: gear.sampler },
+          { binding: 2, resource: sized.history[which].view },
+          { binding: 3, resource: flow },
+          { binding: 4, resource: measured },
+        ],
+      })
+      byMeasured.set(measured, group)
+    }
+
+    return group
+  }
+
+  /**
+   * The bloom chain: the bright pass into level 0, a downsample from each level
+   * into the next, then an upsample from the smallest back up that adds each
+   * level into the one above. What is left in level 0 is the whole glow, every
+   * level already worth what `bloomWeights` says, and the composite reads only
+   * that.
+   *
+   * The weights are applied by the blend, with no uniform. Going down, the
+   * last level the chain runs is scaled as it is written. Going up, the level
+   * being added into is kept at its own weight, so `up[i] = tent(up[i + 1]) +
+   * weight[i] * down[i]`, with the chain's last level standing in for
+   * `up[last]`. A level is only added into after it has been read downward, so
+   * the same texture serves both ways and there is no second set.
+   *
+   * A level too small to matter is not run, so at a radius of 0 the chain is
+   * the three tight levels and costs about what the bloom cost before it had
+   * a radius; the wide levels are paid for only as the radius asks for them.
+   */
+  private bloom(encoder: GPUCommandEncoder, gear: Gear, sized: Sized) {
+    const first = sized.levels[0]
+    if (!first) return
+    const weights = bloomWeights(this.settings.bloom, sized.weights)
+    const active = bloomActiveLevels(weights)
+    if (active === 0) {
+      // Nothing to add, and the composite reads level 0 whatever it holds.
+      this.clear(encoder, first.target.view)
+      return
+    }
+
+    draw(encoder, gear.bright, sized.bright[this.current], first.target.view, 'clear')
+    const last = active - 1
+    for (let index = 1; index <= last; index++) {
+      const level = sized.levels[index]
+      if (!level?.down) continue
+      if (index === last)
+        draw(encoder, gear.downScaled, level.down, level.target.view, 'clear', weights[index])
+      else draw(encoder, gear.down, level.down, level.target.view, 'clear')
+    }
+
+    for (let index = last - 1; index >= 0; index--) {
+      const level = sized.levels[index]
+      if (level?.up) draw(encoder, gear.up, level.up, level.target.view, 'load', weights[index])
+    }
   }
 
   /**
@@ -472,42 +592,30 @@ export class PostStack {
     }
 
     const history: Pair<Target> = [make(width, height), make(width, height)]
-    const levels: Level[] = []
-    for (let index = 0; index < BLOOM_LEVELS; index++) {
+    const count = bloomLevelCount(width, height)
+    const targets: Target[] = []
+    for (let index = 0; index < count; index++) {
       const size = bloomLevelSize(width, height, index)
-      const target = make(size.width, size.height)
-      const temp = make(size.width, size.height)
-      // The horizontal pass reads the texture named by bloomSourceSize, so
-      // its taps are spaced by that texture's texels; the vertical pass stays
-      // inside this level.
-      const from = bloomSourceSize(width, height, index)
-      const steps: Pair<GPUBuffer> = [
-        blurStep(device, 1 / from.width, 1 / from.height, 1, 0),
-        blurStep(device, 1 / size.width, 1 / size.height, 0, 1),
-      ]
-      const source = index === 0 ? target : (levels[index - 1]?.target ?? target)
-      levels.push({
-        target,
-        temp,
-        horizontal: device.createBindGroup({
-          layout: gear.blur.getBindGroupLayout(0),
-          entries: [
-            { binding: 0, resource: { buffer: steps[0] } },
-            { binding: 1, resource: gear.sampler },
-            { binding: 2, resource: source.view },
-          ],
-        }),
-        vertical: device.createBindGroup({
-          layout: gear.blur.getBindGroupLayout(0),
-          entries: [
-            { binding: 0, resource: { buffer: steps[1] } },
-            { binding: 1, resource: gear.sampler },
-            { binding: 2, resource: temp.view },
-          ],
-        }),
-        steps,
-      })
+      targets.push(make(size.width, size.height))
     }
+
+    // Every bloom group reads one texture through the one named layout: a
+    // level's down group reads the level above it, its up group the level below.
+    const read = (source: GPUTextureView) =>
+      device.createBindGroup({
+        layout: gear.bloomLayout,
+        entries: [
+          { binding: 0, resource: { buffer: gear.uniform } },
+          { binding: 1, resource: gear.sampler },
+          { binding: 2, resource: source },
+        ],
+      })
+
+    const levels: Level[] = targets.map((target, index) => ({
+      target,
+      down: index === 0 ? null : read((targets[index - 1] ?? target).view),
+      up: index === count - 1 ? null : read((targets[index + 1] ?? target).view),
+    }))
 
     // One bind group per history texture the scene might have drawn into.
     // The feedback pass is not among them; its group is built per frame,
@@ -517,10 +625,8 @@ export class PostStack {
       build(history[1]),
     ]
 
-    const bloomViews = levels.map((level, index) => ({
-      binding: 3 + index,
-      resource: level.target.view,
-    }))
+    // The composite reads level 0 alone: the chain has already added the rest.
+    const glow = levels[0]?.target.view
 
     // The measuring ladder, quartering each way until a single texel is left.
     // It hangs off the history rather than off the last bloom level, which the
@@ -542,21 +648,14 @@ export class PostStack {
       height,
       history,
       levels,
+      weights: new Float32Array(count),
+      feedback: [new WeakMap(), new WeakMap()],
       measure: {
         rungs,
         first: forHistory((drawn) => rung(drawn.view)),
         rest: rungs.slice(0, -1).map((source) => rung(source.view)),
       },
-      bright: forHistory((drawn) =>
-        gear.device.createBindGroup({
-          layout: gear.bright.getBindGroupLayout(0),
-          entries: [
-            { binding: 0, resource: { buffer: gear.uniform } },
-            { binding: 1, resource: gear.sampler },
-            { binding: 2, resource: drawn.view },
-          ],
-        }),
-      ),
+      bright: forHistory((drawn) => read(drawn.view)),
       composite: forHistory((drawn) =>
         gear.device.createBindGroup({
           layout: gear.composite.getBindGroupLayout(0),
@@ -564,7 +663,7 @@ export class PostStack {
             { binding: 0, resource: { buffer: gear.uniform } },
             { binding: 1, resource: gear.sampler },
             { binding: 2, resource: drawn.view },
-            ...bloomViews,
+            ...(glow ? [{ binding: 3, resource: glow }] : []),
           ],
         }),
       ),
@@ -577,11 +676,7 @@ export class PostStack {
     if (!sized) return
     for (const target of sized.history) target.texture.destroy()
     for (const rung of sized.measure.rungs) rung.texture.destroy()
-    for (const level of sized.levels) {
-      level.target.texture.destroy()
-      level.temp.texture.destroy()
-      for (const step of level.steps) step.destroy()
-    }
+    for (const level of sized.levels) level.target.texture.destroy()
     this.sized = null
   }
 
@@ -613,13 +708,4 @@ function draw(
   pass.setBindGroup(0, group)
   pass.draw(vertices)
   pass.end()
-}
-
-function blurStep(device: GPUDevice, x: number, y: number, dx: number, dy: number) {
-  const buffer = device.createBuffer({
-    size: BLUR_STEP_BYTES,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  })
-  device.queue.writeBuffer(buffer, 0, new Float32Array([x, y, dx, dy]))
-  return buffer
 }

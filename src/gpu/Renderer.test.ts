@@ -445,6 +445,26 @@ vi.mock('../impls/PetalsInk', () => ({
   },
 }))
 
+vi.mock('../impls/LightningInk', () => ({
+  LightningInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.lightning = (impls.built.lightning ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('lightning', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('lightning')
+    }
+    dispose() {
+      impls.disposed.lightning = (impls.disposed.lightning ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/FlowBlend', () => ({
   FlowBlend: class {
     init() {}

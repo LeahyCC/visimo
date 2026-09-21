@@ -34,6 +34,7 @@ export const IMPL_IDS = [
   'sparks',
   'lasers',
   'petals',
+  'lightning',
   'grid',
   'look',
 ] as const
@@ -314,6 +315,16 @@ export const PETAL_KNOBS = [
 export type PetalKnob = (typeof PETAL_KNOBS)[number]
 
 /**
+ * The lightning's numbers. Their ranges and units are in
+ * `impls/lightning.params.ts`. `rate` is strikes a second the bucket refills
+ * at, and the bucket holds one on top, so the most bolts a second there can
+ * ever be is one above the top of this range, which is the flash rule held in
+ * the range itself.
+ */
+export const LIGHTNING_KNOBS = ['rate', 'forks', 'length', 'width', 'life', 'intensity'] as const
+export type LightningKnob = (typeof LIGHTNING_KNOBS)[number]
+
+/**
  * The grid's numbers. Their ranges and units are in `impls/grid.params.ts`.
  * `speed` is world units a second the camera flies and a cell is one unit;
  * `height` and `valley` shape the ground the lines lie on (how tall the relief
@@ -417,6 +428,7 @@ export type ImplKnob =
   | SpectrumKnob
   | LaserKnob
   | PetalKnob
+  | LightningKnob
   | GridKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
@@ -436,6 +448,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   sparks: SPARKS_KNOBS,
   lasers: LASER_KNOBS,
   petals: PETAL_KNOBS,
+  lightning: LIGHTNING_KNOBS,
   grid: GRID_KNOBS,
   look: LOOK_KNOBS,
 }

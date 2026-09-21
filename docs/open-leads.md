@@ -44,4 +44,4 @@ Most of the first section comes from a full review of the repo on 2026-09-13. Th
 
 ## Left from the studies handoff
 
-Chord petals, which need the chroma rows in the packet. A flow for the WebGL2 path, where curl drift is the obvious one since it needs no compute. The performance pass, above.
+A flow for the WebGL2 path, where curl drift is the obvious one since it needs no compute. The performance pass, above.

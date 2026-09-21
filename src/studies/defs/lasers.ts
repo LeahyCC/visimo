@@ -55,17 +55,17 @@ import type { InkStudy } from '../types'
  * Colour is the fans' own and not the shared palette's. The first build took
  * the ribbon's colour and drew every beam one dull yellow, which is a line
  * drawing of a rig and not a rig. Each fan now has a fully saturated hue,
- *  turns apart from its neighbour, starting from the key, so a key
- * change turns the whole rig and  and  walk it
+ * `rainbow` turns apart from its neighbour, starting from the key, so a key
+ * change turns the whole rig and `harmonicChange` and `swell` walk it
  * between them. Only the very middle of a core goes white, the way a laser
- * clips in a camera, and  is the dim wide light a beam throws in the
+ * clips in a camera, and `haze` is the dim wide light a beam throws in the
  * air, kept small: black between the fans is what makes the colour read, and
  * at 0.07 the frame was a pastel wash with no black in it.
  *
  * The intensity rests above 1 on purpose (the canvas is half float and the
  * bloom needs something over its threshold) and nothing loud raises it, which
- * is the registry's rule. The beat lands in the  and the bass in the
- *  instead, so a kick fattens the beams and thickens the air without
+ * is the registry's rule. The beat lands in the `width` and the bass in the
+ * `haze` instead, so a kick fattens the beams and thickens the air without
  * the light itself climbing. Tuned by eye on the adapter against photographs
  * of club rigs; tune it again once the canvas's memory changes.
  */

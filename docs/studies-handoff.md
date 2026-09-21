@@ -303,3 +303,7 @@ Worth asking early, since the answers change the cards:
 2. How much should the same song look the same twice? (Assumed: identical. Deterministic from the track.)
 3. Is a hard cut on the drop wanted, or does he prefer everything to glide? (Assumed: cut.)
 4. Which three tracks are the reference set? One lo-fi, one hardstyle, one in between. Tuning against his own ears beats any synthetic test.
+
+## What is still open
+
+Known faults and unfinished work that nobody is on are in [open leads](open-leads.md), each with the date it was last checked against the code. Question 4 above is answered in practice: `scripts/character-table.mjs` measures any list of local tracks, and twenty of them are recorded in `src/director/tracks.fixture.ts`.

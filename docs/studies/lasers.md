@@ -120,3 +120,7 @@ builds it on that path.
 `cheap`: one fullscreen triangle, one 16 float uniform made once, and a
 bounded double loop in the fragment stage over at most 6 fans of at most 8
 beams. There is no texture, no buffer and no compute.
+
+## Colour and light, after the first look on screen
+
+The first build drew every beam in the ribbon's one colour and dimmed them when the music got loud, and on screen it was thin dull yellow lines. It was reworked against photographs of club rigs: each fan has its own saturated hue (`rainbow` is the step between neighbours, starting from the key), only the middle of a core goes white, `haze` adds a little wide light in the air, and a beam thins along its length. The intensity rests at 1.05 and nothing loud raises it; the beat fattens the beams through `width` and the bass thickens the `haze`. Fans go from 4 to 8 with energy and beams from 5 to 11 with treble. Black between the fans matters more than any of it: at a haze of 0.07 the frame was a pastel wash.

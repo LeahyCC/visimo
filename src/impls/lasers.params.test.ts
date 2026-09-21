@@ -184,7 +184,8 @@ describe('the light at a pixel', () => {
       960,
       1080,
     )
-    expect(on).toBeGreaterThan(0.99)
+    // Under 1 because a beam thins along its length (`REACH`); this pixel is part way down it.
+    expect(on).toBeGreaterThan(0.7)
     const behind = lasersAt(
       beam.originX - beam.dirX * 50,
       beam.originY - beam.dirY * 50,
@@ -214,7 +215,7 @@ describe('the light at a pixel', () => {
     const x = steep.originX + steep.dirX * t
     const y = steep.originY + steep.dirY * t
     const crossing = lasersAt(x, y, two, 0.25, 960, 1080)
-    expect(crossing).toBeGreaterThan(1.5)
+    expect(crossing).toBeGreaterThan(1.35)
     // Well away from every beam a pixel reads nothing.
     expect(lasersAt(60, 1020, two, 0.25, 960, 1080)).toBeLessThan(LIT_THRESHOLD)
   })
@@ -239,8 +240,8 @@ describe('the light at a pixel', () => {
       1080,
     )
     expect(beam.flicked).toBe(true)
-    expect(quiet).toBeGreaterThan(0.99)
-    expect(hit - quiet).toBeGreaterThan(1.5)
+    expect(quiet).toBeGreaterThan(0.7)
+    expect(hit - quiet).toBeGreaterThan(1.3)
   })
 })
 

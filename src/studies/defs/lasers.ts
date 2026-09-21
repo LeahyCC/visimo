@@ -15,9 +15,9 @@ import type { InkStudy } from '../types'
  * A fan is a point origin and a spread of thin beams about a base direction
  * into the frame. Origins alternate between the two edges and stand evenly
  * along the x axis, so neighbours lean across each other. `energy` brings the
- * fan count from 3 to 6 through a square root, so the first sound puts
+ * fan count from 4 to 8 through a square root, so the first sound puts
  * several fans up, and opens the spread and the swing amplitude, so a loud
- * passage sweeps wider. `treble` fattens a fan to 6 beams. The swing's
+ * passage sweeps wider. `treble` fattens a fan from 5 beams to 11. The swing's
  * position is the beat clock's, read from the packet the way the rings read
  * it: the angle is `sweep x (0.5 - beatPhase)`, so every fan crosses the
  * middle of its travel on the predicted beat, and even fans run backwards,
@@ -52,13 +52,22 @@ import type { InkStudy } from '../types'
  * the beams move continuously with the beat, and nothing toggles a large area
  * of luminance on or off, so there is no strobe in the construction.
  *
- * The intensity is the number to trust least. It rests at 0.8, gated by the
- * tempo confidence, and `energy` and `hardness` pull it back (not `swell`, which rests at a half in silence and would take a gated intensity under 0) as the
- * frame fills, the halo's arithmetic: a beam is thin and moves, so it adds
- * its one frame and the floor eats the wake, and crossings only sum a few
- * beams at a pixel before the sweep carries them on. If it is faint beside
- * the ribbon on the adapter, the `width` is the knob to raise before the
- * `intensity`.
+ * Colour is the fans' own and not the shared palette's. The first build took
+ * the ribbon's colour and drew every beam one dull yellow, which is a line
+ * drawing of a rig and not a rig. Each fan now has a fully saturated hue,
+ *  turns apart from its neighbour, starting from the key, so a key
+ * change turns the whole rig and  and  walk it
+ * between them. Only the very middle of a core goes white, the way a laser
+ * clips in a camera, and  is the dim wide light a beam throws in the
+ * air, kept small: black between the fans is what makes the colour read, and
+ * at 0.07 the frame was a pastel wash with no black in it.
+ *
+ * The intensity rests above 1 on purpose (the canvas is half float and the
+ * bloom needs something over its threshold) and nothing loud raises it, which
+ * is the registry's rule. The beat lands in the  and the bass in the
+ *  instead, so a kick fattens the beams and thickens the air without
+ * the light itself climbing. Tuned by eye on the adapter against photographs
+ * of club rigs; tune it again once the canvas's memory changes.
  */
 export const LASERS: InkStudy = {
   id: 'lasers',
@@ -75,7 +84,7 @@ export const LASERS: InkStudy = {
     sweep: 0.3,
     width: 1.0,
     glow: 2.2,
-    intensity: 0.75,
+    intensity: 1.05,
     flick: 0,
     hue: 0,
     rainbow: 0.14,
@@ -90,10 +99,8 @@ export const LASERS: InkStudy = {
     { from: 'energy', to: 'sweep', gain: 0.35, curve: 'linear' },
     { from: 'energy', to: 'width', gain: 0.4, curve: 'linear' },
     { from: 'hardness', to: 'glow', gain: -1.2, curve: 'linear' },
-    { from: 'tempoConfidence', to: 'intensity', gain: -0.75, curve: 'invert' },
-    { from: 'energy', to: 'intensity', gain: 0.3, curve: 'linear' },
-    { from: 'beatPulse', to: 'intensity', gain: 0.5, curve: 'linear' },
-    { from: 'tension', to: 'intensity', gain: 0.1, curve: 'linear' },
+    { from: 'tempoConfidence', to: 'intensity', gain: -1.05, curve: 'invert' },
+    { from: 'beatPulse', to: 'width', gain: 0.5, curve: 'linear' },
     { from: 'treblePulse', to: 'flick', gain: 0.9, curve: 'linear' },
     { from: 'harmonicChange', to: 'hue', gain: 0.12, curve: 'linear' },
     { from: 'swell', to: 'hue', gain: 0.2, curve: 'linear' },

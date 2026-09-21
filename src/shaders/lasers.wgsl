@@ -29,15 +29,31 @@ struct Params {
   // The core half width in pixels, the glow in pixels, the flick. The fourth
   // float is padding.
   beam: vec4<f32>,
-  // Light in rgb, already scaled by the intensity. The fourth float is
-  // padding.
+  // The hue of the first fan in turns, the hue step from one fan to the next,
+  // the intensity, and the haze: the dim wide light a beam throws in the air.
   light: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> params: Params;
 
-const MAX_FANS = 6u;
-const MAX_BEAMS = 8u;
+const MAX_FANS = 8u;
+const MAX_BEAMS = 12u;
+// How far down a beam its light has fallen to 1/e, in canvas heights. A real
+// beam thins into the haze, and without it the far ends read as flat lines.
+const REACH = 1.6;
+// How many glow widths the haze spreads to.
+const HAZE_SPREAD = 9.0;
+// How far a beam's core is pulled to white. A laser's core clips in a camera
+// and in the eye, and the colour lives in the glow round it.
+const CORE_WHITE = 0.55;
+
+// A fully saturated hue, brightest channel at 1: three cosines a third of a
+// turn apart. The shared palette is one colour at a time, and a rig is not.
+fn vivid(turns: f32) -> vec3<f32> {
+  let c = 0.5 + 0.5 * cos(6.2831853 * (turns + vec3<f32>(0.0, 0.3333, 0.6667)));
+  let sat = c * c;
+  return sat / max(max(sat.r, sat.g), max(sat.b, 1e-4));
+}
 const ORIGIN_MARGIN = 0.02;
 const FLICK_GAIN = 2.0;
 
@@ -52,7 +68,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   let fans = u32(params.shape.x + 0.5);
   let beams = u32(params.shape.y + 0.5);
   let margin = ORIGIN_MARGIN * min(params.screen.x, params.screen.y);
-  var light = 0.0;
+  var light = vec3<f32>(0.0);
 
   for (var f = 0u; f < MAX_FANS; f = f + 1u) {
     if (f >= fans) {
@@ -68,6 +84,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     // far side of its travel half way to the next one.
     let swing =
       params.shape.w * (abs(params.screen.z - 0.5) - 0.5) * select(-1.0, 1.0, top);
+    let colour = vivid(params.light.x + f32(f) * params.light.y);
     // The beam the treble answers this beat, a different one of each fan.
     let flick_at = (f + u32(params.screen.z * params.shape.y)) % max(beams, 1u);
 
@@ -95,14 +112,18 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
       let inner = max(params.beam.x - params.beam.y, 0.0);
       let outer = params.beam.x + params.beam.y;
       let at = clamp((across - inner) / (outer - inner), 0.0, 1.0);
-      var add = 1.0 - at * at * (3.0 - 2.0 * at);
+      var core = 1.0 - at * at * (3.0 - 2.0 * at);
+      let wide = clamp(across / (outer * HAZE_SPREAD), 0.0, 1.0);
+      var haze = params.light.w * (1.0 - wide) * (1.0 - wide);
       if (b == flick_at) {
-        add = add * (1.0 + params.beam.z * FLICK_GAIN);
+        core = core * (1.0 + params.beam.z * FLICK_GAIN);
+        haze = haze * (1.0 + params.beam.z);
       }
-      light = light + add;
+      let fade = exp(-along / (REACH * params.screen.y));
+      light = light + (mix(colour, vec3<f32>(1.0), CORE_WHITE) * core + colour * haze) * fade;
     }
   }
 
   // Additive, and the blend leaves alpha alone, so this is light and nothing else.
-  return vec4<f32>(params.light.rgb * light, 1.0);
+  return vec4<f32>(light * params.light.z, 1.0);
 }

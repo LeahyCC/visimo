@@ -215,6 +215,8 @@ export const LASER_KNOBS = [
   'intensity',
   'flick',
   'hue',
+  'rainbow',
+  'haze',
 ] as const
 export type LaserKnob = (typeof LASER_KNOBS)[number]
 

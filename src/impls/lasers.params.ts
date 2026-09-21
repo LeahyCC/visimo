@@ -36,7 +36,6 @@
  * one pixel and the beams move, so nothing settles the way a still glow does.
  */
 import { F } from '../audio/FeatureExtractor'
-import { ribbonColour } from '../post/params'
 import type { LaserKnob } from '../studies/impls'
 import { ringLight, ringReach } from './rings.params'
 
@@ -46,10 +45,10 @@ export { FEEDBACK_KEEP, SETTLE } from './caustics.params'
 export const LASER_UNIFORM_FLOATS = 16
 
 /** Fans the shader loops over at most; the range below holds `fans` to it. */
-export const MAX_FANS = 6
+export const MAX_FANS = 8
 
 /** Beams a fan loops over at most; the range below holds `beams` to it. */
-export const MAX_BEAMS = 8
+export const MAX_BEAMS = 12
 
 /** The canvas height a `width` and `glow` are written against, the same the rings' are. */
 const REFERENCE_HEIGHT = 1080
@@ -63,6 +62,12 @@ export const ORIGIN_MARGIN = 0.02
 
 /** How much extra light the flicked beam carries at `flick` 1. */
 export const FLICK_GAIN = 2
+
+/** How far down a beam its light has fallen to 1/e, in canvas heights. Mirrors REACH in the shader. */
+export const REACH = 1.6
+
+/** How many glow widths the haze spreads to. Mirrors HAZE_SPREAD in the shader. */
+export const HAZE_SPREAD = 9
 
 /**
  * What each knob may reach, inclusive. The params clamp to them, and the
@@ -81,13 +86,20 @@ export const LASER_RANGES: Record<LaserKnob, readonly [number, number]> = {
   // The beam core's half width in pixels at the reference height.
   width: [0.4, 2],
   // The soft edge on each side of the core, in pixels at the reference height.
-  glow: [0.3, 2],
-  // Light one beam adds at its core, before crossings sum.
-  intensity: [0, 1],
+  glow: [0.3, 6],
+  // Light one beam adds at its core, before crossings sum. Past 1 on purpose:
+  // the canvas is half float, a laser's core clips, and the bloom needs
+  // something over its threshold to make the glow a rig has in haze.
+  intensity: [0, 3],
   // How much one beam answers the treble, 0 to 1.
   flick: [0, 1],
   // Palette units added to the key, as the other inks' spread is.
   hue: [-0.5, 0.5],
+  // The hue step from one fan to the next, in turns. 0 is one colour; an
+  // eighth of a turn across eight fans is the whole wheel.
+  rainbow: [0, 0.5],
+  // The dim wide light a beam throws in the air, as a share of its core.
+  haze: [0, 0.3],
 }
 
 export type LaserParams = Record<LaserKnob, number>
@@ -108,6 +120,8 @@ const FALLBACK: LaserParams = {
   intensity: 0,
   flick: 0,
   hue: 0,
+  rainbow: 0,
+  haze: 0,
 }
 
 const clamp = (value: number, low: number, high: number) => Math.min(Math.max(value, low), high)
@@ -236,9 +250,15 @@ export function lasersAt(
     const vy = y - beam.originY
     if (vx * beam.dirX + vy * beam.dirY < 0) continue
     const across = Math.abs(vx * beam.dirY - vy * beam.dirX)
-    let add = laserBeamLight(across, width, glow)
-    if (beam.flicked) add *= 1 + params.flick * FLICK_GAIN
-    light += add
+    let core = laserBeamLight(across, width, glow)
+    const wide = Math.min(across / (laserBeamReach(width, glow) * HAZE_SPREAD), 1)
+    let haze = params.haze * (1 - wide) * (1 - wide)
+    if (beam.flicked) {
+      core *= 1 + params.flick * FLICK_GAIN
+      haze *= 1 + params.flick
+    }
+    const along = vx * beam.dirX + vy * beam.dirY
+    light += (core + haze) * Math.exp(-along / (REACH * canvasHeight))
   }
 
   return light
@@ -301,10 +321,12 @@ export function writeLasersUniform(
   out[9] = laserGlowPixels(params.glow, width, height)
   out[10] = params.flick
   out[11] = 0
-  const [red, green, blue] = ribbonColour(features, params.hue)
-  out[12] = red * params.intensity
-  out[13] = green * params.intensity
-  out[14] = blue * params.intensity
-  out[15] = 0
+  // The first fan's hue follows the key, in turns, and each fan steps on from
+  // it, so a key change turns the whole rig and the fans stay a spread of
+  // colours and never one.
+  out[12] = (features[F.keyHue] ?? 0) + params.hue
+  out[13] = params.rainbow
+  out[14] = params.intensity
+  out[15] = params.haze
   return out
 }

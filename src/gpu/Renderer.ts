@@ -39,6 +39,7 @@ import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
 import { HaloInk } from '../impls/HaloInk'
 import { LasersInk } from '../impls/LasersInk'
+import { LightningInk } from '../impls/LightningInk'
 import { MorphInk } from '../impls/MorphInk'
 import { ParticleField } from '../impls/ParticleField'
 import { DUST_PROFILE, SPARKS_PROFILE } from '../impls/particles.params'
@@ -679,6 +680,7 @@ class Renderer {
     if (impl === 'lasers') return new LasersInk()
     if (impl === 'morph') return new MorphInk()
     if (impl === 'petals') return new PetalsInk()
+    if (impl === 'lightning') return new LightningInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

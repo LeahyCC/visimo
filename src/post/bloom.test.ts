@@ -393,8 +393,9 @@ describe('the chain', () => {
   it('stays black on silence, at every radius', () => {
     const canvas = grid(SIZE, SIZE)
     for (const radius of [0, 0.5, 1])
+      // One assertion a level. One a texel was a million calls, and timed out on CI.
       for (const level of runChain(canvas, radius, 0.1, 0.5))
-        for (const value of level.data) expect(Object.is(value, 0)).toBe(true)
+        expect(level.data.every((value) => Object.is(value, 0))).toBe(true)
   })
 
   it('lets nothing through under the threshold', () => {

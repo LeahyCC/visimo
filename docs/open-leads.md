@@ -42,6 +42,14 @@ Most of the first section comes from a full review of the repo on 2026-09-13. Th
 
 **The WebGL2 fallback has no canvas hold.** It wants a ladder of passes reducing the frame to one texel, and that path is a fallback rather than a second implementation, so it is skipped the way `feedback.carry` is. Everything else about the canvas applies there. Nothing shipped reaches it with a long memory today, because the fallback's cast has the canvas switched off, but a cast that did would have only `feedback.ceiling` holding it: forced on by hand at 0.975, the fractal filled the frame to the ceiling in about a second. `curl-drift` as the fallback flow (below) would be the point at which this matters.
 
+## Found on 2026-09-21, building from the effects catalogue
+
+**Several things merged on checks alone and have not been judged on a screen.** The palettes by look, the wide bloom, and the sparks and the dust on the new particle field were all reviewed with the checks green and a headless GPU run by their builders, and not watched on a real track at full frame rate. The sparks drew nothing visible as a solo before the particle field either. Each wants five minutes in the demo: Auto on a known track for the colour and the glow, then sparks and dust from the Inks group of the preset dropdown.
+
+**The moment rows are too quiet to build a study on.** The lightning first fired only on `impact` or a high `release` and drew nothing for a whole song, the fault the README already records for the radial burst. The lightning now also fires on strong hits in a loud passage. The radial burst still waits for a reading real tracks do not give, and so will any new study that leans on `tension`, `release` or `impact` alone. Either the estimator wants recalibrating on the measured tracks so those rows reach their range, or the radial burst wants a second way in.
+
+**New inks crowd the old ones at the hard end.** Adding the lightning took every drop from the shards until its home was moved. The fairness test caught it, which is what it is for, but the hard, high-drive corner is getting full while the soft end is still thin. The next studies should be soft ones.
+
 ## Left from the studies handoff
 
 A flow for the WebGL2 path, where curl drift is the obvious one since it needs no compute. The performance pass, above.

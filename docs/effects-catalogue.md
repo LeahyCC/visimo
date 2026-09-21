@@ -47,6 +47,20 @@ Two things make this hold:
 
 If a study needs something the contract cannot do (a new packet row, a new blend mode, a new input texture), it stops and raises it. It does not add it.
 
+## The visual bar
+
+Written after the first four studies were built, because two of them had to be redone once they were seen on a screen. Passing the tests is not the bar. A study is done when someone would stop scrolling for it. Every one of these was learned the hard way on this list.
+
+- **Build to a reference.** Before the shader, find two or three photographs or renders of the real thing and write in `docs/studies/<id>.md` what makes them striking. Build to that and not to the smallest thing that passes. The lasers were first built from a description and came out as thin dull lines; against photographs of club rigs they came out as a rig.
+- **Its own colours.** Do not take one colour from the shared palette. Give the study saturated hues of its own that spread across its parts and turn with `keyHue`, `harmonicChange` and `swell`. Where the real thing has a colour, keep to it: lightning that followed the key all the way round drew a red bolt, and it now stays between cyan and violet. `vivid()` in `lasers.wgsl` and `electricHue` in `lightning.params.ts` are the two patterns.
+- **Light like light.** The canvas is half float. A core may rest above 1 so the bloom catches it, white only at the very centre, colour in the glow around it, and some light in the air round a bright mark. Keep true black between marks: black is what makes colour read, and a haze of 0.07 turned the lasers into a pastel wash.
+- **Never dim when the music is loud.** The registry guard forbids raising `intensity` with level. Do not answer it by lowering it. Put the punch into size, width, count, speed, glow width and haze. The mapping rows can carry a `spring`, an `envelope`, an `integrate` or a `hold` now, and a `scale`; a hit should snap and ring, not slide.
+- **It has to show up on real music.** `release`, `impact` and `tension` rarely get high on real tracks. A study that fires only on them draws nothing for whole songs, which is what the lightning first did and what the radial burst still does. Give it a way in from level and hits as well, and solo it on a real track before calling it done.
+- **Do not share a home with an ink of the same moment.** Two inks that both fit the drop and both live at the hard end mean one of them is never cast. The fairness test catches it; the fix is to move a home, never to loosen the test.
+- **Budget for a canvas that remembers.** The canvas keeps 0.975 a frame, so anything that moves leaves seconds of trail. A filled body smears; rims, edges and hot cores draw fine trails. Design the trail on purpose.
+- **Shaders are compiled by `npm test` now**, so a reserved word or a second assignment to a `let` fails in CI. That says a shader is valid, not that it looks like anything.
+- **Someone looks at it before it merges**: solo from the demo's preset dropdown, on a real track, at a quiet passage and a loud one. A builder who cannot see a GPU can still measure: read the canvas back in a headless browser and report how much of the mark is bright, how saturated it is, and how much of the frame stays black.
+
 ## Tiers
 
 - **S**: build these. Each one either shows something about the music that nothing else can, or is a look people will screenshot.
@@ -60,7 +74,7 @@ A note on literal things (animals, spacecraft, Buddha, the devil): a shader draw
 
 ## Shared pieces
 
-Built once, before the rows that need them. Six pieces, four of them built.
+Built once, before the rows that need them. Six pieces: four are built, the raymarch kit is in review with the shape morph study, and the darkening blend has no card yet.
 
 | Piece            | What it is                                                                                           | Needed by                                                                                 | Status |
 | ---------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ |
@@ -203,31 +217,38 @@ Recipes, not new code. Each becomes a JSON in `src/studies/casts/` once its part
 
 ## Coverage map
 
-The check that the library fits all music. Every cell needs at least two studies that are at home there, or Auto will repeat itself. "Now" is what is built today.
+The check that the library fits all music. Every cell needs at least two studies that are at home there, or Auto will repeat itself. "Now" was what existed on 2026-09-20, before this list; **bold** in the last column is built.
 
 | song feels like         | now                           | after the S tier                               |
 | ----------------------- | ----------------------------- | ---------------------------------------------- |
-| soft, slow, tonal       | lazy-fluid, dust, caustics    | + aurora, nebula, ocean, chord-petals          |
+| soft, slow, tonal       | lazy-fluid, dust, caustics    | + aurora, nebula, ocean, **chord-petals**      |
 | soft, slow, dark        | thin                          | + void-tendrils, reaction                      |
 | mid, groovy, tonal      | fractal-glints takes it all   | + mirror-fold, oil-slick, mandala, echo-shapes |
-| mid, steady, electronic | beat-pump, tunnel, beat-rings | + grid-3d, lasers, wormhole                    |
-| acoustic, organic       | nothing made for it           | + ridgeline, cymatics, chord-petals            |
-| fast, hard, bright      | turbulent-fluid, sparks       | + murmuration, shape-morph, lightning          |
+| mid, steady, electronic | beat-pump, tunnel, beat-rings | + **grid-3d**, **lasers**, wormhole            |
+| acoustic, organic       | nothing made for it           | + ridgeline, cymatics, **chord-petals**        |
+| fast, hard, bright      | turbulent-fluid, sparks       | + murmuration, shape-morph, **lightning**      |
 | heavy, hard, dark       | shards, hard-clean            | + black-hole, liquid-chrome, void-tendrils     |
 | big build               | implode, riser-streaks        | + wormhole, black-hole, god-rays               |
-| big drop                | radial-burst (never reached)  | + lightning, liquid-chrome, lasers             |
+| big drop                | radial-burst (never reached)  | + **lightning**, liquid-chrome, **lasers**     |
 
 The "mid, groovy, tonal" row is why so much music lands in the kaleidoscope: `fractal-glints` is the only ink at home there that fits groove. It needs rivals more than it needs retuning.
 
 ## Build order
 
 ```text
-Wave 0   the six shared pieces                                 (no study starts before these)
-Wave 1   S tier, cheap:   cymatics, chord-petals, mirror-fold, grid-3d, lasers, lightning, mandala
-Wave 2   S tier, medium:  murmuration, reaction, ridgeline, ocean, aurora, oil-slick, echo-shapes, god-rays, void-tendrils, black-hole
-Wave 3   S tier, heavy:   wormhole, nebula, shape-morph, liquid-chrome      + looks: neon, spectral-split
-Wave 4   A tier by coverage gap, then the casts
-B tier   only when a gap calls for it
+Done      the registry split; the engine (long memory canvas, mapping shapes, wide bloom,
+          palettes by look, the particle field and canvas sampler, shaders compiled in tests);
+          five of the six shared pieces; lasers, chord-petals, lightning, grid-3d
+In review shape-morph, with the raymarch kit
+
+Next      one study per kit, so every kit is proven twice, and the soft end gets filled first:
+          murmuration (particles), cymatics (notes), ocean (terrain), black-hole (canvas sampler),
+          mirror-fold, aurora
+Then      the rest of the S tier: mandala, ridgeline, echo-shapes, oil-slick, reaction, god-rays,
+          neon, spectral-split, and with the raymarch kit wormhole, nebula, liquid-chrome
+Then      the darkening blend, and void-tendrils on it
+Then      A tier by coverage gap, then the casts
+B tier    only when a gap calls for it
 ```
 
 Four or five cards in flight at a time. Each wave mixes moods so Auto gets broader every merge, and no two cards in a wave share a shared piece that is still moving.

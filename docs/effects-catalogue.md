@@ -60,7 +60,7 @@ A note on literal things (animals, spacecraft, Buddha, the devil): a shader draw
 
 ## Shared pieces
 
-Built once, before the rows that need them. Six pieces, two of them built.
+Built once, before the rows that need them. Six pieces, three of them built.
 
 | Piece            | What it is                                                                                                                  | Needed by                                                                                 | Status |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ |
@@ -69,11 +69,13 @@ Built once, before the rows that need them. Six pieces, two of them built.
 | `swarm-kit`      | one GPU boids pool with steering rules as knobs, drawn as points, quads or short trails                                     | murmuration, school, fireflies                                                            | built  |
 | `subtract-blend` | a second ink blend that darkens. Today inks only add light, so nothing can be dark on light                                 | void-tendrils, eclipse, ink-wash                                                          | open   |
 | `chroma-rows`    | the twelve note strengths appended to the END of the packet (`docs/open-leads.md` has this as the blocker for chord petals) | chord-petals, cymatics, mandala, stained-glass, harmonograph, sacred-lines, constellation | open   |
-| `height-kit`     | a scrolling heightfield from the spectrum with horizon, fog and parallax layers                                             | ridgeline, ocean, grid-3d, city                                                           | open   |
+| `height-kit`     | a scrolling heightfield from the spectrum with horizon, fog and parallax layers                                             | ridgeline, ocean, grid-3d, city                                                           | built  |
 
 **`swarm-kit` is `impls/ParticleField.ts`**, one compute-simulated pool from ten thousand to half a million, with drag, gravity, curl noise, attraction to a point and the three boids terms on a uniform grid, all as knobs, drawn as velocity-aligned streaks that shrink to round points. A study on it is a `ParticleProfile` in `impls/particles.params.ts` and a knob subset in `studies/impls.ts`; the dust and the sparks are the first two, and murmuration, school and fireflies need nothing new built. See "The particle field" in the README.
 
 **`canvas-sampler` is `SceneContext.canvas()`**, which hands an ink the half of the post stack's history the inks are not drawing into. Two things go with it: it is one frame behind, and it is a loop, so an ink reading it has to stay sparse or keep its gain under one. `impls/CanvasQuadInk.ts` is the worked example and is not a study. See "Implementations" in the README.
+
+**`height-kit` is `impls/height.params.ts`, `impls/HeightField.ts` and `shaders/height.common.wgsl`**, a ring of 32 rows of 64 floats that the music writes at the far end and that scroll toward the camera, mirrored about the centre so the middle is a valley. Travel is per second, nothing is allocated per frame and only the rows crossed are uploaded. The shader part gives a march from the camera down onto the ground (with no early exit, so a study may use `fwidth` after it), the height and the slope at a ground point, a horizon glow and a fog to exactly zero; a study replaces `height_profile` for a terrain of its own. `grid-3d` is the first on it. The row's "parallax layers" are not built in: a study that wants several ranges keeps one `HeightField` a layer, each with its own profile, and ridgeline is where that gets decided. See "The 3D grid and height-kit" in the README and "Adding a study" for how to put a study on it.
 
 ## Space and time
 

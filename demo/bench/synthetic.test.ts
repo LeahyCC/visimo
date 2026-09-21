@@ -58,6 +58,27 @@ describe('SyntheticBeat', () => {
     expect(late.length).toBeGreaterThan(0)
   })
 
+  // The bar the eight slots are laid out in, so a row that holds on the bar
+  // has something to step on in the bench as well as on a real track.
+  it('runs the bar phase across four beats and wraps it on the first kick', () => {
+    const frames = play(7.9, 144)
+    let wraps = 0
+    for (let at = 1; at < frames.length; at += 1) {
+      const was = frames[at - 1]?.[F.barPhase] ?? 0
+      const now = frames[at]?.[F.barPhase] ?? 0
+      if (was - now > 0.5) {
+        wraps += 1
+        // A bar begins on a beat, and the first eighth of one is a kick.
+        expect(frames[at]?.[F.beatPhase] ?? 1).toBeLessThan(0.05)
+      }
+    }
+
+    // Eight seconds at 120 BPM is sixteen beats, so four bars: three wraps
+    // after the one the run opens on.
+    expect(wraps).toBe(3)
+    expect(Math.max(...frames.map((frame) => frame[F.barPhase] ?? 0))).toBeGreaterThan(0.95)
+  })
+
   it('writes the pulse as 1 on the hit and then falling, and the hit as its strength', () => {
     const frames = play(1, 60)
     const first = frames[0]

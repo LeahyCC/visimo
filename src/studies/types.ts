@@ -12,7 +12,7 @@
  * each of them accepts; `defs/` holds the studies themselves and `registry.ts` lists them.
  */
 import { AUDIO_FIELDS } from '../presets/knobs'
-import type { AudioField, Curve } from '../presets/knobs'
+import type { AudioField, Curve, Shape } from '../presets/knobs'
 import type { ImplId, ImplKnob, LookStage } from './impls'
 
 export const STUDY_KINDS = ['flow', 'ink', 'look'] as const
@@ -57,25 +57,58 @@ export const STUDY_FIELDS = [...AUDIO_FIELDS, 'presence'] as const
 export type StudyField = AudioField | 'presence'
 
 /**
+ * A second field that multiplies a row's signal, with a curve of its own. It
+ * is what lets one row say "this much, and more of it when the track is
+ * loud": a pulse scaled by `energy` is a pulse whose depth grows with the
+ * level, where two rows can only ever add a pulse and a level together.
+ *
+ * It multiplies the signal and not the finished contribution, so the scale
+ * sits inside whatever `Shape` the row carries. The level at the moment a hit
+ * lands is then what sets the height of the swell an envelope makes of it,
+ * and a quiet passage a second later does not shrink a swell already
+ * ringing; the other way round, a shape's output modulated after the fact,
+ * is what two rows and a multiply would have to be.
+ */
+export type StudyScale = {
+  from: StudyField
+  curve: Curve
+}
+
+/**
  * One row of a study's mapping, read exactly as a preset's is:
  *
- *   value = knobs[to] + gain × curve(field[from])
+ *   value = knobs[to] + gain × shape(curve(field[from]) × scale)
  *
  * `to` is a knob of the study's own implementation and nothing else, so two
  * studies in one cast cannot fight over the same number by accident.
+ *
+ * `scale` and `shape` are both optional and a row with neither is the row it
+ * always was, `gain × curve(field[from])`, evaluated by the same arithmetic.
+ * `scale` is a second field multiplying the signal and `shape` a stage with a
+ * memory over it, stepped by the real `dt`; `presets/knobs.ts` says what each
+ * shape does and `presets/shapes.ts` how. The state a shape remembers is the
+ * resolver's, one per study and row, so a row is still data and two casts
+ * holding the same study do not share a spring.
  */
 export type StudyMapping = {
   from: StudyField
   to: ImplKnob
   gain: number
   curve: Curve
+  scale?: StudyScale
+  shape?: Shape
 }
 
 /** What a study costs, so a director can keep a cast inside the frame budget. */
 export const COSTS = ['cheap', 'medium', 'heavy'] as const
 export type Cost = (typeof COSTS)[number]
 
-type Shape = {
+/**
+ * What every study says, whatever kind it is. Named for the piece rather than
+ * for its shape, because a mapping row's `Shape` is the word's other use in
+ * this layer: a stage with a memory over a row's signal.
+ */
+type Piece = {
   /** Stable and kebab-case; a cast names studies by it. */
   id: string
   /** What a picker and the debug overlay show. */
@@ -106,8 +139,8 @@ type Shape = {
   requires?: readonly ImplId[]
 }
 
-export type FlowStudy = Shape & { kind: 'flow' }
-export type InkStudy = Shape & { kind: 'ink' }
+export type FlowStudy = Piece & { kind: 'flow' }
+export type InkStudy = Piece & { kind: 'ink' }
 
 /**
  * A look is the post stack: its knobs are post knobs, and it also says which
@@ -115,7 +148,7 @@ export type InkStudy = Shape & { kind: 'ink' }
  * them. The feedback is the canvas itself and belongs to the cast, and the
  * ribbon is an ink that happens to be drawn by the post stack.
  */
-export type LookStudy = Shape & { kind: 'look'; stages: readonly LookStage[] }
+export type LookStudy = Piece & { kind: 'look'; stages: readonly LookStage[] }
 
 export type Study = FlowStudy | InkStudy | LookStudy
 

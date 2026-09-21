@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { ENVELOPE_RATE, parabolicOffset, TempoTracker } from './TempoTracker'
+import { BAR_BEATS, ENVELOPE_RATE, parabolicOffset, TempoTracker } from './TempoTracker'
 
 const BANDS = 5
 
@@ -205,5 +205,162 @@ describe('TempoTracker', () => {
     expect(Math.abs(slow - 100)).toBeLessThan(1)
     expect(Math.abs(fast - 100)).toBeLessThan(1)
     expect(ENVELOPE_RATE).toBe(100)
+  })
+})
+
+/**
+ * The bar. Four beats counted off the beat phase, with the downbeat put where
+ * the low end is loudest, so a row on `barPhase` changes once a bar and lands
+ * on the one.
+ */
+describe('TempoTracker bars', () => {
+  /**
+   * The same train as `play`, with a gain per band that may differ from beat
+   * to beat, which is what a kick on the one and a softer one elsewhere looks
+   * like to five bands. Every frame is kept, with which beat of the train had
+   * just landed, so a test can ask where the bar was when a particular hit
+   * sounded.
+   */
+  function playBeats(
+    tracker: TempoTracker,
+    options: {
+      bpm: number
+      seconds: number
+      dt: number
+      gainsAt: (beat: number) => readonly number[]
+    },
+  ) {
+    const period = 60 / options.bpm
+    const flux = new Float32Array(BANDS)
+    const frames: { time: number; hit: number; beat: ReturnType<TempoTracker['step']> }[] = []
+    let time = 0
+    let nextHit = 0
+    let beat = 0
+    while (time < options.seconds) {
+      const hit = nextHit < time + options.dt
+      const gains = hit ? options.gainsAt(beat) : undefined
+      for (let band = 0; band < BANDS; band++) flux[band] = gains?.[band] ?? 0
+      if (hit) {
+        nextHit += period
+        beat++
+      }
+
+      time += options.dt
+      frames.push({ time, hit: hit ? beat - 1 : -1, beat: tracker.step(flux, options.dt) })
+    }
+
+    return frames
+  }
+
+  const EVEN = [1, 1, 1, 1, 1]
+  /** A kick on the one: the low two bands three times as loud there. */
+  const ACCENT = [3, 3, 1, 1, 1]
+
+  /** Where the bar phase fell, frame by frame, over the last of a run. */
+  const tail = (
+    frames: ReturnType<typeof playBeats>,
+    seconds: number,
+  ): ReturnType<typeof playBeats> => frames.filter((frame) => frame.time >= seconds)
+
+  it('wraps once every four beats and lands on the beat', () => {
+    const frames = playBeats(new TempoTracker(BANDS), {
+      bpm: 120,
+      seconds: 30,
+      dt: 1 / 60,
+      gainsAt: () => EVEN,
+    })
+
+    const late = tail(frames, 20)
+    const wraps: number[] = []
+    for (let at = 1; at < late.length; at++) {
+      const was = late[at - 1]?.beat.barPhase ?? 0
+      const now = late[at]?.beat.barPhase ?? 0
+      if (was - now > 0.5) wraps.push(late[at]?.time ?? 0)
+    }
+
+    // Ten seconds at 120 BPM is twenty beats, so five bars.
+    expect(wraps.length).toBe(5)
+    for (let at = 1; at < wraps.length; at++)
+      expect((wraps[at] ?? 0) - (wraps[at - 1] ?? 0)).toBeCloseTo((BAR_BEATS * 60) / 120, 1)
+    // A bar begins on a beat, so the beat phase is back at the start too.
+    for (const time of wraps) {
+      const frame = late.find((entry) => entry.time === time)
+      expect(frame?.beat.phase ?? 1).toBeLessThan(1 / 60 / 0.5 + 1e-6)
+    }
+
+    // And it is the whole of 0 to 1 across the four, a quarter to a beat.
+    const phases = late.map((frame) => frame.beat.barPhase)
+    expect(Math.min(...phases)).toBeLessThan(0.02)
+    expect(Math.max(...phases)).toBeGreaterThan(0.98)
+  })
+
+  it('puts the downbeat on the loudest low end of the four', () => {
+    const frames = playBeats(new TempoTracker(BANDS), {
+      bpm: 120,
+      seconds: 40,
+      dt: 1 / 60,
+      gainsAt: (beat) => (beat % BAR_BEATS === 0 ? ACCENT : EVEN),
+    })
+
+    // Every accented hit of the last ten seconds should land at the start of
+    // a bar, and every unaccented one somewhere else.
+    const accents = tail(frames, 30).filter((frame) => frame.hit >= 0 && frame.hit % 4 === 0)
+    expect(accents.length).toBeGreaterThan(4)
+    for (const frame of accents) expect(frame.beat.barPhase, `beat ${frame.hit}`).toBeLessThan(0.1)
+    const others = tail(frames, 30).filter((frame) => frame.hit > 0 && frame.hit % 4 !== 0)
+    for (const frame of others)
+      expect(frame.beat.barPhase, `beat ${frame.hit}`).toBeGreaterThan(0.15)
+  })
+
+  // A hop slides the whole bar, which is worse than being a beat out, so one
+  // odd bar must not move it. Here the third beat is briefly the loudest.
+  it('does not hop the downbeat for a single loud bar elsewhere', () => {
+    const tracker = new TempoTracker(BANDS)
+    const seconds = 40
+    const frames = playBeats(tracker, {
+      bpm: 120,
+      seconds,
+      dt: 1 / 60,
+      gainsAt: (beat) => {
+        // One bar, well after the downbeat has settled, with the accent moved.
+        const odd = beat >= 48 && beat < 52
+        const place = beat % BAR_BEATS
+        if (odd) return place === 2 ? ACCENT : EVEN
+        return place === 0 ? ACCENT : EVEN
+      },
+    })
+
+    const accents = tail(frames, 34).filter((frame) => frame.hit >= 0 && frame.hit % 4 === 0)
+    expect(accents.length).toBeGreaterThan(2)
+    for (const frame of accents) expect(frame.beat.barPhase, `beat ${frame.hit}`).toBeLessThan(0.1)
+  })
+
+  it('reads the same bar at any frame rate', () => {
+    const bars = [1 / 30, 1 / 60, 1 / 144].map((dt) => {
+      const frames = playBeats(new TempoTracker(BANDS), {
+        bpm: 120,
+        seconds: 30,
+        dt,
+        gainsAt: (beat) => (beat % BAR_BEATS === 0 ? ACCENT : EVEN),
+      })
+
+      const accents = tail(frames, 20).filter((frame) => frame.hit >= 0 && frame.hit % 4 === 0)
+      return { dt, phases: accents.map((frame) => frame.beat.barPhase) }
+    })
+
+    for (const { dt, phases } of bars) {
+      expect(phases.length, `dt ${dt}`).toBeGreaterThan(4)
+      for (const phase of phases) expect(phase, `dt ${dt}`).toBeLessThan(0.1)
+    }
+  })
+
+  it('says nothing about the bar until it knows the beat', () => {
+    const tracker = new TempoTracker(BANDS)
+    const flux = new Float32Array(BANDS)
+    for (let frame = 0; frame < 120; frame++) {
+      const beat = tracker.step(flux, 1 / 60)
+      expect(beat.bpm).toBe(0)
+      expect(beat.barPhase).toBe(0)
+    }
   })
 })

@@ -38,9 +38,22 @@ import type { InkStudy } from '../types'
  *
  * The treble is the tempting row for the intensity and it would break the
  * wash-out rule, since a bright full packet would then draw brighter than rest.
- * It goes on the count instead: `treble` adds up to 3 sparks a hit, and that
- * cannot add light on its own, because the bucket holds the sparks a second and
- * a bigger hit only spends it faster. `hardness` puts up to 0.45 on the speed,
+ * It goes on the count instead: the treble's own hit adds up to 3 sparks a
+ * throw, and that cannot add light on its own, because the bucket holds the
+ * sparks a second and a bigger hit only spends it faster.
+ *
+ * That row is `treblePulse` through an envelope, 5 milliseconds up and 320
+ * down, which is the shape of the handful rather than its size. The pulse
+ * jumps to 1 on the band's onset and decays on the extractor's own clock, the
+ * same clock for every study that reads it; the envelope is where this study
+ * says how long its own hit should last. Up in 5 milliseconds is the crack
+ * itself, one frame at any frame rate, and down over 320 is about a third of
+ * a second of tapering, so a hat throws a fat handful and then thinner ones,
+ * and a run of sixteenths never drops back to the single spark between hits
+ * that the band's level gives. The level itself was what the row read before,
+ * and a level is the wrong thing here: it says how much treble is playing and
+ * not that something was just struck, so a ride cymbal held down read as a
+ * hit that never ended. `hardness` puts up to 0.45 on the speed,
  * so a hard track throws its sparks harder. `pace` shortens their life by up to
  * 0.2 s and `weight` makes them up to 2 px fatter on a bass-led track. Energy,
  * swell and hardness each take a square off the intensity, 0.5, 0.3 and 0.2, so
@@ -95,7 +108,15 @@ export const SPARKS: InkStudy = {
   mapping: [
     { from: 'pace', to: 'rate', gain: 20, curve: 'linear' },
     { from: 'tension', to: 'rate', gain: 20, curve: 'linear' },
-    { from: 'treble', to: 'count', gain: 3, curve: 'linear' },
+    {
+      from: 'treblePulse',
+      to: 'count',
+      gain: 3,
+      curve: 'linear',
+      // The study's own swell for one hit, rather than the extractor's: a
+      // crack and a third of a second of taper. See above.
+      shape: { kind: 'envelope', attackMs: 5, releaseMs: 320 },
+    },
     { from: 'hardness', to: 'speed', gain: 0.45, curve: 'linear' },
     { from: 'pace', to: 'life', gain: -0.2, curve: 'linear' },
     { from: 'weight', to: 'size', gain: 2, curve: 'linear' },

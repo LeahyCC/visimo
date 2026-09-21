@@ -61,7 +61,7 @@ import type { PinnedCast } from '../studies/cast'
 import { castOrDefault, CASTS, DEFAULT_CAST_ID } from '../studies/casts/index'
 import type { ImplId } from '../studies/impls'
 import { findStudy, sceneOf } from '../studies/registry'
-import { blendKnobs, castFrame, liveCast, resolveLive } from '../studies/resolve'
+import { blendKnobs, castFrame, forgetShapes, liveCast, resolveLive } from '../studies/resolve'
 import type { CastFrame, KnobsAt, LiveCast, LiveStudy } from '../studies/resolve'
 import type { Character } from '../studies/types'
 import { acquireGpu, configureCanvas, onGpuLost } from './Device'
@@ -529,6 +529,9 @@ class Renderer {
     this.characterDue = 0
     this.client?.newTrack()
     this.playheadAt = null
+    // A spring mid-ring and a total that has been climbing for three minutes
+    // are both about the track that has just stopped playing.
+    forgetShapes(this.resolved)
   }
 
   /**
@@ -555,7 +558,12 @@ class Renderer {
     if (position === undefined || !Number.isFinite(position)) return
     const last = this.playheadAt
     this.playheadAt = position
-    if (last !== null && Math.abs(position - last - dt) > SEEK_SECONDS) this.client?.seeked()
+    if (last !== null && Math.abs(position - last - dt) > SEEK_SECONDS) {
+      this.client?.seeked()
+      // The shaped rows are about the seconds of music just played, which are
+      // now the wrong seconds, so they start again as they do on a new track.
+      forgetShapes(this.resolved)
+    }
   }
 
   /**
@@ -877,6 +885,17 @@ class Renderer {
     return this.resolved.knobs.get(id) ?? NO_KNOBS
   }
 
+  /**
+   * The numbers one study was drawn with this frame, or nothing when it is not
+   * live. The bench's readout reads this rather than resolving the study
+   * again: a shaped row remembers where it was, so a second resolver stepping
+   * the same rows at the panel's own rate would be reading a different study
+   * from the one on screen.
+   */
+  resolvedKnobs(id: string): Readonly<Record<string, number>> | undefined {
+    return this.resolved.knobs.get(id)
+  }
+
   private drawFrame(now: number) {
     this.frame = 0
     const { canvas, context, gpu, post, compatibility } = this
@@ -941,7 +960,7 @@ class Renderer {
     // build unless a director was choosing.
     const live = this.live
     const tension = this.packet[F.tension] ?? 0
-    resolveLive(live.studies, live.canvas, this.packet, tension, this.resolved)
+    resolveLive(live.studies, live.canvas, this.packet, tension, this.resolved, dt)
     if (this.postPatch) patchPostParams(this.resolved.post, this.postPatch)
     const flows = this.liveFlowStudies
 

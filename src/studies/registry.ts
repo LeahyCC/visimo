@@ -47,6 +47,7 @@ import { HARD_CLEAN } from './defs/hard-clean'
 import { IMPACT_FLASH } from './defs/impact-flash'
 import { IMPLODE } from './defs/implode'
 import { LAZY_FLUID } from './defs/lazy-fluid'
+import { LIGHTNING } from './defs/lightning'
 import { RADIAL_BURST } from './defs/radial-burst'
 import { RIBBON } from './defs/ribbon'
 import { RISER_STREAKS } from './defs/riser-streaks'
@@ -80,6 +81,7 @@ export const STUDIES: readonly Study[] = [
   BEAT_RINGS,
   SPECTRUM_RING,
   SPARKS,
+  LIGHTNING,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

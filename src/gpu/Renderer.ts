@@ -39,6 +39,7 @@ import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
 import { HaloInk } from '../impls/HaloInk'
+import { LightningInk } from '../impls/LightningInk'
 import { RibbonInk } from '../impls/RibbonInk'
 import { RingsInk } from '../impls/RingsInk'
 import { ShardsInk } from '../impls/ShardsInk'
@@ -653,6 +654,7 @@ class Renderer {
     if (impl === 'rings') return new RingsInk()
     if (impl === 'spectrum') return new SpectrumInk()
     if (impl === 'sparks') return new SparksInk()
+    if (impl === 'lightning') return new LightningInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

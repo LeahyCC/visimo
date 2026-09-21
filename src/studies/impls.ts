@@ -33,6 +33,7 @@ export const IMPL_IDS = [
   'spectrum',
   'sparks',
   'lasers',
+  'petals',
   'grid',
   'look',
 ] as const
@@ -280,6 +281,39 @@ export const LASER_KNOBS = [
 export type LaserKnob = (typeof LASER_KNOBS)[number]
 
 /**
+ * The petals' numbers. Their ranges and units are in `impls/petals.params.ts`.
+ * `note0` to `note11` are how lit each petal is, one per pitch class from C to
+ * B, and each is fed by that note's own row of the packet; `open` is how far
+ * the flower has unfolded, from a bud to full bloom; `size` is the radius as a
+ * share of the short side and `width` how fat a petal is; `layer` is how far a
+ * second, smaller whorl of petals has come up between the first; `glow` is the
+ * light's width round a petal in pixels; `turn` is the flower's angle in turns,
+ * which only an integrating row can move.
+ */
+export const PETAL_KNOBS = [
+  'note0',
+  'note1',
+  'note2',
+  'note3',
+  'note4',
+  'note5',
+  'note6',
+  'note7',
+  'note8',
+  'note9',
+  'note10',
+  'note11',
+  'open',
+  'size',
+  'width',
+  'layer',
+  'glow',
+  'intensity',
+  'turn',
+] as const
+export type PetalKnob = (typeof PETAL_KNOBS)[number]
+
+/**
  * The grid's numbers. Their ranges and units are in `impls/grid.params.ts`.
  * `speed` is world units a second the camera flies and a cell is one unit;
  * `height` and `valley` shape the ground the lines lie on (how tall the relief
@@ -382,6 +416,7 @@ export type ImplKnob =
   | RingsKnob
   | SpectrumKnob
   | LaserKnob
+  | PetalKnob
   | GridKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
@@ -400,6 +435,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   spectrum: SPECTRUM_KNOBS,
   sparks: SPARKS_KNOBS,
   lasers: LASER_KNOBS,
+  petals: PETAL_KNOBS,
   grid: GRID_KNOBS,
   look: LOOK_KNOBS,
 }

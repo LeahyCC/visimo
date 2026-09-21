@@ -19,10 +19,12 @@ import {
   BAND_HIT_CENTRE,
   BAND_HIT_WIDTH,
   BAND_PULSE,
+  CHROMA_ROW,
   DEFAULT_BANDS,
   F,
   IMPACT_DECAY_SECONDS,
 } from '../../src/audio/FeatureExtractor'
+import { follow } from '../../src/presets/shapes'
 
 export const BPM_RANGE = [40, 240] as const
 
@@ -48,6 +50,21 @@ const KICK_BANDS = [0, 1] as const
 const SNARE_BANDS = [2, 3] as const
 const HAT_BANDS = [4] as const
 const HIT = { kick: 1, snare: 0.8, hat: 0.6 } as const
+
+/**
+ * One chord a bar, round and round: C, G, A minor, F, as pitch classes. The
+ * commonest four in pop, and a key change is not needed to see the flower move.
+ */
+const PROGRESSION = [
+  [0, 4, 7],
+  [7, 11, 2],
+  [9, 0, 4],
+  [5, 9, 0],
+] as const
+
+/** The note rows rise and fall as the extractor's do, so a study sees the same shape. */
+const NOTE_ATTACK_MS = 50
+const NOTE_RELEASE_MS = 450
 
 /** The last phase below a whole beat that a Float32 still holds as itself. */
 const PHASE_MAX = 0.999999
@@ -76,6 +93,7 @@ export class SyntheticBeat {
   private slot = -1
   private samples = 0
   private readonly pulse = new Float32Array(BAND_COUNT)
+  private readonly notes = new Float32Array(12)
   private readonly wave = new Float32Array(WAVE_SAMPLES)
 
   /** Start the bar again, for a bench that has just been switched on. */
@@ -84,6 +102,7 @@ export class SyntheticBeat {
     this.slot = -1
     this.samples = 0
     this.pulse.fill(0)
+    this.notes.fill(0)
   }
 
   /**
@@ -142,7 +161,19 @@ export class SyntheticBeat {
     const bars = this.beats / (SLOTS / 2)
     packet[F.barPhase] = Math.min(bars - Math.floor(bars), PHASE_MAX)
     packet[F.swell] = 0.5
+    this.writeNotes(packet, dt, bars)
     return packet
+  }
+
+  /** The chord this bar plays, with the rows easing to it and off the last one. */
+  private writeNotes(packet: Float32Array, dt: number, bars: number) {
+    const chord: readonly number[] = PROGRESSION[Math.floor(bars) % PROGRESSION.length] ?? []
+    for (let note = 0; note < 12; note += 1) {
+      const target = chord.includes(note) ? 1 : 0
+      const value = follow(this.notes[note] ?? 0, target, NOTE_ATTACK_MS, NOTE_RELEASE_MS, dt)
+      this.notes[note] = value
+      packet[CHROMA_ROW + note] = value
+    }
   }
 
   /** The hits this slot of the bar plays, written into the packet. Returns the loudest. */

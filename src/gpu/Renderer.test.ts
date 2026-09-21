@@ -425,6 +425,26 @@ vi.mock('../impls/GridInk', () => ({
   },
 }))
 
+vi.mock('../impls/PetalsInk', () => ({
+  PetalsInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.petals = (impls.built.petals ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('petals', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('petals')
+    }
+    dispose() {
+      impls.disposed.petals = (impls.disposed.petals ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/FlowBlend', () => ({
   FlowBlend: class {
     init() {}

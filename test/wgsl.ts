@@ -1,41 +1,72 @@
-import { NagaError, parseWgsl, validate } from 'naga-wasm'
+import { create } from 'webgpu'
 
 export type WgslVerdict =
   | { ok: true }
   | { ok: false; message: string; line: number | null; column: number | null; report: string }
 
+export type WgslChecker = {
+  check: (source: string) => Promise<WgslVerdict>
+  close: () => void
+}
+
+/** A message's position, or null where Tint gave none (it reports 0). */
+const position = (n: number) => (n > 0 ? n : null)
+
 /**
- * Run a WGSL module through naga's front end and validator, which is the same
- * parse-then-validate a browser's compiler does, without a GPU. It sits under
- * `test/` and not `src/` because `src` is the published file list and this is
- * a dev dependency.
+ * A checker that compiles WGSL with Tint, the compiler Chromium uses, on
+ * Dawn's Node bindings. It sits under `test/` and not `src/` because `src` is
+ * the published file list and `webgpu` is a dev dependency.
  *
- * naga puts the position only in its formatted report (`wgsl:2:7`), so it is
- * lifted out here for a caller that wants to name the line.
+ * The `null` backend is what lets this run with no GPU and no Vulkan
+ * driver: it is a real Dawn device that draws nothing, and shader modules are
+ * parsed and validated by Tint on the CPU before any backend is asked to do
+ * anything. Nothing here submits work.
+ *
+ * Checks share one device and one error-scope stack, so they must be awaited
+ * one at a time, which a test file does.
  */
-export function checkWgsl(source: string): WgslVerdict {
-  // The handles hold wasm memory, so they are released whether or not
-  // validation throws.
-  let module: ReturnType<typeof parseWgsl> | undefined
-  let info: ReturnType<typeof validate> | undefined
-  try {
-    module = parseWgsl(source)
-    info = validate(module)
+export async function createWgslChecker(): Promise<WgslChecker> {
+  const gpu = create(['backend=null'])
+  const adapter = await gpu.requestAdapter()
+  if (!adapter) throw new Error('Dawn found no adapter, not even the null backend')
+  const device = await adapter.requestDevice()
 
-    return { ok: true }
-  } catch (error) {
-    if (!(error instanceof NagaError)) throw error
-    const at = /wgsl:(\d+):(\d+)/.exec(error.formatted)
+  return {
+    async check(source) {
+      // The scope keeps a rejected module from surfacing later as an
+      // uncaptured error that fails some other test.
+      device.pushErrorScope('validation')
+      const module = device.createShaderModule({ code: source })
+      const info = await module.getCompilationInfo()
+      const scoped = await device.popErrorScope()
+      const errors = info.messages.filter((m) => m.type === 'error')
+      const first = errors[0]
+      if (!first && !scoped) return { ok: true }
 
-    return {
-      ok: false,
-      message: error.message,
-      line: at ? Number(at[1]) : null,
-      column: at ? Number(at[2]) : null,
-      report: error.formatted,
-    }
-  } finally {
-    info?.free()
-    module?.free()
+      const lines = source.split('\n')
+      const report = info.messages
+        .map((m) => {
+          const at = `${m.lineNum}:${m.linePos}`
+          const shown = m.lineNum > 0 ? `\n${m.lineNum} | ${lines[m.lineNum - 1] ?? ''}` : ''
+
+          return `${m.type}: ${m.message} (${at})${shown}`
+        })
+        .join('\n')
+
+      return {
+        ok: false,
+        // A module can be refused with no message on the module itself, in
+        // which case the scope's text is all there is.
+        message: first?.message ?? scoped?.message ?? 'shader module rejected',
+        line: first ? position(first.lineNum) : null,
+        column: first ? position(first.linePos) : null,
+        report: report || (scoped?.message ?? ''),
+      }
+    },
+    close() {
+      // Dropping the device lets the process exit; Dawn keeps it alive
+      // otherwise.
+      device.destroy()
+    },
   }
 }

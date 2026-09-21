@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { checkWgsl, type WgslVerdict } from './wgsl'
+import { createWgslChecker, type WgslChecker, type WgslVerdict } from './wgsl'
 
 // Vite's own `?raw`, so each string is the file the app's bundler would hand
 // over, byte for byte.
@@ -17,6 +17,14 @@ const appFiles = import.meta.glob<string>(['../src/**/*.ts', '!../src/**/*.test.
   import: 'default',
   eager: true,
 })
+
+let checker: WgslChecker
+
+beforeAll(async () => {
+  checker = await createWgslChecker()
+})
+
+afterAll(() => checker.close())
 
 const shaders = new Map(
   Object.entries(shaderFiles).map(([path, text]) => [path.slice(path.lastIndexOf('/') + 1), text]),
@@ -75,13 +83,13 @@ const appImports = new Map(
 const assembled = new Set(ASSEMBLIES.flatMap(({ prefix, parts }) => [prefix, ...parts]))
 const direct = [...shaders.keys()].filter((file) => !assembled.has(file))
 
-/** What a failure says: the file and line first, then naga's own report. */
+/** What a failure says: the file and line first, then the compiler's own report. */
 function explain(verdict: WgslVerdict, file: string, prefix?: { file: string; text: string }) {
   if (verdict.ok) return ''
   let where = `src/shaders/${file}`
   let line = verdict.line
   if (prefix && line !== null) {
-    // The text naga saw is the prefix and then the part, so a line past the
+    // The text Tint saw is the prefix and then the part, so a line past the
     // prefix belongs to the part, counted from its own first line.
     const prefixLines = prefix.text.split('\n').length - 1
     if (line > prefixLines) line -= prefixLines
@@ -89,7 +97,10 @@ function explain(verdict: WgslVerdict, file: string, prefix?: { file: string; te
   }
   const at = line === null ? '' : `:${line}${verdict.column === null ? '' : `:${verdict.column}`}`
 
-  return `${where}${at} ${verdict.message}\n${verdict.report}`
+  // The report counts lines in the joined text, which is what the compiler read.
+  const note = prefix ? `\n(the report below counts lines in ${prefix.file} plus this file)` : ''
+
+  return `${where}${at} ${verdict.message}${note}\n${verdict.report}`
 }
 
 describe('shader coverage', () => {
@@ -154,24 +165,24 @@ describe('shader coverage', () => {
 })
 
 describe('shaders compile', () => {
-  it.each(direct)('%s', (file) => {
-    const verdict = checkWgsl(shaders.get(file) ?? '')
+  it.each(direct)('%s', async (file) => {
+    const verdict = await checker.check(shaders.get(file) ?? '')
     expect(verdict.ok, explain(verdict, file)).toBe(true)
   })
 
   for (const { prefix, parts } of ASSEMBLIES) {
     describe.each(parts)(`${prefix} + %s`, (part) => {
-      it('validates as the app builds it', () => {
+      it('validates as the app builds it', async () => {
         const prefixText = shaders.get(prefix) ?? ''
-        const verdict = checkWgsl(prefixText + (shaders.get(part) ?? ''))
+        const verdict = await checker.check(prefixText + (shaders.get(part) ?? ''))
         expect(verdict.ok, explain(verdict, part, { file: prefix, text: prefixText })).toBe(true)
       })
     })
   }
 })
 
-// The two mistakes that reached a pull request with every other test green.
-// They are here so the check is known to see them, not only to pass.
+// The mistakes that reached a pull request with every other test green. They
+// are here so the check is known to see them, not only to pass.
 describe('the checker rejects what a browser rejects', () => {
   const frame = (body: string) =>
     `@fragment
@@ -180,49 +191,50 @@ ${body}
   return vec4<f32>(1.0);
 }`
 
-  function rejected(source: string): Extract<WgslVerdict, { ok: false }> {
-    const verdict = checkWgsl(source)
+  async function rejected(source: string): Promise<Extract<WgslVerdict, { ok: false }>> {
+    const verdict = await checker.check(source)
     if (verdict.ok) throw new Error('expected the shader to be rejected')
 
     return verdict
   }
 
-  it('accepts a sound shader', () => {
-    expect(checkWgsl(frame('  var a = 1.0;\n  a = 2.0;')).ok).toBe(true)
+  it('accepts a sound shader', async () => {
+    expect((await checker.check(frame('  var a = 1.0;\n  a = 2.0;'))).ok).toBe(true)
   })
 
-  it('rejects a local named `from`, on its line', () => {
-    const verdict = rejected(frame('  let from = 1.0;'))
-    expect(verdict.message).toContain('`from`')
-    expect(verdict.message).toContain('reserved')
+  it('rejects a local named `from`, on its line', async () => {
+    const verdict = await rejected(frame('  let from = 1.0;'))
+    expect(verdict.message).toMatch(/'from' is a reserved keyword/)
     expect(verdict.line).toBe(3)
-    expect(verdict.report).toContain('wgsl:3:7')
+    expect(verdict.column).toBe(7)
+    expect(verdict.report).toContain('3 |   let from = 1.0;')
   })
 
-  it('rejects a local named `target`, on its line', () => {
-    const verdict = rejected(frame('  var a = 1.0;\n  var target = a;'))
-    expect(verdict.message).toContain('`target`')
+  it('rejects a local named `target`, on its line', async () => {
+    const verdict = await rejected(frame('  var a = 1.0;\n  var target = a;'))
+    expect(verdict.message).toMatch(/'target' is a reserved keyword/)
     expect(verdict.line).toBe(4)
   })
 
-  it('rejects assigning to a `let`, on the assignment', () => {
-    const verdict = rejected(frame('  let a = 1.0;\n  a = 2.0;'))
-    expect(verdict.message).toContain('assignment')
-    // naga reports the binding it cannot change and the assignment together;
-    // the report leads with the `let` on line 3 and points at line 4.
-    expect(verdict.line).toBe(3)
-    expect(verdict.report).toMatch(/\n4 │\s+a = 2\.0;/)
+  it('rejects assigning to a `let`, on the assignment', async () => {
+    const verdict = await rejected(frame('  let a = 1.0;\n  a = 2.0;'))
+    expect(verdict.message).toMatch(/cannot assign to 'let a'/)
+    // The `let` is on line 3 and the second assignment on line 4, which is the
+    // line the message points at. The report also says where `a` was declared.
+    expect(verdict.line).toBe(4)
+    expect(verdict.report).toContain('4 |   a = 2.0;')
+    expect(verdict.report).toMatch(/declared here \(3:/)
   })
 
-  it('names the line in a failure from a real file', () => {
-    const verdict = rejected(frame('  let from = 1.0;'))
+  it('names the line in a failure from a real file', async () => {
+    const verdict = await rejected(frame('  let from = 1.0;'))
     const text = explain(verdict, 'example.wgsl')
     expect(text).toMatch(/^src\/shaders\/example\.wgsl:3:7 /)
   })
 
-  it('names the part, not the prefix, when the fault is in the part', () => {
+  it('names the part, not the prefix, when the fault is in the part', async () => {
     const prefix = 'fn unit_value() -> f32 { return 1.0; }\n'
-    const verdict = rejected(prefix + frame('  let from = unit_value();'))
+    const verdict = await rejected(prefix + frame('  let from = unit_value();'))
     const text = explain(verdict, 'fake.part.wgsl', { file: 'fake.common.wgsl', text: prefix })
     // Line 4 of the assembled text is line 3 of the part.
     expect(verdict.line).toBe(4)

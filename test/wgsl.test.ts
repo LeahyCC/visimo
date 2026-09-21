@@ -38,8 +38,19 @@ const shaders = new Map(
  *
  * `owner` is the file that does the joining. `appImports` below reads it, so
  * this list cannot fall out of step with the code without a test failing.
+ *
+ * `partsFrom` is for a join whose two halves live in different files, which
+ * the raymarch kit is: the base class holds the prefix and does the joining,
+ * and each ink built on it holds its own part and hands it over. It names
+ * where such a part is imported, so the check follows the code rather than
+ * assuming both halves arrive in one file.
  */
-const ASSEMBLIES: { owner: string; prefix: string; parts: string[] }[] = [
+const ASSEMBLIES: {
+  owner: string
+  prefix: string
+  parts: string[]
+  partsFrom?: Record<string, string>
+}[] = [
   {
     owner: 'src/post/PostStack.ts',
     prefix: 'post.common.wgsl',
@@ -67,6 +78,12 @@ const ASSEMBLIES: { owner: string; prefix: string; parts: string[] }[] = [
     owner: 'src/impls/ParticleField.ts',
     prefix: 'particles.common.wgsl',
     parts: ['particles.draw.wgsl', 'particles.sim.wgsl'],
+  },
+  {
+    owner: 'src/impls/RaymarchInk.ts',
+    prefix: 'raymarch.common.wgsl',
+    parts: ['morph.wgsl'],
+    partsFrom: { 'morph.wgsl': 'src/impls/MorphInk.ts' },
   },
 ]
 
@@ -135,16 +152,26 @@ describe('shader coverage', () => {
     expect(missing, `in ASSEMBLIES but not in src/shaders: ${missing.join(', ')}`).toEqual([])
   })
 
-  for (const { owner, prefix, parts } of ASSEMBLIES) {
+  for (const { owner, prefix, parts, partsFrom } of ASSEMBLIES) {
     it(`${owner} joins exactly the declared shaders, prefix first`, () => {
-      const found = appImports.get(owner) ?? []
-      const declared = [prefix, ...parts].sort()
-      expect(
-        found.map((i) => i.file).sort(),
-        `${owner} imports a different set of shaders than ASSEMBLIES declares for it; update ASSEMBLIES`,
-      ).toEqual(declared)
+      const imports = appImports.get(owner) ?? []
+      const found = imports.map((i) => i.file)
+      const elsewhere = partsFrom ?? {}
+      // What the joining file itself has to import: the prefix, and every
+      // part that is not declared as coming from somewhere else. It may
+      // import whole shaders of its own besides, which the check below holds
+      // to being handed over whole, so this asks what is there and not what
+      // is not.
+      for (const file of [prefix, ...parts.filter((part) => !elsewhere[part])])
+        expect(found, `${owner} no longer imports ${file}; update ASSEMBLIES`).toContain(file)
 
-      const prefixName = found.find((i) => i.file === prefix)?.ident
+      for (const [part, from] of Object.entries(elsewhere))
+        expect(
+          (appImports.get(from) ?? []).map((i) => i.file),
+          `${part} is declared as coming from ${from}, which does not import it`,
+        ).toContain(part)
+
+      const prefixName = imports.find((i) => i.file === prefix)?.ident
       const text = appFiles[`../${owner}`] ?? ''
       // The order matters: WGSL is read top to bottom by the front end, and
       // the parts use what the prefix declares.
@@ -156,12 +183,13 @@ describe('shader coverage', () => {
   }
 
   it('passes every other shader to createShaderModule whole', () => {
-    const owners = new Set(ASSEMBLIES.map((a) => a.owner))
     const wrong: string[] = []
     for (const [owner, found] of appImports) {
-      if (owners.has(owner)) continue
       const text = appFiles[`../${owner}`] ?? ''
       for (const { ident, file } of found) {
+        // A shader that belongs to a declared assembly is joined rather than
+        // handed over whole, wherever it is imported.
+        if (assembled.has(file)) continue
         // `code: shader,` or `code: shader }` and nothing joined on, so the
         // file on disk is the module.
         if (!new RegExp(`code:\\s*${ident}\\s*[,}]`).test(text)) wrong.push(`${owner} (${file})`)

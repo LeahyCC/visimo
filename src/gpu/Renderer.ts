@@ -41,6 +41,7 @@ import { GridInk } from '../impls/GridInk'
 import { HaloInk } from '../impls/HaloInk'
 import { LasersInk } from '../impls/LasersInk'
 import { LightningInk } from '../impls/LightningInk'
+import { MorphInk } from '../impls/MorphInk'
 import { ParticleField } from '../impls/ParticleField'
 import { DUST_PROFILE, SPARKS_PROFILE } from '../impls/particles.params'
 import { PetalsInk } from '../impls/PetalsInk'
@@ -678,6 +679,7 @@ class Renderer {
     if (impl === 'spectrum') return new SpectrumInk()
     if (impl === 'sparks') return new ParticleField(SPARKS_PROFILE)
     if (impl === 'lasers') return new LasersInk()
+    if (impl === 'morph') return new MorphInk()
     if (impl === 'petals') return new PetalsInk()
     if (impl === 'lightning') return new LightningInk()
     if (impl === 'grid') return new GridInk()

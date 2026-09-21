@@ -405,6 +405,26 @@ vi.mock('../impls/LasersInk', () => ({
   },
 }))
 
+vi.mock('../impls/MorphInk', () => ({
+  MorphInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.morph = (impls.built.morph ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('morph', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('morph')
+    }
+    dispose() {
+      impls.disposed.morph = (impls.disposed.morph ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/GridInk', () => ({
   GridInk: class {
     readonly detail = ''

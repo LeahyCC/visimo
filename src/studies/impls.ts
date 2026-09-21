@@ -33,6 +33,7 @@ export const IMPL_IDS = [
   'spectrum',
   'sparks',
   'lasers',
+  'morph',
   'petals',
   'lightning',
   'grid',
@@ -282,6 +283,33 @@ export const LASER_KNOBS = [
 export type LaserKnob = (typeof LASER_KNOBS)[number]
 
 /**
+/**
+ * The shape morph's numbers. Their ranges and units are in
+ * `impls/morph.params.ts`. `size` is the solid's bounding radius in world
+ * units and `ripple` a displacement of its surface in the same units, held
+ * against `rippleScale`, which is waves across one of them; `spin` and
+ * `tumble` are angles in turns rather than speeds, which is why the study
+ * drives them through `integrate` rows; `rim` and `specular` are the two
+ * lights that are not the key, and `hue` moves both of them round the palette
+ * together. `glint` is the share of the frame's own brightest that light must
+ * clear to be drawn at all, as it is for the fractal.
+ */
+export const MORPH_KNOBS = [
+  'size',
+  'ripple',
+  'rippleScale',
+  'spin',
+  'tumble',
+  'rim',
+  'specular',
+  'hue',
+  'intensity',
+  'glint',
+  'glintKnee',
+] as const
+export type MorphKnob = (typeof MORPH_KNOBS)[number]
+
+/**
  * The petals' numbers. Their ranges and units are in `impls/petals.params.ts`.
  * `note0` to `note11` are how lit each petal is, one per pitch class from C to
  * B, and each is fed by that note's own row of the packet; `open` is how far
@@ -429,6 +457,7 @@ export type ImplKnob =
   | RingsKnob
   | SpectrumKnob
   | LaserKnob
+  | MorphKnob
   | PetalKnob
   | LightningKnob
   | GridKnob
@@ -449,6 +478,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   spectrum: SPECTRUM_KNOBS,
   sparks: SPARKS_KNOBS,
   lasers: LASER_KNOBS,
+  morph: MORPH_KNOBS,
   petals: PETAL_KNOBS,
   lightning: LIGHTNING_KNOBS,
   grid: GRID_KNOBS,

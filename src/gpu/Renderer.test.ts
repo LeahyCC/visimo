@@ -411,9 +411,6 @@ vi.mock('../impls/MorphInk', () => ({
     constructor() {
       impls.built.morph = (impls.built.morph ?? 0) + 1
     }
-    get maxFps() {
-      return 60
-    }
     init() {}
     resize() {}
     update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
@@ -424,6 +421,26 @@ vi.mock('../impls/MorphInk', () => ({
     }
     dispose() {
       impls.disposed.morph = (impls.disposed.morph ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/PetalsInk', () => ({
+  PetalsInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.petals = (impls.built.petals ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('petals', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('petals')
+    }
+    dispose() {
+      impls.disposed.petals = (impls.disposed.petals ?? 0) + 1
     }
   },
 }))

@@ -42,6 +42,7 @@ import { LasersInk } from '../impls/LasersInk'
 import { MorphInk } from '../impls/MorphInk'
 import { ParticleField } from '../impls/ParticleField'
 import { DUST_PROFILE, SPARKS_PROFILE } from '../impls/particles.params'
+import { PetalsInk } from '../impls/PetalsInk'
 import { RibbonInk } from '../impls/RibbonInk'
 import { RingsInk } from '../impls/RingsInk'
 import { ShardsInk } from '../impls/ShardsInk'
@@ -677,6 +678,7 @@ class Renderer {
     if (impl === 'sparks') return new ParticleField(SPARKS_PROFILE)
     if (impl === 'lasers') return new LasersInk()
     if (impl === 'morph') return new MorphInk()
+    if (impl === 'petals') return new PetalsInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

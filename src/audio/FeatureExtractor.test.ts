@@ -6,11 +6,13 @@ import {
   BAND_NAMES,
   BAND_PULSE,
   bandFilter,
+  CHROMA_ROW,
   dbToLinear,
   DEFAULT_BANDS,
   Envelope,
   F,
   FeatureExtractor,
+  Harmony,
   keyHueOf,
   keyLabel,
   keyOf,
@@ -113,7 +115,7 @@ describe('FeatureExtractor', () => {
   const make = (fftSize = FFT_SIZE) => new FeatureExtractor({ sampleRate: SAMPLE_RATE, fftSize })
 
   it('has the documented packet length and indices', () => {
-    expect(PACKET_LENGTH).toBe(53)
+    expect(PACKET_LENGTH).toBe(65)
     expect(F.treble).toBe(4)
     expect(F.tempoBpm).toBe(21)
     expect(F.dt).toBe(23)
@@ -132,6 +134,9 @@ describe('FeatureExtractor', () => {
     expect(F.impact).toBe(50)
     expect(F.grit).toBe(51)
     expect(F.barPhase).toBe(52)
+    expect(F.chroma0).toBe(53)
+    expect(F.chroma11).toBe(64)
+    expect(CHROMA_ROW).toBe(F.chroma0)
     expect(make().packet).toHaveLength(PACKET_LENGTH)
   })
 
@@ -857,6 +862,67 @@ describe('harmony', () => {
     const silent = hold(extractor, silence, 8)
     expect(silent[F.keyClarity] ?? 1).toBeLessThan(0.1)
     expect(silent[F.keyHue]).toBeCloseTo(hue, 2)
+  })
+
+  describe('the note rows', () => {
+    /** A chord's worth of peaks on C, E and G for `seconds`, then nothing for `after`. */
+    function play(harmony: Harmony, dt: number, seconds: number, sounding: boolean) {
+      const readings: number[][] = []
+      for (let t = 0; t < seconds - 1e-9; t += dt) {
+        if (sounding)
+          for (const hz of [130.81, 164.81, 196, 261.63, 329.63, 392]) harmony.add(hz, 4)
+        harmony.step(dt)
+        readings.push(Array.from(harmony.notes))
+      }
+
+      return readings
+    }
+
+    it('rises faster than it falls', () => {
+      const harmony = new Harmony()
+      const up = play(harmony, 1 / 240, 1, true)
+      const down = play(harmony, 1 / 240, 2, false)
+      const reach = (rows: number[][], from: number, to: (value: number) => boolean) =>
+        rows.findIndex((row) => to(row[from] ?? 0)) / 240
+      // Up to 0.9 and back down to 0.1 of the way, on the C.
+      const rise = reach(up, 0, (value) => value > 0.9)
+      const fall = reach(down, 0, (value) => value < 0.1)
+      expect(rise).toBeGreaterThan(0)
+      expect(fall).toBeGreaterThan(rise * 3)
+    })
+
+    it('is the same curve at 60, 144 and 240 frames a second', () => {
+      const at = (rate: number) => {
+        const harmony = new Harmony()
+        const up = play(harmony, 1 / rate, 0.5, true)
+        const down = play(harmony, 1 / rate, 0.5, false)
+        return [up[up.length - 1], down[down.length - 1]].map((row) => row?.[0] ?? 0)
+      }
+
+      const [slowUp, slowDown] = at(60)
+      for (const rate of [144, 240]) {
+        const [up, down] = at(rate)
+        expect(up).toBeCloseTo(slowUp ?? 0, 1)
+        expect(down).toBeCloseTo(slowDown ?? 0, 1)
+      }
+    })
+
+    it('lights the notes that stand out and none of a flat spectrum', () => {
+      const harmony = new Harmony()
+      for (let frame = 0; frame < 120; frame++) {
+        for (let k = 0; k < 12; k++) harmony.add(130.81 * 2 ** (k / 12), 4)
+        harmony.step(1 / 60)
+      }
+
+      expect(Math.max(...harmony.notes)).toBe(0)
+    })
+
+    it('is exactly zero once the notes stop', () => {
+      const harmony = new Harmony()
+      play(harmony, 1 / 60, 1, true)
+      const rows = play(harmony, 1 / 60, 6, false)
+      expect(rows[rows.length - 1]).toEqual(new Array<number>(12).fill(0))
+    })
   })
 
   it('hears little clarity in noise', () => {

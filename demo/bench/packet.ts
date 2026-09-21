@@ -1,7 +1,7 @@
 /**
  * How the bench writes over the packet. The controls it owns are the five
- * character axes and the three moment levels, and each of them is a packet row
- * or two; an override says which row and what number, and this is the whole of
+ * character axes, the three moment levels and the twelve notes, and each of
+ * them is a packet row or two; an override says which row and what number, and this is the whole of
  * how it lands. Nothing else in the packet is touched, which is what lets a
  * live track keep playing under a bench that holds only the tension.
  *
@@ -36,8 +36,25 @@ export function overridePacket(
   return packet
 }
 
-/** The eight levels a slider holds. `impact` is an event and has a button instead. */
-export const BENCH_ROWS = [...CHARACTER_AXES, 'tension', 'release', 'rest'] as const
+/** The twelve note rows a slider each may hold, C to B, named as the packet's rows are. */
+export const NOTE_ROWS = [
+  'chroma0',
+  'chroma1',
+  'chroma2',
+  'chroma3',
+  'chroma4',
+  'chroma5',
+  'chroma6',
+  'chroma7',
+  'chroma8',
+  'chroma9',
+  'chroma10',
+  'chroma11',
+] as const
+export type NoteRow = (typeof NOTE_ROWS)[number]
+
+/** The twenty levels a slider holds. `impact` is an event and has a button instead. */
+export const BENCH_ROWS = [...CHARACTER_AXES, 'tension', 'release', 'rest', ...NOTE_ROWS] as const
 export type BenchRow = (typeof BENCH_ROWS)[number]
 
 /**
@@ -59,6 +76,18 @@ export const ROWS_OF: Readonly<Record<BenchRow, readonly number[]>> = {
   tension: [F.tension],
   release: [F.release],
   rest: [F.rest],
+  chroma0: [F.chroma0],
+  chroma1: [F.chroma1],
+  chroma2: [F.chroma2],
+  chroma3: [F.chroma3],
+  chroma4: [F.chroma4],
+  chroma5: [F.chroma5],
+  chroma6: [F.chroma6],
+  chroma7: [F.chroma7],
+  chroma8: [F.chroma8],
+  chroma9: [F.chroma9],
+  chroma10: [F.chroma10],
+  chroma11: [F.chroma11],
 }
 
 /** What a control reads when nothing holds it: no opinion on an axis, no moment. */
@@ -71,6 +100,18 @@ export const REST_LEVEL: Readonly<Record<BenchRow, number>> = {
   tension: 0,
   release: 0,
   rest: 0,
+  chroma0: 0,
+  chroma1: 0,
+  chroma2: 0,
+  chroma3: 0,
+  chroma4: 0,
+  chroma5: 0,
+  chroma6: 0,
+  chroma7: 0,
+  chroma8: 0,
+  chroma9: 0,
+  chroma10: 0,
+  chroma11: 0,
 }
 
 export type Held = Readonly<Partial<Record<BenchRow, number>>>
@@ -81,18 +122,25 @@ export const isBenchRow = (value: string): value is BenchRow =>
 const isAxis = (value: BenchRow): value is CharacterAxis =>
   (CHARACTER_AXES as readonly string[]).includes(value)
 
+export const isNoteRow = (value: string): value is NoteRow =>
+  (NOTE_ROWS as readonly string[]).includes(value)
+
 const unit = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value)
 
 /**
  * The overrides for a set of controls. Over a live track only the held ones
  * are written and the rest of the music passes through. Over a synthetic
  * packet there is no music to pass through, so every control is written, held
- * or not, at its resting level when nothing holds it.
+ * or not, at its resting level when nothing holds it. The notes are the
+ * exception: the synthetic packet plays a chord progression into them, and a
+ * flower with every note at rest would be a black frame, so an unheld note is
+ * left to that and only a held one is written.
  */
 export function overridesFor(held: Held, everything: boolean): RowOverride[] {
   const out: RowOverride[] = []
   for (const key of BENCH_ROWS) {
-    const value = held[key] ?? (everything ? REST_LEVEL[key] : undefined)
+    const rest = everything && !isNoteRow(key) ? REST_LEVEL[key] : undefined
+    const value = held[key] ?? rest
     if (value === undefined) continue
     if (isAxis(key))
       for (const entry of rowsForAxis(key, unit(value)))

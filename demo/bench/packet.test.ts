@@ -86,6 +86,16 @@ describe('overridesFor', () => {
     expect(character.hardness).toBeCloseTo(0.5, 2)
   })
 
+  it('leaves the notes to the synthetic chord unless one is held', () => {
+    const rows = overridesFor({ chroma4: 0.6 }, true).map((entry) => entry.row)
+    expect(rows).toContain(F.chroma4)
+    for (let note = 0; note < 12; note += 1)
+      if (note !== 4) expect(rows).not.toContain(F.chroma0 + note)
+    const packet = new Float32Array(PACKET_LENGTH)
+    overridePacket(packet, overridesFor({ chroma4: 0.6 }, false))
+    expect(packet[F.chroma4]).toBeCloseTo(0.6)
+  })
+
   it('writes drive to both rows the character reader averages, so it reads back whole', () => {
     const packet = new Float32Array(PACKET_LENGTH)
     overridePacket(packet, overridesFor({ drive: 0.8 }, false))

@@ -34,6 +34,7 @@ export const IMPL_IDS = [
   'sparks',
   'lasers',
   'morph',
+  'petals',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -280,6 +281,7 @@ export const LASER_KNOBS = [
 export type LaserKnob = (typeof LASER_KNOBS)[number]
 
 /**
+/**
  * The shape morph's numbers. Their ranges and units are in
  * `impls/morph.params.ts`. `size` is the solid's bounding radius in world
  * units and `ripple` a displacement of its surface in the same units, held
@@ -304,6 +306,39 @@ export const MORPH_KNOBS = [
   'glintKnee',
 ] as const
 export type MorphKnob = (typeof MORPH_KNOBS)[number]
+
+/**
+ * The petals' numbers. Their ranges and units are in `impls/petals.params.ts`.
+ * `note0` to `note11` are how lit each petal is, one per pitch class from C to
+ * B, and each is fed by that note's own row of the packet; `open` is how far
+ * the flower has unfolded, from a bud to full bloom; `size` is the radius as a
+ * share of the short side and `width` how fat a petal is; `layer` is how far a
+ * second, smaller whorl of petals has come up between the first; `glow` is the
+ * light's width round a petal in pixels; `turn` is the flower's angle in turns,
+ * which only an integrating row can move.
+ */
+export const PETAL_KNOBS = [
+  'note0',
+  'note1',
+  'note2',
+  'note3',
+  'note4',
+  'note5',
+  'note6',
+  'note7',
+  'note8',
+  'note9',
+  'note10',
+  'note11',
+  'open',
+  'size',
+  'width',
+  'layer',
+  'glow',
+  'intensity',
+  'turn',
+] as const
+export type PetalKnob = (typeof PETAL_KNOBS)[number]
 
 /**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
@@ -387,6 +422,7 @@ export type ImplKnob =
   | SpectrumKnob
   | LaserKnob
   | MorphKnob
+  | PetalKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -405,6 +441,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   sparks: SPARKS_KNOBS,
   lasers: LASER_KNOBS,
   morph: MORPH_KNOBS,
+  petals: PETAL_KNOBS,
   look: LOOK_KNOBS,
 }
 

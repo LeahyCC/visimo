@@ -702,14 +702,20 @@ describe('a shaped row cannot carry a knob out of range', () => {
                   states,
                 )
 
+                // The message and the assertion are made only for a value that
+                // is wrong. One of each for every knob of every frame was
+                // millions of calls, and a study with a dozen shaped rows ran
+                // past the time limit on CI.
                 for (const [knob, value] of Object.entries(out)) {
+                  const range = safeRange(study.impl, knob)
+                  const under =
+                    range !== undefined && !MAY_RUN_UNDER[study.id]?.[knob] && value < range[0]
+                  const over = range !== undefined && value > range[1]
+                  if (Number.isFinite(value) && !under && !over) continue
                   const where = `${study.id} ${knob} on a ${wave} of ${period}s at ${dt}s, tension ${tension}`
                   expect(Number.isFinite(value), where).toBe(true)
-                  const range = safeRange(study.impl, knob)
-                  if (!range) continue
-                  if (!MAY_RUN_UNDER[study.id]?.[knob])
-                    expect(value, where).toBeGreaterThanOrEqual(range[0])
-                  expect(value, where).toBeLessThanOrEqual(range[1])
+                  if (under) expect(value, where).toBeGreaterThanOrEqual(range[0])
+                  if (over) expect(value, where).toBeLessThanOrEqual(range[1])
                 }
               }
             }

@@ -60,16 +60,16 @@ A note on literal things (animals, spacecraft, Buddha, the devil): a shader draw
 
 ## Shared pieces
 
-Built once, before the rows that need them. Six pieces, three of them built.
+Built once, before the rows that need them. Six pieces, four of them built.
 
-| Piece            | What it is                                                                                                                  | Needed by                                                                                 | Status |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ |
-| `raymarch-kit`   | WGSL camera, SDF ops, soft shadow, half-res render and upscale, the glint threshold                                         | wormhole, shape-morph, liquid-chrome, nebula, city                                        | built  |
-| `canvas-sampler` | lets an ink or look read last frame's canvas as a texture (MilkDrop's textured shapes)                                      | echo-shapes, liquid-chrome, wormhole, black-hole                                          | built  |
-| `swarm-kit`      | one GPU boids pool with steering rules as knobs, drawn as points, quads or short trails                                     | murmuration, school, fireflies                                                            | built  |
-| `subtract-blend` | a second ink blend that darkens. Today inks only add light, so nothing can be dark on light                                 | void-tendrils, eclipse, ink-wash                                                          | open   |
-| `chroma-rows`    | the twelve note strengths appended to the END of the packet (`docs/open-leads.md` has this as the blocker for chord petals) | chord-petals, cymatics, mandala, stained-glass, harmonograph, sacred-lines, constellation | open   |
-| `height-kit`     | a scrolling heightfield from the spectrum with horizon, fog and parallax layers                                             | ridgeline, ocean, grid-3d, city                                                           | open   |
+| Piece            | What it is                                                                                           | Needed by                                                                                 | Status |
+| ---------------- | ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------ |
+| `raymarch-kit`   | WGSL camera, SDF ops, soft shadow, half-res render and upscale, the glint threshold                  | wormhole, shape-morph, liquid-chrome, nebula, city                                        | built  |
+| `canvas-sampler` | lets an ink or look read last frame's canvas as a texture (MilkDrop's textured shapes)               | echo-shapes, liquid-chrome, wormhole, black-hole                                          | built  |
+| `swarm-kit`      | one GPU boids pool with steering rules as knobs, drawn as points, quads or short trails              | murmuration, school, fireflies                                                            | built  |
+| `subtract-blend` | a second ink blend that darkens. Today inks only add light, so nothing can be dark on light          | void-tendrils, eclipse, ink-wash                                                          | open   |
+| `chroma-rows`    | the twelve note strengths appended to the END of the packet (rows 53 to 64, `chroma0` to `chroma11`) | chord-petals, cymatics, mandala, stained-glass, harmonograph, sacred-lines, constellation | built  |
+| `height-kit`     | a scrolling heightfield from the spectrum with horizon, fog and parallax layers                      | ridgeline, ocean, grid-3d, city                                                           | open   |
 
 **`raymarch-kit` is `impls/RaymarchInk.ts`**, a base an ink in three dimensions extends, and `shaders/raymarch.common.wgsl`, which is prepended to its shader. The shared WGSL is the camera, the sphere trace, the normal, the soft shadow, the occlusion, the fresnel, the primitives and their operators, and the glint threshold; the TypeScript marches a target at half the ink target and scales it back up, additively at the study's presence. An ink on it writes `sceneDistance` and a fragment entry point and nothing else. `impls/MorphInk.ts` is the worked example. See "The raymarch kit" in the README.
 
@@ -108,16 +108,16 @@ Built once, before the rows that need them. Six pieces, three of them built.
 
 ## Living things
 
-| id             | kind | what you see                                                                   | how                                                     | music                      | moments | tension does                          | cost   | tier | status |
-| -------------- | ---- | ------------------------------------------------------------------------------ | ------------------------------------------------------- | -------------------------- | ------- | ------------------------------------- | ------ | ---- | ------ |
-| `murmuration`  | ink  | thousands of birds moving as one body, folding and splitting on the beat       | swarm-kit, points, scatter on hits                      | DnB, IDM, orchestral       | G B D   | the flock balls up tight, then bursts | medium | S    | open   |
-| `chord-petals` | ink  | a flower of twelve petals, one per note. The notes sounding are the petals lit | chroma to 12 petal quads, opens on release              | jazz, classical, soul, pop | I G R   | petals close to a bud                 | cheap  | S    | open   |
-| `reaction`     | ink  | living coral and cell patterns that grow, split and heal                       | Gray-Scott compute, feed and kill rates from the packet | minimal, IDM, techno       | G R     | pattern tightens into fine spots      | medium | S    | open   |
-| `jellyfish`    | ink  | a few soft bells that pulse on the beat and trail tendrils                     | SDF bells, tendrils as verlet ribbons                   | downtempo, chillout, dub   | G R     | they sink and slow                    | medium | A    | open   |
-| `growth`       | ink  | branches that grow a segment per beat and fork on each new phrase              | L-system on CPU, line quads, seeded by section          | folk, indie, post-rock     | I G B   | growth races                          | cheap  | A    | open   |
-| `fireflies`    | ink  | warm points that blink in slowly syncing waves                                 | swarm-kit, blink phase coupled to beatPhase             | acoustic, lo-fi, country   | I R O   | blinking falls into step              | cheap  | A    | open   |
-| `school`       | ink  | fish turning together, flashing silver as they turn                            | swarm-kit, quads, brightness from turn rate             | house, funk, disco         | G       | the school tightens                   | medium | B    | open   |
-| `eye`          | ink  | one huge iris. The fibres are the spectrum, the pupil opens on bass            | polar spectrum texture, pupil radius from lowEnd        | trip hop, dark ambient     | I B R   | pupil shrinks to a pinhole            | cheap  | A    | open   |
+| id             | kind | what you see                                                                   | how                                                        | music                      | moments | tension does                          | cost   | tier | status |
+| -------------- | ---- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- | -------------------------- | ------- | ------------------------------------- | ------ | ---- | ------ |
+| `murmuration`  | ink  | thousands of birds moving as one body, folding and splitting on the beat       | swarm-kit, points, scatter on hits                         | DnB, IDM, orchestral       | G B D   | the flock balls up tight, then bursts | medium | S    | open   |
+| `chord-petals` | ink  | a flower of twelve petals, one per note. The notes sounding are the petals lit | twelve SDF petals fed by the chroma rows, opens on release | jazz, classical, soul, pop | I G R   | petals close to a bud                 | cheap  | S    | built  |
+| `reaction`     | ink  | living coral and cell patterns that grow, split and heal                       | Gray-Scott compute, feed and kill rates from the packet    | minimal, IDM, techno       | G R     | pattern tightens into fine spots      | medium | S    | open   |
+| `jellyfish`    | ink  | a few soft bells that pulse on the beat and trail tendrils                     | SDF bells, tendrils as verlet ribbons                      | downtempo, chillout, dub   | G R     | they sink and slow                    | medium | A    | open   |
+| `growth`       | ink  | branches that grow a segment per beat and fork on each new phrase              | L-system on CPU, line quads, seeded by section             | folk, indie, post-rock     | I G B   | growth races                          | cheap  | A    | open   |
+| `fireflies`    | ink  | warm points that blink in slowly syncing waves                                 | swarm-kit, blink phase coupled to beatPhase                | acoustic, lo-fi, country   | I R O   | blinking falls into step              | cheap  | A    | open   |
+| `school`       | ink  | fish turning together, flashing silver as they turn                            | swarm-kit, quads, brightness from turn rate                | house, funk, disco         | G       | the school tightens                   | medium | B    | open   |
+| `eye`          | ink  | one huge iris. The fibres are the spectrum, the pupil opens on bass            | polar spectrum texture, pupil radius from lowEnd           | trip hop, dark ambient     | I B R   | pupil shrinks to a pinhole            | cheap  | A    | open   |
 
 ## Shape and machine
 

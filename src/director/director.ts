@@ -436,7 +436,17 @@ export class Director {
     const weights = this.moment.step(features, dt, playhead)
     if (this.pinned) return this.frame
     const settled = this.reader.settled
-    if (this.trackSeed === undefined && settled >= 1) this.trackSeed = characterSeed(character)
+    // The frame the character is first known. The opening cast was picked in
+    // the first fraction of a second, when the character was a guess and the
+    // plain best is the neutral cast, and everything after that waits for the
+    // music to signal a change. A track that never does is left on that guess
+    // for good: a metal track read one section, no impact and no novelty spike
+    // in two minutes, and played the whole of it on lazy fluid and warm soft.
+    // This is not a timer. It is the one moment the director learns something
+    // about the track that no packet row reports, and it is asked the way any
+    // fast signal is, so a cast that already suits the track keeps its seat.
+    const known = this.trackSeed === undefined && settled >= 1
+    if (known) this.trackSeed = characterSeed(character)
     const section = features[F.section] ?? 0
     const impact = this.fired(features[F.impact] ?? 0)
     const novelty = this.spiked(features[F.novelty] ?? 0)
@@ -453,6 +463,9 @@ export class Director {
     }
 
     this.sinceImpact = impact ? 0 : this.sinceImpact + dt
+    // A director handed a saved character knows it on its first frame, and the
+    // opening pick is then already made with it: there is nothing to ask again.
+    const first = !this.current
     if (boundary || !this.current) this.settle(section, character, weights, settled, impact)
     else if (impact) this.challenge(character, weights, settled, this.cutSeconds)
     else if (winding) {
@@ -462,6 +475,14 @@ export class Director {
       this.challenge(character, weights, settled, this.glideSeconds)
     } else if ((novelty || fizzled) && !this.holding)
       this.challenge(character, weights, settled, this.glideSeconds)
+    else if (known && !first && !this.holding) {
+      this.challenge(character, weights, settled, this.glideSeconds)
+      // Unlike the other fast signals this one is remembered. The section was
+      // confirmed while the character was a guess, and what it was handed then
+      // is not what it looks like now; when it comes back it should come back
+      // to the cast it was left with.
+      if (this.section > 0 && this.current) this.memory.set(this.section, this.current)
+    }
     if (impact) this.holding = true
 
     this.fade(dt)

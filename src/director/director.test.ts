@@ -380,6 +380,31 @@ describe('Director', () => {
     run(director, sounding(packet({ section: 2 }), track), 2)
     expect(director.cast?.inks).toEqual(['near-ink'])
   })
+
+  // Heard on a real metal track: one section, no impact and no novelty spike
+  // in two minutes, so nothing ever asked again and the whole of it played on
+  // the neutral cast picked in its first fraction of a second.
+  it('asks again when the character is first known, with no boundary to prompt it', () => {
+    const track: Character = { ...NEUTRAL, hardness: 0.95, drive: 0.9 }
+    const elsewhere: Character = { ...NEUTRAL, hardness: 0.05, drive: 0.1 }
+    const wide = ink('wide-ink', moments({ groove: 1 }), { reach: 1, home: elsewhere })
+    const near = ink('near-ink', moments({ groove: 1 }), { reach: 0.2, home: track })
+    const director = new Director({ studies: [GROOVE_FLOW, ONE_LOOK, wide, near], budget: 4 })
+    const steady = sounding(packet({ section: 1, recall: 0.9 }), track)
+    run(director, steady, 4)
+    expect(director.cast?.inks).toEqual(['wide-ink'])
+    run(director, steady, 60)
+    expect(director.cast?.inks).toEqual(['near-ink'])
+  })
+
+  it('does not ask again when it was handed the character to begin with', () => {
+    const director = new Director({ studies: BENCH, budget: 4, start: NEUTRAL })
+    const steady = packet({ section: 1, recall: 0.9 })
+    run(director, steady, 1)
+    const opening = name(director.cast)
+    run(director, steady, 60)
+    expect(name(director.cast)).toBe(opening)
+  })
 })
 
 describe('how a change lands', () => {

@@ -51,6 +51,7 @@ import { LAZY_FLUID } from './defs/lazy-fluid'
 import { RADIAL_BURST } from './defs/radial-burst'
 import { RIBBON } from './defs/ribbon'
 import { RISER_STREAKS } from './defs/riser-streaks'
+import { SHAPE_MORPH } from './defs/shape-morph'
 import { SHARDS } from './defs/shards'
 import { SPARKS } from './defs/sparks'
 import { SPECTRUM_RING } from './defs/spectrum-ring'
@@ -82,6 +83,7 @@ export const STUDIES: readonly Study[] = [
   SPECTRUM_RING,
   SPARKS,
   LASERS,
+  SHAPE_MORPH,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

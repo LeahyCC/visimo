@@ -33,6 +33,7 @@ export const IMPL_IDS = [
   'spectrum',
   'sparks',
   'lasers',
+  'morph',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -279,6 +280,32 @@ export const LASER_KNOBS = [
 export type LaserKnob = (typeof LASER_KNOBS)[number]
 
 /**
+ * The shape morph's numbers. Their ranges and units are in
+ * `impls/morph.params.ts`. `size` is the solid's bounding radius in world
+ * units and `ripple` a displacement of its surface in the same units, held
+ * against `rippleScale`, which is waves across one of them; `spin` and
+ * `tumble` are angles in turns rather than speeds, which is why the study
+ * drives them through `integrate` rows; `rim` and `specular` are the two
+ * lights that are not the key, and `hue` moves both of them round the palette
+ * together. `glint` is the share of the frame's own brightest that light must
+ * clear to be drawn at all, as it is for the fractal.
+ */
+export const MORPH_KNOBS = [
+  'size',
+  'ripple',
+  'rippleScale',
+  'spin',
+  'tumble',
+  'rim',
+  'specular',
+  'hue',
+  'intensity',
+  'glint',
+  'glintKnee',
+] as const
+export type MorphKnob = (typeof MORPH_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -359,6 +386,7 @@ export type ImplKnob =
   | RingsKnob
   | SpectrumKnob
   | LaserKnob
+  | MorphKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -376,6 +404,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   spectrum: SPECTRUM_KNOBS,
   sparks: SPARKS_KNOBS,
   lasers: LASER_KNOBS,
+  morph: MORPH_KNOBS,
   look: LOOK_KNOBS,
 }
 

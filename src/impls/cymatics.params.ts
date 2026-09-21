@@ -333,6 +333,7 @@ export function plateAt(modes: readonly Mode[], x: number, y: number) {
       amplitude *
       -Math.PI *
       (n * Math.sin(n * Math.PI * x) * cmy + sign * m * Math.sin(m * Math.PI * x) * cny)
+
     gy +=
       amplitude *
       -Math.PI *

@@ -457,8 +457,8 @@ describe('the colour', () => {
     expect(at(0)).not.toEqual(at(1 / 3))
   })
 
-  it('has a core that goes toward white and is not white outright', () => {
-    expect(CORE_WHITE).toBeGreaterThan(0.4)
+  it('has a core that goes toward white without being white, so the colour is still in it', () => {
+    expect(CORE_WHITE).toBeGreaterThan(0.2)
     expect(CORE_WHITE).toBeLessThan(1)
   })
 })

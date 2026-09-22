@@ -37,6 +37,7 @@ export const IMPL_IDS = [
   'petals',
   'lightning',
   'grid',
+  'aurora',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -377,6 +378,28 @@ export const GRID_KNOBS = [
 export type GridKnob = (typeof GRID_KNOBS)[number]
 
 /**
+ * The aurora's numbers. Their ranges and units are in
+ * `impls/aurora.params.ts`. `intensity` is the light the foot of a curtain
+ * settles at on a still canvas and `curtains` how many are lit, a fraction
+ * fading the last one in; `height` is a share of each curtain's own height;
+ * `sway` is how far the top of a ray leans in frame heights and `drift` the
+ * cycles a second the path turns at; `rays` runs from a soft veil to hard
+ * strands and `ripple` is how strong a hit's ripple is. `hue` is turns the
+ * chord has added to the key, and only an integrating row can move it.
+ */
+export const AURORA_KNOBS = [
+  'intensity',
+  'curtains',
+  'height',
+  'sway',
+  'drift',
+  'rays',
+  'ripple',
+  'hue',
+] as const
+export type AuroraKnob = (typeof AURORA_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -461,6 +484,7 @@ export type ImplKnob =
   | PetalKnob
   | LightningKnob
   | GridKnob
+  | AuroraKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -482,6 +506,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   petals: PETAL_KNOBS,
   lightning: LIGHTNING_KNOBS,
   grid: GRID_KNOBS,
+  aurora: AURORA_KNOBS,
   look: LOOK_KNOBS,
 }
 

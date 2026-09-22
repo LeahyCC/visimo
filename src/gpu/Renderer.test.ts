@@ -485,6 +485,26 @@ vi.mock('../impls/LightningInk', () => ({
   },
 }))
 
+vi.mock('../impls/AuroraInk', () => ({
+  AuroraInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.aurora = (impls.built.aurora ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('aurora', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('aurora')
+    }
+    dispose() {
+      impls.disposed.aurora = (impls.disposed.aurora ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/FlowBlend', () => ({
   FlowBlend: class {
     init() {}

@@ -61,7 +61,9 @@ struct Look {
   // How far under the horizon the glints along its line come in, are all there,
   // start to fade and are gone.
   window: vec4<f32>,
-  // How far under the horizon the glints on the light start to fade and are gone.
+  // How far under the horizon the glints on the light start to fade and are
+  // gone, then how much further the sheen reaches into the water than the
+  // horizon's own glow reaches into the sky, as a multiple of `hues.w`.
   window2: vec4<f32>,
 }
 
@@ -69,6 +71,21 @@ struct Look {
 
 const TAU: f32 = 6.2831853;
 const MAX_TRAINS: i32 = 24;
+// How much of the sky a facet's reflection sees as it crosses the horizon:
+// none below the first, all of it by the second. Mirrors `OCEAN_SKY_EDGE` in
+// ocean.params.ts.
+const SKY_EDGE_START: f32 = -0.07;
+const SKY_EDGE_END: f32 = 0.03;
+// A crest's near face catches more of the sheen and its far face less: plain
+// shading, not part of the mirror, and the one term the crest-to-trough
+// relief comes from, since the mirror alone barely varies for a sea this
+// close to flat. A smoothstep of the slope and not a ramp, so close to half
+// the surface reads as lit at once rather than only its rare, large slopes.
+// Mirrors `crestLift` in ocean.params.ts.
+const CREST_LOW: f32 = -0.03;
+const CREST_HIGH: f32 = 0.07;
+const CREST_FLOOR: f32 = 0.1;
+const CREST_CEIL: f32 = 5.5;
 // How many even slices of height the march walks the ray through, then how
 // many times it halves the slice the surface is in.
 const SEA_MARCH_STEPS: i32 = 24;
@@ -224,21 +241,25 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let forward = max(mirrored.z, 0.05);
     let e = focal * mirrored.y / forward;
     let az = focal * mirrored.x / forward;
-    let is_sky = select(0.0, smoothstep(-0.015, 0.012, e), mirrored.z > 0.0);
+    let is_sky = select(0.0, smoothstep(SKY_EDGE_START, SKY_EDGE_END, e), mirrored.z > 0.0);
     let grazing = 1.0 - clamp(-facing, 0.0, 1.0);
     let fres = look.more.x + (1.0 - look.more.x) * grazing * grazing * grazing * grazing * grazing;
 
-    // The glow mirrored: warm at the line, the deep hue far above it.
+    // The glow mirrored: warm at the line, the deep hue far above it, lifted
+    // or dimmed by which way the facet under it faces (`crest`), which is
+    // what turns the mirror into relief instead of a wash of one brightness.
     let above = max(e, 0.0);
-    let glow = exp(-above / spread);
-    let broad = look.sky.w * exp(-above / (look.extra.x * spread));
-    let sheen_colour = mix(warm, deep, smoothstep(0.0, 2.5 * spread, above));
-    let sheen = fres * (glow * sheen_colour * look.gain.x + broad * deep * look.extra.y);
+    let sheen_reach = spread * look.window2.z;
+    let glow = exp(-above / sheen_reach);
+    let broad = look.sky.w * exp(-above / (look.extra.x * sheen_reach));
+    let sheen_colour = mix(warm, deep, smoothstep(0.0, 2.5 * sheen_reach, above));
+    let crest = CREST_FLOOR + (CREST_CEIL - CREST_FLOOR) * smoothstep(CREST_LOW, CREST_HIGH, slope.y);
+    let sheen = fres * (glow * sheen_colour * look.gain.x + broad * deep * look.extra.y) * crest;
 
     // The path: facets whose reflection lands on the light.
     let up = e - look.sea.w;
     let lobe = exp(-(up * up + az * az) / (2.0 * look.sea.y * look.sea.y));
-    let path = fres * lobe * look.gain.y * mix(warm, white, 0.35);
+    let path = fres * lobe * look.gain.y * mix(warm, white, 0.1);
 
     // A glint: a facet whose reflection is inside the thin band about the
     // glow's brightest line, or on the light itself, which is what breaks the
@@ -252,7 +273,7 @@ fn fs(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let on_light = along_light
       * (1.0 - smoothstep(0.5 * band_width, band_width, length(vec2<f32>(up, az))));
     let band = select(0.0, resolved * max(on_line, on_light), look.sea.z > 0.0);
-    let glint = fres * band * (1.0 + look.tune.w * lobe) * look.gain.z * mix(warm, white, 0.6);
+    let glint = fres * band * (1.0 + look.tune.w * lobe) * look.gain.z * mix(warm, white, 0.2);
 
     water = (sheen + path + glint) * is_sky * height_fog(hit.dz, look.sky.y) * intensity;
   }

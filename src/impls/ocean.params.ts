@@ -140,7 +140,7 @@ export const OCEAN_GLINT_ELEVATION = 0.012
 export const OCEAN_GLINT_WIDTH = 0.02
 
 /** What the path's lobe is at its narrowest and its widest, in half-heights of reflected sky. */
-export const OCEAN_PATH_SIGMA = { least: 0.03, most: 0.3 } as const
+export const OCEAN_PATH_SIGMA = { least: 0.018, most: 0.08 } as const
 
 /** How much of the deep hue the water shows away from the glow, as a share of the glow's own light. */
 export const OCEAN_DEEP_SHARE = 0.5
@@ -151,10 +151,21 @@ export const OCEAN_DEEP_SHARE = 0.5
  * down goes into the water, and one that only just clears it meets the next
  * wave's back, so the edge is soft and not a cut.
  */
-export const OCEAN_SKY_EDGE = { start: -0.015, end: 0.012 } as const
+export const OCEAN_SKY_EDGE = { start: -0.07, end: 0.03 } as const
 
 /** How far the deep colour's glow reaches above the line, as a multiple of the warm glow's reach. */
 export const OCEAN_DEEP_REACH = 6
+
+/**
+ * How much further the sheen reaches into the water than the horizon's own
+ * glow reaches into the sky, as a multiple of `horizon`. The two are
+ * different things at the same knob: the horizon's own line is meant to stay
+ * a narrow band the way the grid's does, but a mirror this close to flat
+ * shows the sky over a wide stretch of water, and a sheen no wider than the
+ * horizon's own glow is a thread of light and not a sea. The shader's own
+ * `sheen_reach`.
+ */
+export const OCEAN_SHEEN_REACH = 3.5
 
 /**
  * Where in the frame the glints are lit, as how far under the horizon a pixel
@@ -186,24 +197,60 @@ export const OCEAN_GLINT_WINDOW = {
 } as const
 
 /** A glint that lands in the path is this much hotter, so the path breaks up into sparks and is not a smear. */
-export const OCEAN_PATH_GLINT = 2
+export const OCEAN_PATH_GLINT = 1
 
 /** Fresnel at normal incidence, for water. The rest is a fifth power in the cosine. */
 export const OCEAN_F0 = 0.02
 
 /**
+ * A facet whose front slopes toward the camera catches more of the sheen, and
+ * one whose back slopes away catches less: a plain shading term, not part of
+ * the mirror, and what turns a field of slopes into a body of relief rather
+ * than a haze of the same brightness everywhere. `along` is the slope down
+ * the depth axis (`SeaSurface.along`, the shader's `slope.y`); a crest's near
+ * face has it positive.
+ *
+ * It is a smoothstep between `low` and `high` and not a plain ramp, because a
+ * summed field of nine trains puts most of its slope within a narrow band
+ * either side of flat (measured: half the surface sits inside -0.09 to 0.10):
+ * a ramp wide enough to use the rare, large slopes barely lifts that crowded
+ * middle, and a picture with only its tails lit is mostly the floor. The
+ * smoothstep instead asks how a facet stands against the middle of the
+ * range, so close to half of the surface reads as caught by the light at
+ * once, which is the body a sea has, and the other half stays dark, which is
+ * the crest-to-trough contrast the mirror alone does not supply for a sea
+ * this close to flat. The shader's `crest`.
+ */
+export const OCEAN_CREST_LOW = -0.03
+export const OCEAN_CREST_HIGH = 0.07
+export const OCEAN_CREST_FLOOR = 0.1
+export const OCEAN_CREST_CEIL = 5.5
+
+/** The sheen's crest-facing shading multiplier. The shader's `crest`. */
+export const crestLift = (along: number) =>
+  OCEAN_CREST_FLOOR +
+  (OCEAN_CREST_CEIL - OCEAN_CREST_FLOOR) * smoothstep(OCEAN_CREST_LOW, OCEAN_CREST_HIGH, along)
+
+/**
  * The light of each part, as a multiple of `intensity`, held here and handed
- * to the shader in the uniform so the two cannot disagree. The sheen (the
- * glow in the water) and the path move, and are drawn at their own light. The
- * horizon and the light itself stand still on the screen and the canvas sums
- * a mark that stands still to about forty times what is drawn, so they are
- * drawn at a small share of it: the same lesson as the grid's horizon.
+ * to the shader in the uniform so the two cannot disagree.
+ *
+ * The sheen and the path move with the water, which the grid's horizon does
+ * not: the canvas only piles up what stays still at a screen point, and a
+ * wave's slope keeps changing under a given pixel, so neither of these gets
+ * anywhere near the horizon's forty-times pile-up. They are drawn close to
+ * the brightness they are meant to be seen at, in one frame, and the canvas
+ * only ever adds a short trail on top of that: an ink built to need the
+ * canvas to become visible is a pile and not a picture, which the visual bar
+ * asks for by name. Only the horizon's hairline and the light itself
+ * genuinely hold one screen position frame after frame, and only those two
+ * keep the small `still` share.
  */
 export const OCEAN_GAIN = {
-  sheen: 0.005,
-  deep: 0.02,
-  path: 0.05,
-  glint: 0.6,
+  sheen: 0.5,
+  deep: 0.2,
+  path: 9,
+  glint: 0.9,
   still: 0.0012,
 } as const
 
@@ -532,7 +579,8 @@ export type SeaLight = { sheen: number; path: number; glint: number }
  * What one facet reflects to the eye, in the parts the shader adds:
  *
  * - the sheen, the glow along the horizon mirrored (bright at the line and
- *   fading up the sky) with a little of the deep colour far above it,
+ *   fading up the sky) with a little of the deep colour far above it, lifted
+ *   or dimmed by `crestLift` for the slope it stands on,
  * - the path, the light's lobe,
  * - the glints, the thin band about the glow's brightest line, hotter where
  *   they fall in the path.
@@ -540,17 +588,27 @@ export type SeaLight = { sheen: number; path: number; glint: number }
  * All three are scaled by Fresnel, which is why the water is black under your
  * feet and bright toward the horizon: a view that grazes the surface reflects
  * nearly everything and one that looks down into it reflects almost nothing.
- * The shader's body of the same name, term for term.
+ * `along` is the slope at the facet (`SeaSurface.along`); the sheen is the
+ * one part that reads it, which is where the crest-to-trough relief comes
+ * from and Fresnel alone does not supply for a sea this close to flat. The
+ * shader's body of the same name, term for term.
  */
-export function seaLight(params: OceanParams, sky: FacetSky, depression: number): SeaLight {
+export function seaLight(
+  params: OceanParams,
+  sky: FacetSky,
+  depression: number,
+  along = 0,
+): SeaLight {
   if (sky.sky <= 0) return { sheen: 0, path: 0, glint: 0 }
   const fres = fresnel(sky.cosine) * sky.sky
   const spread = params.horizon
   const height = Math.max(sky.elevation, 0)
+  const sheenReach = spread * OCEAN_SHEEN_REACH
   const sheen =
     fres *
-    (Math.exp(-height / spread) * OCEAN_GAIN.sheen +
-      OCEAN_DEEP_SHARE * Math.exp(-height / (OCEAN_DEEP_REACH * spread)) * OCEAN_GAIN.deep)
+    (Math.exp(-height / sheenReach) * OCEAN_GAIN.sheen +
+      OCEAN_DEEP_SHARE * Math.exp(-height / (OCEAN_DEEP_REACH * sheenReach)) * OCEAN_GAIN.deep) *
+    crestLift(along)
   const lobe = pathLobe(sky.elevation, sky.azimuth, pathSigma(params.path))
   const path = fres * lobe * OCEAN_GAIN.path
   const glint =
@@ -631,6 +689,7 @@ export function oceanCoverage(
             params,
             facetSky(ndc, surface.across, surface.along),
             HEIGHT_CAMERA.horizon - ndc.y,
+            surface.along,
           )
           light += (parts.sheen + parts.path + parts.glint) * heightFog(ground.z, OCEAN_REACH)
         }
@@ -674,7 +733,7 @@ export const OCEAN_LAYOUT = {
  *   extra   how far the deep colour's glow reaches, the light of the deep colour, how many trains
  *           there are, how many of them are swell
  *   window  where the glints come in and are all there, where the ones on the line fade and are gone
- *   window2 where the ones on the light fade and are gone, two spare
+ *   window2 where the ones on the light fade and are gone, how far the sheen reaches, one spare
  * ```
  *
  * The key is read from the packet, not the knobs, because it is a colour the
@@ -739,7 +798,7 @@ export function writeOceanUniform(
       OCEAN_GLINT_WINDOW.lineGone,
       OCEAN_GLINT_WINDOW.lightFade,
       OCEAN_GLINT_WINDOW.lightGone,
-      0,
+      OCEAN_SHEEN_REACH,
       0,
     ],
     OCEAN_LAYOUT.hues,

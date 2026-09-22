@@ -26,6 +26,7 @@ import {
   fieldRuns,
   GRID_SIDE,
   MAX_SPAWN_GROUPS,
+  MURMURATION_PROFILE,
   PARTICLE_UNIFORM_FLOATS,
   PARTICLE_UNIFORM_HEAD,
   particleColours,
@@ -44,6 +45,8 @@ import {
   stepParticle,
   TREBLE_BANDS,
   valueNoise,
+  VIVID_BASE,
+  vividAt,
   writeParticleUniform,
 } from './particles.params'
 import type { ParticleParams, ParticleState, SpawnGroup } from './particles.params'
@@ -525,6 +528,8 @@ describe('the palette and the uniform', () => {
         groupCount: 1,
         flowCover: [1.5, 1],
         wrap: true,
+        scatter: 1,
+        turnHue: 0,
       },
       out,
     )
@@ -573,6 +578,8 @@ describe('the palette and the uniform', () => {
         groupCount: 0,
         flowCover: null,
         wrap: false,
+        scatter: 1,
+        turnHue: 0,
       },
       out,
     )
@@ -581,5 +588,113 @@ describe('the palette and the uniform', () => {
     expect(out[44]).toBe(0)
     expect(out[45]).toBe(0)
     expect(out.slice(PARTICLE_UNIFORM_HEAD).every((value) => value === 0)).toBe(true)
+  })
+})
+
+/** Hue in turns and saturation of a colour, the way HSV has them. */
+const hsv = ([red, green, blue]: readonly [number, number, number]) => {
+  const peak = Math.max(red, green, blue)
+  const low = Math.min(red, green, blue)
+  const chroma = peak - low
+  let hue = 0
+  if (chroma > 0) {
+    if (peak === red) hue = ((green - blue) / chroma + 6) % 6
+    else if (peak === green) hue = (blue - red) / chroma + 2
+    else hue = (red - green) / chroma + 4
+  }
+
+  return { hue: hue / 6, saturation: peak > 0 ? chroma / peak : 0, value: peak }
+}
+
+/** The shortest way round the wheel between two hues, in turns. */
+const wheelGap = (a: number, b: number) => {
+  const gap = Math.abs(a - b) % 1
+  return Math.min(gap, 1 - gap)
+}
+
+describe('the flock’s own colours', () => {
+  it('is a fully saturated hue at any turn, brightest channel at 1', () => {
+    for (let step = 0; step < 24; step += 1) {
+      const colour = hsv(vividAt(step / 24))
+      expect(colour.value).toBeCloseTo(1, 9)
+      expect(colour.saturation).toBeGreaterThan(0.9)
+    }
+  })
+
+  it('walks the whole wheel over one turn of its argument, and comes back to where it began', () => {
+    const hues = Array.from({ length: 12 }, (_, step) => hsv(vividAt(step / 12)).hue)
+    expect(new Set(hues.map((hue) => Math.round(hue * 6))).size).toBeGreaterThanOrEqual(5)
+    expect(hsv(vividAt(1)).hue).toBeCloseTo(hsv(vividAt(0)).hue, 6)
+  })
+
+  it('puts the leading hue a spread down the wheel from the resting one, about a third of a turn', () => {
+    const out = new Float32Array(9)
+    particleColours(silent(), MURMURATION_PROFILE.ranges.hueSpread[1] * 0 + 0.36, out, 'vivid')
+    const low = hsv([out[0] ?? 0, out[1] ?? 0, out[2] ?? 0])
+    const resting = hsv([out[3] ?? 0, out[4] ?? 0, out[5] ?? 0])
+    const leading = hsv([out[6] ?? 0, out[7] ?? 0, out[8] ?? 0])
+    for (const stop of [low, resting, leading]) expect(stop.saturation).toBeGreaterThan(0.85)
+    // Within a hair of the third of a turn the spread names.
+    expect(wheelGap(resting.hue, leading.hue)).toBeGreaterThan(0.28)
+    expect(wheelGap(resting.hue, leading.hue)).toBeLessThan(0.4)
+    expect(wheelGap(resting.hue, low.hue)).toBeLessThan(wheelGap(resting.hue, leading.hue))
+  })
+
+  it('turns both hues with the key', () => {
+    const at = (key: number) => {
+      const out = new Float32Array(9)
+      particleColours(with_({ [F.keyHue]: key }), 0.36, out, 'vivid')
+      return {
+        resting: hsv([out[3] ?? 0, out[4] ?? 0, out[5] ?? 0]).hue,
+        leading: hsv([out[6] ?? 0, out[7] ?? 0, out[8] ?? 0]).hue,
+      }
+    }
+
+    const start = at(0)
+    const moved = at(0.25)
+    expect(wheelGap(start.resting, moved.resting)).toBeGreaterThan(0.15)
+    expect(wheelGap(start.leading, moved.leading)).toBeGreaterThan(0.15)
+    // The gap between them is the spread at any key, to within the little the
+    // squared cosine bends the wheel by.
+    expect(wheelGap(moved.resting, moved.leading)).toBeCloseTo(
+      wheelGap(start.resting, start.leading),
+      1,
+    )
+    // A key of a whole turn is the key of none.
+    expect(at(1).resting).toBeCloseTo(start.resting, 6)
+  })
+
+  it('rests on a blue at a key of nothing, which is what the dusk sky wants', () => {
+    const colour = hsv(vividAt(VIVID_BASE))
+    // Blue and cyan are between a half and two thirds of a turn round from red.
+    expect(colour.hue).toBeGreaterThan(0.45)
+    expect(colour.hue).toBeLessThan(0.7)
+  })
+
+  it('leaves the palette’s colours exactly as they were for every other field', () => {
+    const palette = new Float32Array(9)
+    const same = new Float32Array(9)
+    particleColours(with_({ [F.keyHue]: 0.3 }), 0.4, palette)
+    particleColours(with_({ [F.keyHue]: 0.3 }), 0.4, same, 'palette')
+    expect([...same]).toEqual([...palette])
+    expect(DUST_PROFILE.colour).toBe('palette')
+    expect(SPARKS_PROFILE.colour).toBe('palette')
+    expect(MURMURATION_PROFILE.colour).toBe('vivid')
+  })
+})
+
+describe('where the continuous rate is laid', () => {
+  it('is over the whole field for the dust and the sparks and on the flock for the murmuration', () => {
+    const groups: SpawnGroup[] = []
+    for (const [profile, shape] of [
+      [DUST_PROFILE, 'field'],
+      [SPARKS_PROFILE, 'field'],
+      [MURMURATION_PROFILE, 'flock'],
+    ] as const) {
+      const params = particleParams({ count: 1000, rate: 600, burst: 0 }, profile)
+      const live = planSpawns(params, profile, silent(), 1 / 10, spawnState(), groups)
+      expect(live, profile.label).toBe(1)
+      expect(groups[0]?.shape, profile.label).toBe(shape)
+    }
   })
 })

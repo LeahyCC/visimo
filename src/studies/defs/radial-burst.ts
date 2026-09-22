@@ -1,5 +1,5 @@
 import type { FlowStudy } from '../types'
-import { NO_CURL } from './shared'
+import { NO_CURL, NO_LENS } from './shared'
 
 /**
  * The drop, thrown outward from the middle. It fires on `impact`, which is 1
@@ -28,7 +28,7 @@ export const RADIAL_BURST: FlowStudy = {
   home: { drive: 0.7, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.8 },
   reach: 0.55,
   moments: { intro: 0, groove: 0, build: 0, drop: 1, rest: 0, outro: 0 },
-  knobs: { ...NO_CURL, radial: 0.05, falloff: 2, swirl: 0, twist: 0 },
+  knobs: { ...NO_CURL, ...NO_LENS, radial: 0.05, falloff: 2, swirl: 0, twist: 0 },
   mapping: [
     { from: 'impact', to: 'radial', gain: 1.1, curve: 'linear' },
     { from: 'release', to: 'radial', gain: 0.3, curve: 'linear' },

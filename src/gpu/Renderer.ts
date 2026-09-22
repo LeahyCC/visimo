@@ -33,7 +33,10 @@ import { Director } from '../director/director'
 import type { MomentWeights, Playhead } from '../director/moment'
 import { Hud } from '../hud/Hud'
 import { AnalyticFlow } from '../impls/analytic'
+import { AuroraInk } from '../impls/AuroraInk'
+import { BlackHoleInk } from '../impls/BlackHoleInk'
 import { CausticsInk } from '../impls/CausticsInk'
+import { CymaticsInk } from '../impls/CymaticsInk'
 import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
 import { DyeInk, FluidFlow } from '../impls/fluid'
@@ -44,7 +47,7 @@ import { LightningInk } from '../impls/LightningInk'
 import { MorphInk } from '../impls/MorphInk'
 import { OceanInk } from '../impls/OceanInk'
 import { ParticleField } from '../impls/ParticleField'
-import { DUST_PROFILE, SPARKS_PROFILE } from '../impls/particles.params'
+import { DUST_PROFILE, MURMURATION_PROFILE, SPARKS_PROFILE } from '../impls/particles.params'
 import { PetalsInk } from '../impls/PetalsInk'
 import { RibbonInk } from '../impls/RibbonInk'
 import { RingsInk } from '../impls/RingsInk'
@@ -679,11 +682,15 @@ class Renderer {
     if (impl === 'rings') return new RingsInk()
     if (impl === 'spectrum') return new SpectrumInk()
     if (impl === 'sparks') return new ParticleField(SPARKS_PROFILE)
+    if (impl === 'murmuration') return new ParticleField(MURMURATION_PROFILE)
     if (impl === 'lasers') return new LasersInk()
     if (impl === 'morph') return new MorphInk()
     if (impl === 'petals') return new PetalsInk()
     if (impl === 'lightning') return new LightningInk()
     if (impl === 'grid') return new GridInk()
+    if (impl === 'blackhole') return new BlackHoleInk()
+    if (impl === 'aurora') return new AuroraInk()
+    if (impl === 'cymatics') return new CymaticsInk()
     if (impl === 'ocean') return new OceanInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the

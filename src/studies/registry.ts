@@ -33,12 +33,16 @@
  * more, and `director.test.ts` holds every study to winning a seat for at
  * least one of them. A home moved on that evidence says so where it is.
  */
+import { AURORA } from './defs/aurora'
 import { BEAT_PUMP } from './defs/beat-pump'
 import { BEAT_RINGS } from './defs/beat-rings'
+import { BLACK_HOLE } from './defs/black-hole'
+import { BLACK_HOLE_RING } from './defs/black-hole-ring'
 import { CAUSTICS } from './defs/caustics'
 import { CHORD_PETALS } from './defs/chord-petals'
 import { CLEAN_GLASS } from './defs/clean-glass'
 import { CURL_DRIFT } from './defs/curl-drift'
+import { CYMATICS } from './defs/cymatics'
 import { DUST } from './defs/dust'
 import { DYE_PLUMES } from './defs/dye-plumes'
 import { FILM } from './defs/film'
@@ -51,6 +55,8 @@ import { IMPLODE } from './defs/implode'
 import { LASERS } from './defs/lasers'
 import { LAZY_FLUID } from './defs/lazy-fluid'
 import { LIGHTNING } from './defs/lightning'
+import { MIRROR_FOLD } from './defs/mirror-fold'
+import { MURMURATION } from './defs/murmuration'
 import { OCEAN } from './defs/ocean'
 import { RADIAL_BURST } from './defs/radial-burst'
 import { RIBBON } from './defs/ribbon'
@@ -73,8 +79,10 @@ export const STUDIES: readonly Study[] = [
   IMPLODE,
   RADIAL_BURST,
   CURL_DRIFT,
+  MIRROR_FOLD,
   BEAT_PUMP,
   TUNNEL,
+  BLACK_HOLE,
   DYE_PLUMES,
   RIBBON,
   FRACTAL_GLINTS,
@@ -92,6 +100,10 @@ export const STUDIES: readonly Study[] = [
   GRID_3D,
   OCEAN,
   SHAPE_MORPH,
+  MURMURATION,
+  BLACK_HOLE_RING,
+  AURORA,
+  CYMATICS,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

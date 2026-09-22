@@ -21,6 +21,8 @@ struct Field {
   frame: vec4<f32>,
   // x speed, y cells across the field, z the clock in turns, w spare
   curl: vec4<f32>,
+  // x the pull at its fastest, y the photon radius, zw spare
+  lens: vec4<f32>,
 }
 
 @group(0) @binding(0) var<uniform> field: Field;
@@ -28,6 +30,9 @@ struct Field {
 const PI = 3.141592653589793;
 const TWO_PI = 6.283185307179586;
 const E = 2.718281828459045;
+// `LENS_PEAK` and `LENS_ESCAPE` in impls/analytic.params.ts.
+const LENS_PEAK = 0.14814814814814814;
+const LENS_ESCAPE = 0.25;
 
 struct Blit {
   @builtin(position) position: vec4<f32>,
@@ -53,6 +58,23 @@ fn vs(@builtin(vertex_index) vi: u32) -> Blit {
 fn radial_profile(t: f32, falloff: f32) -> f32 {
   let peak = select(exp(-falloff), 1.0 / (max(falloff, 1.0) * E), falloff > 1.0);
   return (max(t, 0.0) * exp(-falloff * max(t, 0.0))) / peak;
+}
+
+// The lens shape, signed, as a multiple of `lens`: inward outside the photon
+// radius and falling off with the square of the distance, gently outward
+// inside it, and exactly zero at the centre and at the photon radius, so the
+// two halves join with no step. `lensProfile` in impls/analytic.params.ts is
+// where the reasoning lives. Both halves are evaluated and one is selected,
+// so nothing branches on a per-texel value; the `max` calls are what keep the
+// unused half finite rather than a division by zero.
+fn lens_profile(t: f32, photon: f32) -> f32 {
+  let p = max(photon, 1e-4);
+  let at = max(t, 0.0);
+  let u = at / p;
+  let inside = LENS_ESCAPE * 4.0 * u * (1.0 - u);
+  let s = p / max(at, 1e-5);
+  let outside = -(s * s * (1.0 - s)) / LENS_PEAK;
+  return select(outside, inside, at < p);
 }
 
 // One octave of the curl term, before `curl` scales it: the curl of
@@ -91,7 +113,10 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
   // away whatever it is.
   let unit = offset / max(r, 1e-5);
 
-  let speed = field.radial.x * radial_profile(t, field.radial.y);
+  // Both radial terms are a speed along the same ray, so they add. The lens
+  // carries its own sign: the profile turns over at the photon radius.
+  let speed = field.radial.x * radial_profile(t, field.radial.y)
+    + field.lens.x * lens_profile(t, field.lens.y);
   // Solid-body swirl plus the part that is only near the middle. An angular
   // speed times the radius is a speed along the tangent, which is the perp of
   // the outward unit vector.

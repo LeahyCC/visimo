@@ -1,5 +1,5 @@
 import type { FlowStudy } from '../types'
-import { NO_CURL } from './shared'
+import { NO_CURL, NO_LENS } from './shared'
 
 /**
  * Everything drawn to the middle, as a build winds up. The pull IS the
@@ -27,7 +27,7 @@ export const IMPLODE: FlowStudy = {
   home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.5 },
   reach: 1,
   moments: { intro: 0, groove: 0, build: 1, drop: 0, rest: 0, outro: 0 },
-  knobs: { ...NO_CURL, radial: -0.01, falloff: 0, swirl: 0, twist: 0 },
+  knobs: { ...NO_CURL, ...NO_LENS, radial: -0.01, falloff: 0, swirl: 0, twist: 0 },
   mapping: [
     { from: 'tension', to: 'radial', gain: -0.4, curve: 'linear' },
     { from: 'energy', to: 'radial', gain: -0.08, curve: 'linear' },

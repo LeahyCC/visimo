@@ -28,7 +28,7 @@ import {
 import { implKnobs, isImplKnob } from './impls'
 import { findStudy } from './registry'
 import { STUDY_FIELDS } from './types'
-import type { Study, StudyField, StudyMapping, StudyScale } from './types'
+import type { Study, StudyCanvas, StudyField, StudyMapping, StudyScale } from './types'
 
 /**
  * The feedback, which is the canvas itself and not a look. It is what carries
@@ -43,6 +43,8 @@ export const CANVAS_KNOBS = [
   'feedback.decay',
   'feedback.zoom',
   'feedback.rotate',
+  'feedback.fold',
+  'feedback.foldMix',
   'feedback.carry',
   'feedback.floor',
   'feedback.fade',
@@ -139,6 +141,8 @@ const defaultCanvasKnobs = (): Record<CanvasKnob, number> => ({
   'feedback.decay': DEFAULT_POST_PARAMS.feedback.decay,
   'feedback.zoom': DEFAULT_POST_PARAMS.feedback.zoom,
   'feedback.rotate': DEFAULT_POST_PARAMS.feedback.rotate,
+  'feedback.fold': DEFAULT_POST_PARAMS.feedback.fold,
+  'feedback.foldMix': DEFAULT_POST_PARAMS.feedback.foldMix,
   'feedback.carry': DEFAULT_POST_PARAMS.feedback.carry,
   'feedback.floor': DEFAULT_POST_PARAMS.feedback.floor,
   'feedback.fade': DEFAULT_POST_PARAMS.feedback.fade,
@@ -220,6 +224,12 @@ export const carriedCanvas = (): CastCanvas => ({
     'feedback.decay': 0.975,
     'feedback.zoom': 1.0015,
     'feedback.rotate': 0,
+    // The fold is off, and off is exact. The kaleidoscope is not something
+    // every cast wants under it: it is a flow's own patch on the canvas, and
+    // a canvas that names neither of these draws exactly what it drew before
+    // the two knobs existed.
+    'feedback.fold': 0,
+    'feedback.foldMix': 0,
     'feedback.carry': 1,
     // The subtractive floor is off: the fade beside it does the same job
     // without a cliff at the bottom of a trail.
@@ -255,6 +265,83 @@ export const carriedCanvas = (): CastCanvas => ({
     { from: 'tension', to: 'feedback.sharpen', gain: 0.04, curve: 'linear' },
   ],
 })
+
+/**
+ * The buffers `patchCanvas` writes into, so that merging a patch over the
+ * canvas every frame allocates nothing after the first. The caller owns one
+ * and keeps it, the way the renderer owns a `CastFrame`.
+ *
+ * `faded` is the patch's rows with their gains scaled by presence. They are
+ * kept rather than made because a row is four fields and a frame would
+ * otherwise build one object per patched row; the list grows to the longest
+ * patch ever seen and never shrinks. It is beside the canvas and not on it so
+ * that what `patchCanvas` hands back is a `CastCanvas` and nothing more, which
+ * is what `parseCast` will accept.
+ */
+export type CanvasBuffers = {
+  /** What `patchCanvas` hands back, and the only part anything else reads. */
+  canvas: { enabled: boolean; knobs: Record<CanvasKnob, number>; mapping: CanvasMapping[] }
+  faded: CanvasMapping[]
+}
+
+export const canvasBuffers = (): CanvasBuffers => ({
+  canvas: { enabled: true, knobs: defaultCanvasKnobs(), mapping: [] },
+  faded: [],
+})
+
+/**
+ * A flow's canvas patch merged over the canvas the cast is drawing on.
+ *
+ * Every knob the patch names walks from the canvas's own value to the patch's
+ * by `presence`, so a fold comes in with the flow that asked for it and goes
+ * out with it; a knob the patch does not name is the canvas's untouched. The
+ * patch's rows are appended after the canvas's own with their gains scaled by
+ * the same presence, so a row is faded exactly as the knob under it is and
+ * the canvas's rows still do what they always did. The canvas's rows come
+ * first because the canvas's numbers are the base and a patch only ever adds
+ * to what is already being said.
+ *
+ * With no patch, or at presence 0, it hands back the canvas it was given,
+ * unchanged and not a copy: nothing to merge is nothing to allocate, and the
+ * picture is bit for bit what it was before any study carried a patch.
+ */
+export function patchCanvas(
+  base: CastCanvas,
+  patch: StudyCanvas | undefined,
+  presence: number,
+  out: CanvasBuffers,
+): CastCanvas {
+  const fade = Math.min(Math.max(presence, 0), 1)
+  if (!patch || !(fade > 0)) return base
+  const canvas = out.canvas
+  canvas.enabled = base.enabled
+  for (const knob of CANVAS_KNOBS) {
+    const from = base.knobs[knob]
+    const to = patch.knobs?.[knob]
+    canvas.knobs[knob] = to === undefined ? from : from + (to - from) * fade
+  }
+
+  canvas.mapping.length = 0
+  for (const row of base.mapping) canvas.mapping.push(row)
+  const rows = patch.mapping ?? []
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]
+    if (!row) continue
+    let held = out.faded[index]
+    if (!held) {
+      held = { from: row.from, to: row.to, gain: 0, curve: row.curve }
+      out.faded[index] = held
+    }
+
+    held.from = row.from
+    held.to = row.to
+    held.curve = row.curve
+    held.gain = row.gain * fade
+    canvas.mapping.push(held)
+  }
+
+  return canvas
+}
 
 function readField(value: unknown, source: string, path: string): StudyField {
   const from = readString(value, source, path)

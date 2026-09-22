@@ -12,7 +12,7 @@ struct PostParams {
   tone: vec4<f32>,      // exposure, shoulder, on, 0
   grain: vec4<f32>,     // amount, clock, 0, 0
   flow: vec4<f32>,      // carry this frame, ceiling, cover x and y
-  floor: vec4<f32>,     // light taken off the history this frame, the fade knee, 0, 0
+  floor: vec4<f32>,     // light taken off the history this frame, the fade knee, the fold's sectors (0 none, whole and even), how far the fold is applied (0 to 1)
   ribbon: vec4<f32>,    // intensity, width and amplitude in pixels, circle (0 or 1)
   ribbonTint: vec4<f32>, // colour rgb, circle radius in pixels
   grade: vec4<f32>,     // vignette (0 none), saturation (1 untouched), vignette edge width, 0

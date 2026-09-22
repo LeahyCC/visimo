@@ -37,6 +37,10 @@ export const IMPL_IDS = [
   'petals',
   'lightning',
   'grid',
+  'murmuration',
+  'blackhole',
+  'aurora',
+  'cymatics',
   'ocean',
   'look',
 ] as const
@@ -173,6 +177,8 @@ export const PARTICLE_KNOBS = [
   'alignment',
   'cohesion',
   'neighbourhood',
+  // How much brighter, and how far toward the leading hue, a turning one is.
+  'turnLight',
 ] as const
 export type ParticleKnob = (typeof PARTICLE_KNOBS)[number]
 
@@ -194,6 +200,43 @@ export const DUST_KNOBS = [
   'gather',
 ] as const satisfies readonly ParticleKnob[]
 export type DustKnob = (typeof DUST_KNOBS)[number]
+
+/**
+ * The flock's subset of the field's knobs, and the first to switch the boids
+ * grid on. `rate` is the birds a second and `count` the slots the pool holds,
+ * so the flock alive is about `rate` times the seconds a bird lives; `life` is
+ * held longer than the pool takes to come round, see `MURMURATION_PROFILE`.
+ * `separation`, `alignment` and `cohesion` are the three rules and
+ * `neighbourhood` is how far a bird looks; `gather`, `attractX` and `attractY`
+ * are what drifts the whole body to a moving point, and `curl` and `curlScale`
+ * are the broad current that carries it across the frame on the way. `streak`
+ * is seconds of a bird's own travel drawn behind it, and `turnLight` is how
+ * much a bird turning hard is brightened.
+ */
+export const MURMURATION_KNOBS = [
+  'count',
+  'rate',
+  'life',
+  'speed',
+  'size',
+  'streak',
+  'intensity',
+  'hueSpread',
+  'turnLight',
+  'drag',
+  'gravity',
+  'gravityAngle',
+  'curl',
+  'curlScale',
+  'gather',
+  'attractX',
+  'attractY',
+  'separation',
+  'alignment',
+  'cohesion',
+  'neighbourhood',
+] as const satisfies readonly ParticleKnob[]
+export type MurmurationKnob = (typeof MURMURATION_KNOBS)[number]
 
 /**
  * The caustics' numbers. Their ranges and units are in
@@ -378,6 +421,84 @@ export const GRID_KNOBS = [
 export type GridKnob = (typeof GRID_KNOBS)[number]
 
 /**
+ * The black hole ink's numbers. Their ranges and units are in
+ * `impls/blackhole.params.ts`. `disc` is where the empty middle ends, `width`
+ * is half the burning ring's thickness and `annulus` how far the bending part
+ * reaches beyond it, all three fractions of the short side; `heat` is how
+ * hard the ring burns as a multiple of the intensity and `beam` how much
+ * brighter its approaching side is, with `spin` saying in turns where that
+ * side points; `bend` is the share of what the canvas lets go of each frame
+ * that the annulus puts back, which is what keeps the loop bounded; `hue` is
+ * turns added to the key, for both of the study's hues together.
+ */
+export const BLACKHOLE_KNOBS = [
+  'disc',
+  'width',
+  'annulus',
+  'heat',
+  'beam',
+  'bend',
+  'intensity',
+  'hue',
+  'spin',
+] as const
+export type BlackHoleKnob = (typeof BLACKHOLE_KNOBS)[number]
+
+/**
+ * The aurora's numbers. Their ranges and units are in
+ * `impls/aurora.params.ts`. `intensity` is the light the foot of a curtain
+ * settles at on a still canvas and `curtains` how many are lit, a fraction
+ * fading the last one in; `height` is a share of each curtain's own height;
+ * `sway` is how far the top of a ray leans in frame heights and `drift` the
+ * cycles a second the path turns at; `rays` runs from a soft veil to hard
+ * strands and `ripple` is how strong a hit's ripple is. `hue` is turns the
+ * chord has added to the key, and only an integrating row can move it.
+ */
+export const AURORA_KNOBS = [
+  'intensity',
+  'curtains',
+  'height',
+  'sway',
+  'drift',
+  'rays',
+  'ripple',
+  'hue',
+] as const
+export type AuroraKnob = (typeof AURORA_KNOBS)[number]
+
+/**
+ * The plate's numbers. Their ranges and units are in `impls/cymatics.params.ts`.
+ * `mode0` to `mode11` are how strongly each pitch class is ringing the plate,
+ * one per note from C to B, each fed by that note's own row of the packet;
+ * `layer` is how far the finer partner modes have come up beside them; `sharp`
+ * is how thin and tight the line is drawn, 0 to 1; `width` and `glow` are the
+ * line's half width and the glow's reach in pixels on a 1080 high canvas;
+ * `strike` is how hard the plate has just been hit, which the study reaches
+ * through a spring so the line rings and settles.
+ */
+export const CYMATICS_KNOBS = [
+  'mode0',
+  'mode1',
+  'mode2',
+  'mode3',
+  'mode4',
+  'mode5',
+  'mode6',
+  'mode7',
+  'mode8',
+  'mode9',
+  'mode10',
+  'mode11',
+  'layer',
+  'sharp',
+  'width',
+  'glow',
+  'strike',
+  'intensity',
+] as const
+export type CymaticsKnob = (typeof CYMATICS_KNOBS)[number]
+
+/**
  * The ocean's numbers. Their ranges and units are in `impls/ocean.params.ts`.
  * `speed` is world units a second the camera flies and, through it, how fast
  * the water itself moves; `swell` and `chop` are how tall the long and the
@@ -484,6 +605,9 @@ export type ImplKnob =
   | PetalKnob
   | LightningKnob
   | GridKnob
+  | BlackHoleKnob
+  | AuroraKnob
+  | CymaticsKnob
   | OceanKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
@@ -506,6 +630,10 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   petals: PETAL_KNOBS,
   lightning: LIGHTNING_KNOBS,
   grid: GRID_KNOBS,
+  murmuration: MURMURATION_KNOBS,
+  blackhole: BLACKHOLE_KNOBS,
+  aurora: AURORA_KNOBS,
+  cymatics: CYMATICS_KNOBS,
   ocean: OCEAN_KNOBS,
   look: LOOK_KNOBS,
 }

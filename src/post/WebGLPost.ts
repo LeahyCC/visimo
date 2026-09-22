@@ -173,7 +173,11 @@ type Pass = {
  * passes reducing the frame to one texel, and this path is a fallback rather
  * than a second implementation. So a cast that leans on the hold to keep a
  * long memory in bounds here has only `feedback.ceiling` holding it, which is
- * what held it before the hold existed. `floor`, `fade`, `cool`, `hue`,
+ * what held it before the hold existed. `feedback.fold` and `feedback.foldMix`
+ * are skipped too: the fold is a study's patch on the canvas and the director
+ * that applies it never runs on this path, so the two floats are simply left
+ * unread and the lookup here is the zoom and the turn it always was. Nothing
+ * throws on them. `floor`, `fade`, `cool`, `hue`,
  * `sharpen` and `ceiling` need no flow and no measurement, so all six apply
  * here exactly as they do on the WebGPU path, and so does the grade, a few
  * lines of the composite, the gate weave among them. The ribbon is skipped: it wants the

@@ -626,13 +626,16 @@ describe('the uniform', () => {
       curl: 0.05,
       curlScale: 3.5,
       curlClock: 12.25,
+      lens: 0.14,
+      photon: 0.07,
     }
     const out = writeAnalyticUniform(field, new Float32Array(ANALYTIC_UNIFORM_FLOATS))
     // The buffer is float32, so the expected side is rounded the same way.
     expect([...out]).toEqual(
-      [-0.4, 3, 0, 0, 0.2, -0.1, 0, 0, 0.5, 0.5, 0.5737, 0, 0.05, 3.5, 12.25, 0].map((value) =>
-        Math.fround(value),
-      ),
+      // prettier-ignore
+      [
+        -0.4, 3, 0, 0, 0.2, -0.1, 0, 0, 0.5, 0.5, 0.5737, 0, 0.05, 3.5, 12.25, 0, 0.14, 0.07, 0, 0,
+      ].map((value) => Math.fround(value)),
     )
   })
 
@@ -640,7 +643,7 @@ describe('the uniform', () => {
   // what lets a term added later append a vec4 and move nothing.
   it('is a whole number of vec4s', () => {
     expect(ANALYTIC_UNIFORM_FLOATS % 4).toBe(0)
-    expect(ANALYTIC_UNIFORM_FLOATS).toBe(16)
+    expect(ANALYTIC_UNIFORM_FLOATS).toBe(20)
   })
 
   // The curl vec4 went on the end, so the three that were already there are

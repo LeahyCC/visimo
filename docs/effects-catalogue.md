@@ -87,7 +87,7 @@ Built once, before the rows that need them. Six pieces: four are built, the raym
 
 **`raymarch-kit` is `impls/RaymarchInk.ts`**, a base an ink in three dimensions extends, and `shaders/raymarch.common.wgsl`, which is prepended to its shader. The shared WGSL is the camera, the sphere trace, the normal, the soft shadow, the occlusion, the fresnel, the primitives and their operators, and the glint threshold; the TypeScript marches a target at half the ink target and scales it back up, additively at the study's presence. An ink on it writes `sceneDistance` and a fragment entry point and nothing else. `impls/MorphInk.ts` is the worked example. See "The raymarch kit" in the README.
 
-**`swarm-kit` is `impls/ParticleField.ts`**, one compute-simulated pool from ten thousand to half a million, with drag, gravity, curl noise, attraction to a point and the three boids terms on a uniform grid, all as knobs, drawn as velocity-aligned streaks that shrink to round points. A study on it is a `ParticleProfile` in `impls/particles.params.ts` and a knob subset in `studies/impls.ts`; the dust and the sparks are the first two, and murmuration, school and fireflies need nothing new built. See "The particle field" in the README.
+**`swarm-kit` is `impls/ParticleField.ts`**, one compute-simulated pool from ten thousand to half a million, with drag, gravity, curl noise, attraction to a point and the three boids terms on a uniform grid, all as knobs, drawn as velocity-aligned streaks that shrink to round points. A study on it is a `ParticleProfile` in `impls/particles.params.ts` and a knob subset in `studies/impls.ts`; the dust, the sparks and the murmuration are the first three, and school and fireflies are still to come. The murmuration is the first on the boids grid and did need three small additions, each off for the others: a bird that turns is brighter and moves toward a second hue, a profile may say its continuous births land on a bird already alive (`fill: 'flock'`), and a profile may pick three saturated hues of its own (`colour: 'vivid'`). It also made the separation a sum and gave the grid a fresh random sample and a moving origin each frame. The school will want the turn light already; expect the grid's eight birds a cell to limit any dense flock, so a reach near 0.02 of the short side. See "The particle field" in the README.
 
 **`canvas-sampler` is `SceneContext.canvas()`**, which hands an ink the half of the post stack's history the inks are not drawing into. Two things go with it: it is one frame behind, and it is a loop, so an ink reading it has to stay sparse or keep its gain under one. `impls/CanvasQuadInk.ts` is the worked example and is not a study. See "Implementations" in the README.
 
@@ -98,7 +98,7 @@ Built once, before the rows that need them. Six pieces: four are built, the raym
 | id           | kind | what you see                                                                                        | how                                                       | music                    | moments | tension does                      | cost   | tier | status |
 | ------------ | ---- | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------ | ------- | --------------------------------- | ------ | ---- | ------ |
 | `wormhole`   | flow | a tube you fall through, walls made of the picture itself, streaks stretching at speed. Time travel | raymarched tube, canvas as wall texture, outward feedback | trance, techno, prog     | G B D   | speed climbs, tube narrows        | heavy  | S    | open   |
-| `black-hole` | flow | the whole picture bends round a dark disc with a burning ring. Bass feeds the ring                  | lens warp of the canvas plus one ring ink                 | dubstep, bass, doom      | B D     | disc grows, pull strengthens      | medium | S    | open   |
+| `black-hole` | flow | the whole picture bends round a dark disc with a burning ring. Bass feeds the ring                  | lens warp of the canvas plus one ring ink                 | dubstep, bass, doom      | B D     | disc grows, pull strengthens      | medium | S    | built  |
 | `nebula`     | ink  | slow coloured gas clouds with stars inside, hue from the key                                        | raymarched 3D noise, half res, glint threshold            | ambient, downtempo, prog | I R O   | clouds thin and darken            | heavy  | S    | open   |
 | `starfield`  | ink  | points streaming past in depth                                                                      | instanced points, depth sorted by speed                   | trance, synthwave, house | G B     | warp speed, points become streaks | cheap  | A    | open   |
 | `orbits`     | ink  | a few bodies circling on rings, one per band, leaving arcs                                          | analytic orbits, period locked to the beat                | minimal, IDM, classical  | I G R   | orbits tighten toward the centre  | cheap  | A    | open   |
@@ -113,7 +113,7 @@ Built once, before the rows that need them. Six pieces: four are built, the raym
 | `ridgeline` | ink  | mountain ranges in layers, their outline is the spectrum, scrolling past with mist between | height-kit, 4 parallax layers, ridge lines only (sparse)   | rock, folk, post-rock, indie | I G R   | scroll speeds, peaks sharpen          | medium | S    | open   |
 | `ocean`     | ink  | a sea surface to the horizon, swell height is the energy, light glints on treble           | height-kit waves, glints only above threshold              | ambient, downtempo, reggae   | I G R O | sea flattens and goes still           | medium | S    | built  |
 | `lightning` | ink  | branching bolts on the biggest hits, afterglow hangs in the canvas                         | recursive midpoint branches on CPU, line quads, flash safe | metal, dubstep, DnB          | D       | none. Held back, fires on impact      | cheap  | S    | built  |
-| `aurora`    | ink  | tall slow curtains of light that sway, colour from the chord                               | layered noise ribbons, vertical falloff                    | ambient, classical, acoustic | I R O   | curtains lower and dim                | medium | S    | open   |
+| `aurora`    | ink  | tall slow curtains of light that sway, colour from the chord                               | layered noise ribbons, vertical falloff                    | ambient, classical, acoustic | I R O   | curtains lower and dim                | medium | S    | built  |
 | `rain`      | ink  | streaks falling, a ring where each one lands                                               | particle streaks, spawns ripple events                     | lo-fi, jazz, trip hop        | I G R   | rain thins to single drops            | cheap  | A    | open   |
 | `ripple`    | flow | rings of displacement spreading from where hits land                                       | analytic ring sum, 8 live rings                            | lo-fi, dub, downtempo        | G R     | rings come faster                     | cheap  | A    | open   |
 | `waterfall` | flow | the picture pours downward and breaks into mist at the bottom                              | drip flow plus a mist ink at the base                      | downtempo, liquid DnB        | G R O   | the fall stops. Released on the drop  | medium | A    | open   |
@@ -126,7 +126,7 @@ Built once, before the rows that need them. Six pieces: four are built, the raym
 
 | id             | kind | what you see                                                                   | how                                                        | music                      | moments | tension does                          | cost   | tier | status |
 | -------------- | ---- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- | -------------------------- | ------- | ------------------------------------- | ------ | ---- | ------ |
-| `murmuration`  | ink  | thousands of birds moving as one body, folding and splitting on the beat       | swarm-kit, points, scatter on hits                         | DnB, IDM, orchestral       | G B D   | the flock balls up tight, then bursts | medium | S    | open   |
+| `murmuration`  | ink  | thousands of birds moving as one body, folding and splitting on the beat       | swarm-kit, points, scatter on hits                         | DnB, IDM, orchestral       | G B D   | the flock balls up tight, then bursts | medium | S    | built  |
 | `chord-petals` | ink  | a flower of twelve petals, one per note. The notes sounding are the petals lit | twelve SDF petals fed by the chroma rows, opens on release | jazz, classical, soul, pop | I G R   | petals close to a bud                 | cheap  | S    | built  |
 | `reaction`     | ink  | living coral and cell patterns that grow, split and heal                       | Gray-Scott compute, feed and kill rates from the packet    | minimal, IDM, techno       | G R     | pattern tightens into fine spots      | medium | S    | open   |
 | `jellyfish`    | ink  | a few soft bells that pulse on the beat and trail tendrils                     | SDF bells, tendrils as verlet ribbons                      | downtempo, chillout, dub   | G R     | they sink and slow                    | medium | A    | open   |
@@ -139,7 +139,7 @@ Built once, before the rows that need them. Six pieces: four are built, the raym
 
 | id              | kind | what you see                                                                                       | how                                                       | music                     | moments | tension does                     | cost   | tier | status |
 | --------------- | ---- | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------- | ------- | -------------------------------- | ------ | ---- | ------ |
-| `cymatics`      | ink  | sand on a vibrating plate. The pattern is set by the notes actually playing. You see the sound     | Chladni modes summed from the top spectral peaks          | any tonal music           | I G R   | pattern sharpens to thin lines   | cheap  | S    | open   |
+| `cymatics`      | ink  | sand on a vibrating plate. The pattern is set by the notes actually playing. You see the sound     | Chladni modes from the chroma rows, one per note          | any tonal music           | I G R   | pattern sharpens to thin lines   | cheap  | S    | built  |
 | `shape-morph`   | ink  | one solid in the middle that turns and melts from form to form, a new form each section            | raymarch-kit, SDF blend between solids, faceted rim light | electro, prog, IDM        | G B D   | the form shrinks and spins up    | heavy  | S    | built  |
 | `grid-3d`       | ink  | a neon grid floor to the horizon that ripples with the bass                                        | height-kit as grid lines only                             | synthwave, house, electro | G B     | grid rushes toward you           | cheap  | S    | built  |
 | `liquid-chrome` | ink  | a blob of liquid metal that wobbles with the bass and reflects the rest of the picture. 3D texture | raymarch-kit metaballs, canvas-sampler as the reflection  | dubstep, trap, bass       | G D     | blob pulls into a sphere         | heavy  | S    | open   |
@@ -159,7 +159,7 @@ Built once, before the rows that need them. Six pieces: four are built, the raym
 
 | id              | kind | what you see                                                                         | how                                                         | music                     | moments | tension does                  | cost   | tier | status |
 | --------------- | ---- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------- | ------------------------- | ------- | ----------------------------- | ------ | ---- | ------ |
-| `mirror-fold`   | flow | the whole canvas folded into a kaleidoscope, whatever else is drawing                | fold the feedback lookup by angle. Works over every ink     | house, psych, disco       | G D     | fold count steps up on impact | cheap  | S    | open   |
+| `mirror-fold`   | flow | the whole canvas folded into a kaleidoscope, whatever else is drawing                | fold the feedback lookup by angle. Works over every ink     | house, psych, disco       | G D     | fold count steps up on impact | cheap  | S    | built  |
 | `oil-slick`     | ink  | slow marbled liquid with rainbow sheen sliding over it                               | domain warped noise, thin film colour, edges only           | psych, downtempo, soul    | I G R   | marbling tightens             | medium | S    | open   |
 | `mandala`       | ink  | a breathing mandala built ring by ring, inner ring the beat, outer rings the harmony | polar SDF layers from chroma and beatPhase                  | psytrance, world, ambient | I G R   | rings draw inward             | cheap  | S    | open   |
 | `polar-twist`   | flow | rotation that changes with distance from the centre. The tie-dye spiral              | analytic field                                              | psych, jam, funk          | G R     | twist tightens                | cheap  | A    | open   |
@@ -221,17 +221,17 @@ Recipes, not new code. Each becomes a JSON in `src/studies/casts/` once its part
 
 The check that the library fits all music. Every cell needs at least two studies that are at home there, or Auto will repeat itself. "Now" was what existed on 2026-09-20, before this list; **bold** in the last column is built.
 
-| song feels like         | now                           | after the S tier                               |
-| ----------------------- | ----------------------------- | ---------------------------------------------- |
-| soft, slow, tonal       | lazy-fluid, dust, caustics    | + aurora, nebula, **ocean**, **chord-petals**  |
-| soft, slow, dark        | thin                          | + void-tendrils, reaction                      |
-| mid, groovy, tonal      | fractal-glints takes it all   | + mirror-fold, oil-slick, mandala, echo-shapes |
-| mid, steady, electronic | beat-pump, tunnel, beat-rings | + **grid-3d**, **lasers**, wormhole            |
-| acoustic, organic       | nothing made for it           | + ridgeline, cymatics, **chord-petals**        |
-| fast, hard, bright      | turbulent-fluid, sparks       | + murmuration, shape-morph, **lightning**      |
-| heavy, hard, dark       | shards, hard-clean            | + black-hole, liquid-chrome, void-tendrils     |
-| big build               | implode, riser-streaks        | + wormhole, black-hole, god-rays               |
-| big drop                | radial-burst (never reached)  | + **lightning**, liquid-chrome, **lasers**     |
+| song feels like         | now                           | after the S tier                                   |
+| ----------------------- | ----------------------------- | -------------------------------------------------- |
+| soft, slow, tonal       | lazy-fluid, dust, caustics    | + **aurora**, nebula, **ocean**, **chord-petals**  |
+| soft, slow, dark        | thin                          | + void-tendrils, reaction                          |
+| mid, groovy, tonal      | fractal-glints takes it all   | + **mirror-fold**, oil-slick, mandala, echo-shapes |
+| mid, steady, electronic | beat-pump, tunnel, beat-rings | + **grid-3d**, **lasers**, wormhole                |
+| acoustic, organic       | nothing made for it           | + ridgeline, **cymatics**, **chord-petals**        |
+| fast, hard, bright      | turbulent-fluid, sparks       | + **murmuration**, shape-morph, **lightning**      |
+| heavy, hard, dark       | shards, hard-clean            | + **black-hole**, liquid-chrome, void-tendrils     |
+| big build               | implode, riser-streaks        | + wormhole, **black-hole**, god-rays               |
+| big drop                | radial-burst (never reached)  | + **lightning**, liquid-chrome, **lasers**         |
 
 The "mid, groovy, tonal" row is why so much music lands in the kaleidoscope: `fractal-glints` is the only ink at home there that fits groove. It needs rivals more than it needs retuning.
 
@@ -240,12 +240,12 @@ The "mid, groovy, tonal" row is why so much music lands in the kaleidoscope: `fr
 ```text
 Done      the registry split; the engine (long memory canvas, mapping shapes, wide bloom,
           palettes by look, the particle field and canvas sampler, shaders compiled in tests);
-          five of the six shared pieces; lasers, chord-petals, lightning, grid-3d
+          five of the six shared pieces; lasers, chord-petals, lightning, grid-3d, mirror-fold
 In review shape-morph, with the raymarch kit
 
 Next      one study per kit, so every kit is proven twice, and the soft end gets filled first:
           murmuration (particles), cymatics (notes), ocean (terrain), black-hole (canvas sampler),
-          mirror-fold, aurora
+          aurora
 Then      the rest of the S tier: mandala, ridgeline, echo-shapes, oil-slick, reaction, god-rays,
           neon, spectral-split, and with the raymarch kit wormhole, nebula, liquid-chrome
 Then      the darkening blend, and void-tendrils on it

@@ -37,12 +37,12 @@
  * are the same objects every frame.
  */
 import { F } from '../audio/FeatureExtractor'
-import { carriedCanvas, MAX_INKS } from '../studies/cast'
-import type { Cast, CastOverride } from '../studies/cast'
+import { canvasBuffers, carriedCanvas, MAX_INKS, patchCanvas } from '../studies/cast'
+import type { CanvasBuffers, Cast, CastOverride } from '../studies/cast'
 import { STUDIES } from '../studies/registry'
 import type { LiveCast, LiveStudy } from '../studies/resolve'
 import { CHARACTER_AXES } from '../studies/types'
-import type { Character, Cost, Study } from '../studies/types'
+import type { Character, Cost, Study, StudyCanvas } from '../studies/types'
 import { CharacterReader } from './character'
 import { MomentReader } from './moment'
 import type { MomentWeights, Playhead } from './moment'
@@ -350,6 +350,17 @@ export class Director {
   private readonly live: LiveStudy[] = []
   private readonly frame: LiveCast
 
+  /**
+   * The canvas the director's casts draw on, and the buffers a flow's patch
+   * is merged into. The base is built once and never written: a frame with no
+   * patch on it hands back this very object, so the canvas is bit for bit
+   * what it was before a study could speak to it.
+   */
+  private readonly base = carriedCanvas()
+  private readonly painted: CanvasBuffers = canvasBuffers()
+  /** By id, so the patch of whatever flow is live is one lookup and not a scan. */
+  private readonly byId = new Map<string, Study>()
+
   /** The cast a section had, so a section that comes back comes back to it. */
   private readonly memory = new Map<number, PickedCast>()
 
@@ -395,9 +406,10 @@ export class Director {
     this.pinned = options.pinned
     this.reader = new CharacterReader({ start: options.start })
     this.ramp = this.glideSeconds
+    for (const study of this.studies) this.byId.set(study.id, study)
     this.frame = {
       studies: this.live,
-      canvas: this.pinned?.canvas ?? carriedCanvas(),
+      canvas: this.pinned?.canvas ?? this.base,
       tension: 0,
     }
 
@@ -603,6 +615,37 @@ export class Director {
       entry.presence = next
       this.live.push(entry)
     }
+
+    this.paint()
+  }
+
+  /**
+   * The canvas for this frame: the director's own, with the live flow's patch
+   * merged over it at that flow's presence. Only a flow may carry a patch, so
+   * there is at most one to apply once a change has settled.
+   *
+   * Mid-change there are two flows live, and the one taken is the strongest
+   * of those that carry a patch rather than simply the strongest flow. A flow
+   * with nothing to say about the canvas then never displaces one that has,
+   * and the patch fades out on its own flow's presence instead of being cut
+   * off the frame the other overtakes it.
+   *
+   * With no patch live this leaves `frame.canvas` as the base object, so a
+   * library with no patch in it anywhere draws precisely what it drew before.
+   */
+  private paint() {
+    if (this.pinned) return
+    let patch: StudyCanvas | undefined
+    let presence = 0
+    for (const entry of this.live) {
+      const study = this.byId.get(entry.id)
+      if (!study || study.kind !== 'flow' || !study.canvas) continue
+      if (entry.presence <= presence) continue
+      patch = study.canvas
+      presence = entry.presence
+    }
+
+    this.frame.canvas = patchCanvas(this.base, patch, presence, this.painted)
   }
 
   /** A pinned cast is built once and never changes; only tension moves. */

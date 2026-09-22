@@ -157,21 +157,21 @@ Built once, before the rows that need them. Six pieces: four are built, the raym
 
 ## Trippy
 
-| id              | kind | what you see                                                                         | how                                                         | music                     | moments | tension does                  | cost   | tier | status                             |
-| --------------- | ---- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------- | ------------------------- | ------- | ----------------------------- | ------ | ---- | ---------------------------------- |
-| `mirror-fold`   | flow | the whole canvas folded into a kaleidoscope, whatever else is drawing                | fold the feedback lookup by angle. Works over every ink     | house, psych, disco       | G D     | fold count steps up on impact | cheap  | S    | claimed: feature/study-mirror-fold |
-| `oil-slick`     | ink  | slow marbled liquid with rainbow sheen sliding over it                               | domain warped noise, thin film colour, edges only           | psych, downtempo, soul    | I G R   | marbling tightens             | medium | S    | open                               |
-| `mandala`       | ink  | a breathing mandala built ring by ring, inner ring the beat, outer rings the harmony | polar SDF layers from chroma and beatPhase                  | psytrance, world, ambient | I G R   | rings draw inward             | cheap  | S    | open                               |
-| `polar-twist`   | flow | rotation that changes with distance from the centre. The tie-dye spiral              | analytic field                                              | psych, jam, funk          | G R     | twist tightens                | cheap  | A    | open                               |
-| `vortex`        | flow | one big swirl about the middle                                                       | analytic field                                              | any tonal                 | B R     | spins up                      | cheap  | A    | open                               |
-| `julia`         | ink  | a fractal coastline that reshapes as the key moves                                   | Julia set, constant from keyHue and swell, edges only, half | prog, psytrance           | G B     | zooms in                      | heavy  | A    | open                               |
-| `lattice-warp`  | flow | the classic MilkDrop sine grid wobble                                                | analytic field                                              | any                       | G       | amplitude grows               | cheap  | A    | open                               |
-| `shear-bands`   | flow | horizontal bands sliding against each other                                          | analytic field                                              | techno, electro           | G       | band count rises              | cheap  | B    | open                               |
-| `gravity-wells` | flow | a few orbiting attractors bending the picture                                        | analytic field                                              | ambient, IDM              | R I     | wells close in                | cheap  | B    | open                               |
-| `drip`          | flow | slow downward melt                                                                   | analytic field                                              | doom, lo-fi, trip hop     | R O     | stops. Releases on the drop   | cheap  | B    | open                               |
-| `ink-drops`     | ink  | big soft blooms on sub hits                                                          | dye emitter variant                                         | lo-fi, dub                | G R     | fewer, larger                 | cheap  | B    | open                               |
-| `bubbles`       | ink  | rising soft circles, popped by treble hits                                           | particle quads with rim only                                | pop, disco                | G R     | rise faster                   | cheap  | B    | open                               |
-| `constellation` | ink  | points joined by lines, laid out from the chroma                                     | 12 points, lines between sounding notes                     | ambient, classical        | I R     | lines shorten                 | cheap  | B    | open                               |
+| id              | kind | what you see                                                                         | how                                                         | music                     | moments | tension does                  | cost   | tier | status |
+| --------------- | ---- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------- | ------------------------- | ------- | ----------------------------- | ------ | ---- | ------ |
+| `mirror-fold`   | flow | the whole canvas folded into a kaleidoscope, whatever else is drawing                | fold the feedback lookup by angle. Works over every ink     | house, psych, disco       | G D     | fold count steps up on impact | cheap  | S    | built  |
+| `oil-slick`     | ink  | slow marbled liquid with rainbow sheen sliding over it                               | domain warped noise, thin film colour, edges only           | psych, downtempo, soul    | I G R   | marbling tightens             | medium | S    | open   |
+| `mandala`       | ink  | a breathing mandala built ring by ring, inner ring the beat, outer rings the harmony | polar SDF layers from chroma and beatPhase                  | psytrance, world, ambient | I G R   | rings draw inward             | cheap  | S    | open   |
+| `polar-twist`   | flow | rotation that changes with distance from the centre. The tie-dye spiral              | analytic field                                              | psych, jam, funk          | G R     | twist tightens                | cheap  | A    | open   |
+| `vortex`        | flow | one big swirl about the middle                                                       | analytic field                                              | any tonal                 | B R     | spins up                      | cheap  | A    | open   |
+| `julia`         | ink  | a fractal coastline that reshapes as the key moves                                   | Julia set, constant from keyHue and swell, edges only, half | prog, psytrance           | G B     | zooms in                      | heavy  | A    | open   |
+| `lattice-warp`  | flow | the classic MilkDrop sine grid wobble                                                | analytic field                                              | any                       | G       | amplitude grows               | cheap  | A    | open   |
+| `shear-bands`   | flow | horizontal bands sliding against each other                                          | analytic field                                              | techno, electro           | G       | band count rises              | cheap  | B    | open   |
+| `gravity-wells` | flow | a few orbiting attractors bending the picture                                        | analytic field                                              | ambient, IDM              | R I     | wells close in                | cheap  | B    | open   |
+| `drip`          | flow | slow downward melt                                                                   | analytic field                                              | doom, lo-fi, trip hop     | R O     | stops. Releases on the drop   | cheap  | B    | open   |
+| `ink-drops`     | ink  | big soft blooms on sub hits                                                          | dye emitter variant                                         | lo-fi, dub                | G R     | fewer, larger                 | cheap  | B    | open   |
+| `bubbles`       | ink  | rising soft circles, popped by treble hits                                           | particle quads with rim only                                | pop, disco                | G R     | rise faster                   | cheap  | B    | open   |
+| `constellation` | ink  | points joined by lines, laid out from the chroma                                     | 12 points, lines between sounding notes                     | ambient, classical        | I R     | lines shorten                 | cheap  | B    | open   |
 
 ## Light and dark
 
@@ -221,17 +221,17 @@ Recipes, not new code. Each becomes a JSON in `src/studies/casts/` once its part
 
 The check that the library fits all music. Every cell needs at least two studies that are at home there, or Auto will repeat itself. "Now" was what existed on 2026-09-20, before this list; **bold** in the last column is built.
 
-| song feels like         | now                           | after the S tier                               |
-| ----------------------- | ----------------------------- | ---------------------------------------------- |
-| soft, slow, tonal       | lazy-fluid, dust, caustics    | + aurora, nebula, ocean, **chord-petals**      |
-| soft, slow, dark        | thin                          | + void-tendrils, reaction                      |
-| mid, groovy, tonal      | fractal-glints takes it all   | + mirror-fold, oil-slick, mandala, echo-shapes |
-| mid, steady, electronic | beat-pump, tunnel, beat-rings | + **grid-3d**, **lasers**, wormhole            |
-| acoustic, organic       | nothing made for it           | + ridgeline, cymatics, **chord-petals**        |
-| fast, hard, bright      | turbulent-fluid, sparks       | + murmuration, shape-morph, **lightning**      |
-| heavy, hard, dark       | shards, hard-clean            | + black-hole, liquid-chrome, void-tendrils     |
-| big build               | implode, riser-streaks        | + wormhole, black-hole, god-rays               |
-| big drop                | radial-burst (never reached)  | + **lightning**, liquid-chrome, **lasers**     |
+| song feels like         | now                           | after the S tier                                   |
+| ----------------------- | ----------------------------- | -------------------------------------------------- |
+| soft, slow, tonal       | lazy-fluid, dust, caustics    | + aurora, nebula, ocean, **chord-petals**          |
+| soft, slow, dark        | thin                          | + void-tendrils, reaction                          |
+| mid, groovy, tonal      | fractal-glints takes it all   | + **mirror-fold**, oil-slick, mandala, echo-shapes |
+| mid, steady, electronic | beat-pump, tunnel, beat-rings | + **grid-3d**, **lasers**, wormhole                |
+| acoustic, organic       | nothing made for it           | + ridgeline, cymatics, **chord-petals**            |
+| fast, hard, bright      | turbulent-fluid, sparks       | + murmuration, shape-morph, **lightning**          |
+| heavy, hard, dark       | shards, hard-clean            | + black-hole, liquid-chrome, void-tendrils         |
+| big build               | implode, riser-streaks        | + wormhole, black-hole, god-rays                   |
+| big drop                | radial-burst (never reached)  | + **lightning**, liquid-chrome, **lasers**         |
 
 The "mid, groovy, tonal" row is why so much music lands in the kaleidoscope: `fractal-glints` is the only ink at home there that fits groove. It needs rivals more than it needs retuning.
 
@@ -240,12 +240,12 @@ The "mid, groovy, tonal" row is why so much music lands in the kaleidoscope: `fr
 ```text
 Done      the registry split; the engine (long memory canvas, mapping shapes, wide bloom,
           palettes by look, the particle field and canvas sampler, shaders compiled in tests);
-          five of the six shared pieces; lasers, chord-petals, lightning, grid-3d
+          five of the six shared pieces; lasers, chord-petals, lightning, grid-3d, mirror-fold
 In review shape-morph, with the raymarch kit
 
 Next      one study per kit, so every kit is proven twice, and the soft end gets filled first:
           murmuration (particles), cymatics (notes), ocean (terrain), black-hole (canvas sampler),
-          mirror-fold, aurora
+          aurora
 Then      the rest of the S tier: mandala, ridgeline, echo-shapes, oil-slick, reaction, god-rays,
           neon, spectral-split, and with the raymarch kit wormhole, nebula, liquid-chrome
 Then      the darkening blend, and void-tendrils on it

@@ -41,6 +41,7 @@ export const IMPL_IDS = [
   'blackhole',
   'aurora',
   'cymatics',
+  'ocean',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -498,6 +499,28 @@ export const CYMATICS_KNOBS = [
 export type CymaticsKnob = (typeof CYMATICS_KNOBS)[number]
 
 /**
+ * The ocean's numbers. Their ranges and units are in `impls/ocean.params.ts`.
+ * `speed` is world units a second the camera flies and, through it, how fast
+ * the water itself moves; `swell` and `chop` are how tall the long and the
+ * short wave trains stand, 0 to 1 of the most they may; `path` is how wide the
+ * path of light is and `glints` how wide the band of slopes that glint is, so
+ * how many facets are lit at once; `intensity` is the light of the glow in the
+ * water and the silence gate; `hue` is added to the key; `horizon` is how far
+ * the horizon's glow reaches above the line, in half-heights of the frame.
+ */
+export const OCEAN_KNOBS = [
+  'speed',
+  'swell',
+  'chop',
+  'path',
+  'glints',
+  'intensity',
+  'hue',
+  'horizon',
+] as const
+export type OceanKnob = (typeof OCEAN_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -585,6 +608,7 @@ export type ImplKnob =
   | BlackHoleKnob
   | AuroraKnob
   | CymaticsKnob
+  | OceanKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -610,6 +634,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   blackhole: BLACKHOLE_KNOBS,
   aurora: AURORA_KNOBS,
   cymatics: CYMATICS_KNOBS,
+  ocean: OCEAN_KNOBS,
   look: LOOK_KNOBS,
 }
 

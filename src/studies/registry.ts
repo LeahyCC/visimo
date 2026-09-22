@@ -57,6 +57,7 @@ import { LAZY_FLUID } from './defs/lazy-fluid'
 import { LIGHTNING } from './defs/lightning'
 import { MIRROR_FOLD } from './defs/mirror-fold'
 import { MURMURATION } from './defs/murmuration'
+import { OCEAN } from './defs/ocean'
 import { RADIAL_BURST } from './defs/radial-burst'
 import { RIBBON } from './defs/ribbon'
 import { RISER_STREAKS } from './defs/riser-streaks'
@@ -97,6 +98,7 @@ export const STUDIES: readonly Study[] = [
   CHORD_PETALS,
   LIGHTNING,
   GRID_3D,
+  OCEAN,
   SHAPE_MORPH,
   MURMURATION,
   BLACK_HOLE_RING,

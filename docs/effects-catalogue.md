@@ -111,7 +111,7 @@ Built once, before the rows that need them. Six pieces: four are built, the raym
 | id          | kind | what you see                                                                               | how                                                        | music                        | moments | tension does                          | cost   | tier | status |
 | ----------- | ---- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------- | ---------------------------- | ------- | ------------------------------------- | ------ | ---- | ------ |
 | `ridgeline` | ink  | mountain ranges in layers, their outline is the spectrum, scrolling past with mist between | height-kit, 4 parallax layers, ridge lines only (sparse)   | rock, folk, post-rock, indie | I G R   | scroll speeds, peaks sharpen          | medium | S    | open   |
-| `ocean`     | ink  | a sea surface to the horizon, swell height is the energy, light glints on treble           | height-kit waves, glints only above threshold              | ambient, downtempo, reggae   | I G R O | sea flattens and goes still           | medium | S    | open   |
+| `ocean`     | ink  | a sea surface to the horizon, swell height is the energy, light glints on treble           | height-kit waves, glints only above threshold              | ambient, downtempo, reggae   | I G R O | sea flattens and goes still           | medium | S    | built  |
 | `lightning` | ink  | branching bolts on the biggest hits, afterglow hangs in the canvas                         | recursive midpoint branches on CPU, line quads, flash safe | metal, dubstep, DnB          | D       | none. Held back, fires on impact      | cheap  | S    | built  |
 | `aurora`    | ink  | tall slow curtains of light that sway, colour from the chord                               | layered noise ribbons, vertical falloff                    | ambient, classical, acoustic | I R O   | curtains lower and dim                | medium | S    | built  |
 | `rain`      | ink  | streaks falling, a ring where each one lands                                               | particle streaks, spawns ripple events                     | lo-fi, jazz, trip hop        | I G R   | rain thins to single drops            | cheap  | A    | open   |
@@ -223,14 +223,14 @@ The check that the library fits all music. Every cell needs at least two studies
 
 | song feels like         | now                           | after the S tier                                   |
 | ----------------------- | ----------------------------- | -------------------------------------------------- |
-| soft, slow, tonal       | lazy-fluid, dust, caustics    | + aurora, nebula, ocean, **chord-petals**          |
+| soft, slow, tonal       | lazy-fluid, dust, caustics    | + **aurora**, nebula, **ocean**, **chord-petals**  |
 | soft, slow, dark        | thin                          | + void-tendrils, reaction                          |
 | mid, groovy, tonal      | fractal-glints takes it all   | + **mirror-fold**, oil-slick, mandala, echo-shapes |
 | mid, steady, electronic | beat-pump, tunnel, beat-rings | + **grid-3d**, **lasers**, wormhole                |
-| acoustic, organic       | nothing made for it           | + ridgeline, cymatics, **chord-petals**            |
+| acoustic, organic       | nothing made for it           | + ridgeline, **cymatics**, **chord-petals**        |
 | fast, hard, bright      | turbulent-fluid, sparks       | + **murmuration**, shape-morph, **lightning**      |
-| heavy, hard, dark       | shards, hard-clean            | + black-hole, liquid-chrome, void-tendrils         |
-| big build               | implode, riser-streaks        | + wormhole, black-hole, god-rays                   |
+| heavy, hard, dark       | shards, hard-clean            | + **black-hole**, liquid-chrome, void-tendrils     |
+| big build               | implode, riser-streaks        | + wormhole, **black-hole**, god-rays               |
 | big drop                | radial-burst (never reached)  | + **lightning**, liquid-chrome, **lasers**         |
 
 The "mid, groovy, tonal" row is why so much music lands in the kaleidoscope: `fractal-glints` is the only ink at home there that fits groove. It needs rivals more than it needs retuning.

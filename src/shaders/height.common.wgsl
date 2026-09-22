@@ -16,7 +16,18 @@
 //   height_slope        how steep it is, across and along
 //   height_fog          how much of a line survives the distance, to exactly 0
 //   height_horizon_glow the horizon line and the glow either side of it
-// A study that wants another terrain replaces height_profile and keeps the rest.
+//
+// height_profile is not a hook a study overrides. This file is prepended to
+// the study's own as one block of text and the study's is appended after it,
+// so a study that declared its own height_profile would be declaring the
+// function this file already declared: a duplicate name, which WGSL refuses
+// to compile. A study on the kit's own terrain (a valley and hills), the way
+// grid-3d is, uses height_march, height_at and the rest exactly as they are.
+// A study that wants a different terrain, the way ocean does, does not touch
+// height_profile at all: it reads the two bindings this file declares (the
+// view and the rows) and writes its own march and its own height and slope
+// functions under its own names, alongside this file's, in the same module.
+// See src/shaders/ocean.wgsl for the worked example.
 
 struct HeightView {
   // Canvas width and height in pixels, the horizon in half-heights above the

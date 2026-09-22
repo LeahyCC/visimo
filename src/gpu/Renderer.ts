@@ -45,6 +45,7 @@ import { HaloInk } from '../impls/HaloInk'
 import { LasersInk } from '../impls/LasersInk'
 import { LightningInk } from '../impls/LightningInk'
 import { MorphInk } from '../impls/MorphInk'
+import { OceanInk } from '../impls/OceanInk'
 import { ParticleField } from '../impls/ParticleField'
 import { DUST_PROFILE, MURMURATION_PROFILE, SPARKS_PROFILE } from '../impls/particles.params'
 import { PetalsInk } from '../impls/PetalsInk'
@@ -690,6 +691,7 @@ class Renderer {
     if (impl === 'blackhole') return new BlackHoleInk()
     if (impl === 'aurora') return new AuroraInk()
     if (impl === 'cymatics') return new CymaticsInk()
+    if (impl === 'ocean') return new OceanInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

@@ -75,6 +75,11 @@ const ASSEMBLIES: {
     parts: ['grid.wgsl'],
   },
   {
+    owner: 'src/impls/OceanInk.ts',
+    prefix: 'height.common.wgsl',
+    parts: ['ocean.wgsl'],
+  },
+  {
     owner: 'src/impls/ParticleField.ts',
     prefix: 'particles.common.wgsl',
     parts: ['particles.draw.wgsl', 'particles.sim.wgsl'],

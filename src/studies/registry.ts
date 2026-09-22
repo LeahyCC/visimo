@@ -51,6 +51,7 @@ import { IMPLODE } from './defs/implode'
 import { LASERS } from './defs/lasers'
 import { LAZY_FLUID } from './defs/lazy-fluid'
 import { LIGHTNING } from './defs/lightning'
+import { MIRROR_FOLD } from './defs/mirror-fold'
 import { MURMURATION } from './defs/murmuration'
 import { RADIAL_BURST } from './defs/radial-burst'
 import { RIBBON } from './defs/ribbon'
@@ -73,6 +74,7 @@ export const STUDIES: readonly Study[] = [
   IMPLODE,
   RADIAL_BURST,
   CURL_DRIFT,
+  MIRROR_FOLD,
   BEAT_PUMP,
   TUNNEL,
   DYE_PLUMES,

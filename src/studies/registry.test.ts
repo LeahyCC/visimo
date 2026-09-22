@@ -26,7 +26,7 @@ import { RING_RANGES } from '../impls/rings.params'
 import { SHARD_RANGES } from '../impls/shards.params'
 import { SPECTRUM_RANGES } from '../impls/spectrum.params'
 import { STREAK_RANGES } from '../impls/streaks.params'
-import { MAX_WEAVE, POST_KNOBS, POST_LANES } from '../post/params'
+import { MAX_FOLD, MAX_WEAVE, POST_KNOBS, POST_LANES } from '../post/params'
 import type { PostKnob } from '../post/params'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import type { AnalyticKnob, KaleidoscopeKnob, ShardKnob } from '../presets/knobs'
@@ -89,6 +89,11 @@ const SAFE_POST: Record<PostKnob, readonly [number, number]> = {
   'feedback.decay': [0, 0.985],
   'feedback.zoom': [0.98, 1.05],
   'feedback.rotate': [-0.02, 0.02],
+  // The kaleidoscope. 0 is no fold and the top is `MAX_FOLD`, which the
+  // uniform snaps to anyway; past it the wedges are narrower than the marks
+  // in them. The mix is a share of one whole, so it ends at 1.
+  'feedback.fold': [0, MAX_FOLD],
+  'feedback.foldMix': [0, 1],
   'feedback.carry': [0, 2],
   'feedback.floor': [0, 0.1],
   // The multiplicative floor's knee, in the same units as the floor above it
@@ -309,6 +314,13 @@ const ALLOWED: Record<string, Record<string, string>> = {
       'a plain zoom about the middle, which is what reads as travel; a peak nearer the middle would read as a burst',
     twist:
       'a twist that varies with radius is the polar twist study, and the swirl is the turn this study has',
+    ...UNUSED_CURL,
+  },
+  'mirror-fold': {
+    falloff:
+      'a plain zoom about the middle, so every sector streams out at the same rate; a peak nearer the middle would feed some of the wedge and not the rest',
+    twist:
+      'a twist that varies with radius would shear the seams apart, and the fold is the only symmetry this study has; a turn that varies with radius is the polar twist study',
     ...UNUSED_CURL,
   },
   'curl-drift': {

@@ -17,8 +17,15 @@ import {
   feedbackStep,
   fillRibbonPoints,
   flowCover,
+  FOLD_EDGE,
+  FOLD_REACH,
+  foldAngle,
+  foldHold,
+  foldSectors,
+  foldWeight,
   freshWeight,
   holdRuns,
+  MAX_FOLD,
   MAX_SHARPEN,
   measureSizes,
   mergePostParams,
@@ -1124,5 +1131,243 @@ describe('the wide bloom numbers', () => {
     const out = write(defaultPostParams(), packet())
     expect(out[60]).toBe(0)
     for (const value of out) expect(Number.isFinite(value)).toBe(true)
+  })
+})
+
+const TURN = Math.PI * 2
+
+/**
+ * The feedback pass's two lookups: where in canvas uv one pixel reads the
+ * history from without the fold and with it, and how much of the folded read
+ * it gets. It is a transcription of the first dozen lines of
+ * `post.feedback.wgsl`'s `fs`, taken off the same uniform the pass reads, so
+ * the fold can be run over whole frames without an adapter. Only the lookups
+ * are here: what becomes of the light once it has been read is `runCanvas`
+ * above, and the fold touches none of it.
+ */
+const lookupAt = (out: Float32Array, u: number, v: number) => {
+  const zoom = Math.max(out[6] ?? 1, 0.001)
+  const angle = out[7] ?? 0
+  const aspect = (out[0] ?? 1) / Math.max(out[1] ?? 1, 1)
+  const centredX = (u - 0.5) * aspect
+  const centredY = v - 0.5
+  const s = Math.sin(angle)
+  const c = Math.cos(angle)
+  const x = (centredX * c - centredY * s) / zoom
+  const y = (centredX * s + centredY * c) / zoom
+  const sectors = out[34] ?? 0
+  const radius = Math.hypot(x, y)
+  const aimed = foldAngle(Math.atan2(y, x), sectors)
+  const plain = [x / aspect + 0.5, y + 0.5] as const
+  return {
+    plain,
+    folded: [(Math.cos(aimed) * radius) / aspect + 0.5, Math.sin(aimed) * radius + 0.5] as const,
+    weight: sectors >= 2 ? foldWeight(out[35] ?? 0, radius) : 0,
+  }
+}
+
+/** A ring of points about the middle, in canvas uv on a 16:9 stage. */
+const ring = (radius: number, count: number) =>
+  Array.from({ length: count }, (_, at) => {
+    const angle = (TURN * at) / count
+    return [0.5 + (Math.cos(angle) * radius) / (16 / 9), 0.5 + Math.sin(angle) * radius] as const
+  })
+
+/**
+ * A canvas that does nothing to the lookup but fold it. The zoom and the turn
+ * are put back to the identity so the geometry below is the fold alone; what
+ * the fold does under the canvas's own zoom and turn is the test that
+ * compares a folded lookup against an unfolded one.
+ */
+const folding = (fold: number, foldMix: number) =>
+  mergePostParams(defaultPostParams(), { feedback: { fold, foldMix, zoom: 1, rotate: 0 } })
+
+/** A point at this angle and this distance from the middle, in canvas uv. */
+const around = (angle: number, radius: number) =>
+  [0.5 + (Math.cos(angle) * radius) / (16 / 9), 0.5 + Math.sin(angle) * radius] as const
+
+/** How far a point sits from the middle, in the square coordinates the pass folds in. */
+const away = ([u, v]: readonly [number, number]) => Math.hypot((u - 0.5) * (16 / 9), v - 0.5)
+
+describe('the kaleidoscope fold', () => {
+  it('snaps the count to a whole even number, and under two is no fold', () => {
+    expect([0, 0.4, 0.9, -3, Number.NaN].map(foldSectors)).toEqual([0, 0, 0, 0, 0])
+    // 1 rounds up to two, which is the first fold there is.
+    expect([1, 2, 2.9, 3, 5, 6, 7].map(foldSectors)).toEqual([2, 2, 2, 4, 6, 6, 8])
+    // Never odd, whatever it is handed: an odd count would bring the last
+    // sector round the circle against the first one the wrong way up.
+    for (let fold = -2; fold <= 40; fold += 0.37) expect(foldSectors(fold) % 2).toBe(0)
+    expect([25, 40, 1e6].map(foldSectors)).toEqual([MAX_FOLD, MAX_FOLD, MAX_FOLD])
+  })
+
+  it('is the angle it was handed, to the last bit, with no fold', () => {
+    for (let angle = -Math.PI; angle < Math.PI; angle += 0.017) {
+      expect(foldAngle(angle, 0)).toBe(angle)
+      expect(foldAngle(angle, 1)).toBe(angle)
+    }
+  })
+
+  it('folds the whole circle into one wedge, and the seams are mirrors', () => {
+    for (const sectors of [2, 4, 6, 12, MAX_FOLD]) {
+      const wedge = TURN / sectors
+      const step = TURN / 2000
+      let lowest = Number.POSITIVE_INFINITY
+      let highest = Number.NEGATIVE_INFINITY
+      for (let at = 0; at < 2000; at += 1) {
+        const angle = -Math.PI + step * at
+        const folded = foldAngle(angle, sectors)
+        expect(folded, `${sectors} sectors at ${angle}`).toBeGreaterThanOrEqual(0)
+        expect(folded, `${sectors} sectors at ${angle}`).toBeLessThanOrEqual(wedge + 1e-12)
+        lowest = Math.min(lowest, folded)
+        highest = Math.max(highest, folded)
+      }
+
+      // Nothing outside the wedge is ever read, and the whole of it is, so
+      // none of the picture is thrown away and none is repeated twice over.
+      expect(lowest, `${sectors} sectors`).toBeLessThan(step)
+      expect(highest, `${sectors} sectors`).toBeGreaterThan(wedge - step)
+
+      for (const base of [0.02, wedge * 0.4, wedge * 0.9]) {
+        const want = foldAngle(base, sectors)
+        // The pattern repeats every two wedges, one of them mirrored.
+        expect(foldAngle(base + 2 * wedge, sectors), `${sectors}`).toBeCloseTo(want, 9)
+        expect(foldAngle(base - 2 * wedge, sectors), `${sectors}`).toBeCloseTo(want, 9)
+        // A point and its mirror either side of a seam land on the same
+        // place, which is what a reflected seam is.
+        expect(foldAngle(-base, sectors), `${sectors}`).toBeCloseTo(want, 9)
+        expect(foldAngle(2 * wedge - base, sectors), `${sectors}`).toBeCloseTo(want, 9)
+      }
+    }
+  })
+
+  // It is idempotent, which is what makes it settle: the pass folds the
+  // history and the history is what it folded last frame, so a wedge that is
+  // already the wedge is left alone rather than walking round the circle.
+  it('folds an already folded angle onto itself', () => {
+    for (const sectors of [2, 6, 12, MAX_FOLD])
+      for (let angle = -Math.PI; angle < Math.PI; angle += 0.011) {
+        const once = foldAngle(angle, sectors)
+        expect(foldAngle(once, sectors)).toBeCloseTo(once, 12)
+      }
+  })
+
+  it('reads every sector of the frame from the same wedge of the picture', () => {
+    for (const sectors of [4, 6, 12]) {
+      const out = write(folding(sectors, 1))
+      // One wedge is a sector wide and the pattern repeats every two of them,
+      // one the right way up and one mirrored. So a point two wedges round,
+      // and a point mirrored back across a seam, read the same place.
+      const wedge = TURN / sectors
+      for (const base of [0.08, 0.4 * wedge, 0.9 * wedge, wedge + 0.2]) {
+        const want = lookupAt(out, ...around(base, 0.3)).folded
+        for (const other of [base + 2 * wedge, base + 4 * wedge, base - 2 * wedge, -base]) {
+          const { folded } = lookupAt(out, ...around(other, 0.3))
+          expect(folded[0], `${sectors} sectors, ${base} against ${other}`).toBeCloseTo(want[0], 6)
+          expect(folded[1], `${sectors} sectors, ${base} against ${other}`).toBeCloseTo(want[1], 6)
+        }
+      }
+    }
+  })
+
+  it('keeps a point’s distance from the middle exactly', () => {
+    const out = write(folding(8, 1))
+    for (const point of ring(0.34, 37)) {
+      const { plain, folded } = lookupAt(out, ...point)
+      expect(away(folded)).toBeCloseTo(away(point), 9)
+      expect(away(plain)).toBeCloseTo(away(point), 9)
+    }
+
+    // And under the canvas's own zoom and turn, where the unfolded lookup is
+    // already somewhere else: the fold moves the angle and nothing else.
+    const turned = write(
+      mergePostParams(defaultPostParams(), { feedback: { fold: 6, foldMix: 1 } }),
+    )
+    for (const point of ring(0.31, 23)) {
+      const { plain, folded } = lookupAt(turned, ...point)
+      expect(away(folded)).toBeCloseTo(away(plain), 9)
+    }
+  })
+
+  // The mix is a cross-fade between the two reads and not a partial turn of
+  // the angle. Turning part of the way cannot be done without a seam: the
+  // folded angle wraps the circle once and the plain one does not, so a walk
+  // between them breaks somewhere, and on an adapter it broke as a straight
+  // dark ray along the negative x axis.
+  it('weighs the folded read from nothing to the whole of it', () => {
+    const at = (mix: number, radius: number) =>
+      lookupAt(write(folding(6, mix)), ...around(1, radius)).weight
+    expect(at(0, 0.2)).toBe(0)
+    expect(at(1, 0.2)).toBe(1)
+    for (const mix of [0.25, 0.5, 0.75]) expect(at(mix, 0.2)).toBeCloseTo(mix, 6)
+    // With no fold the weight is nothing, whatever the mix says.
+    expect(lookupAt(write(folding(0, 1)), 0.6, 0.6).weight).toBe(0)
+  })
+
+  it('stops at the biggest circle the frame holds, so no sector reads off it', () => {
+    // Well inside, the whole fold; outside, none of it; and a smooth step
+    // between, so the corners show no ring where the fold ends.
+    expect(foldHold(0)).toBe(1)
+    expect(foldHold(FOLD_REACH - FOLD_EDGE)).toBe(1)
+    expect(foldHold(FOLD_REACH)).toBe(0)
+    expect(foldHold(FOLD_REACH + 1)).toBe(0)
+    expect(foldHold(FOLD_REACH - FOLD_EDGE / 2)).toBeCloseTo(0.5, 6)
+    let last = 1
+    for (let radius = 0; radius <= 1; radius += 0.005) {
+      const held = foldHold(radius)
+      expect(held).toBeLessThanOrEqual(last + 1e-12)
+      last = held
+    }
+
+    // A point past the reach takes none of the folded read, so a corner keeps
+    // the picture it had rather than going black.
+    const out = write(folding(6, 1))
+    for (const point of ring(FOLD_REACH + 0.1, 16)) expect(lookupAt(out, ...point).weight).toBe(0)
+  })
+
+  it('holds the mix to nothing and one, whatever a row asks for', () => {
+    expect(write(folding(6, 4))[35]).toBe(1)
+    expect(write(folding(6, -3))[35]).toBe(0)
+    expect(write(folding(6, Number.NaN))[35]).toBe(0)
+    expect(write(folding(Number.POSITIVE_INFINITY, 1))[34]).toBe(0)
+  })
+
+  it('writes nothing at all with the stage off', () => {
+    const off = mergePostParams(folding(12, 1), { feedback: { enabled: false } })
+    expect([write(off)[34], write(off)[35]]).toEqual([0, 0])
+  })
+
+  // The flash rule. The fold moves where light is read from and never how
+  // much of it there is, so a count stepping on every hit cannot flash the
+  // frame: no float the brightness of the loop depends on moves with it.
+  it('changes no float the light depends on', () => {
+    const flat = write(folding(0, 0))
+    const folded = write(folding(MAX_FOLD, 1))
+    for (let at = 0; at < POST_UNIFORM_FLOATS; at += 1) {
+      if (at === 34 || at === 35) continue
+      expect(folded[at], `float ${at}`).toBe(flat[at])
+    }
+
+    // And the loop settles in exactly the same place either way, because it
+    // never reads the two.
+    const settled = (fold: number, foldMix: number) =>
+      runCanvas(folding(fold, foldMix).feedback, { fps: 60, input: 0.4, cover: 1, seconds: 4 })
+    expect(settled(MAX_FOLD, 1)).toEqual(settled(0, 0))
+  })
+
+  // What every canvas in the repository says today, which is nothing. A
+  // canvas that names neither knob reads the point it always read, through
+  // the whole chain and at every packet a row of its own could put on it.
+  it('leaves every canvas that names neither exactly where it was', () => {
+    for (const canvas of [carriedCanvas(), ...CASTS.map((cast) => cast.canvas)]) {
+      expect(canvas.knobs['feedback.fold']).toBe(0)
+      expect(canvas.knobs['feedback.foldMix']).toBe(0)
+      expect(canvas.mapping.some((row) => row.to.startsWith('feedback.fold'))).toBe(false)
+      for (const level of [0, 0.5, 1]) {
+        const features = filled(level)
+        const out = write(resolveLive([], canvas, features, level, castFrame()).post, features)
+        expect([out[34], out[35]]).toEqual([0, 0])
+        for (const point of ring(0.3, 12)) expect(lookupAt(out, ...point).weight).toBe(0)
+      }
+    }
   })
 })

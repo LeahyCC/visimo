@@ -337,6 +337,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     twist:
       'a twist that varies with radius would shear the seams apart, and the fold is the only symmetry this study has; a turn that varies with radius is the polar twist study',
     ...UNUSED_CURL,
+    ...UNUSED_LENS,
   },
   'curl-drift': {
     radial: 'this flow is the curl term alone; a pull to the middle is the implode study',

@@ -109,6 +109,8 @@ export const MIRROR_FOLD: FlowStudy = {
     curl: 0,
     curlScale: 3.5,
     curlRate: 0.05,
+    lens: 0,
+    photon: 0.07,
   },
   mapping: [
     { from: 'energy', to: 'swirl', gain: 0.006, curve: 'sqrt' },

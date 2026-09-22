@@ -52,6 +52,7 @@ import { LASERS } from './defs/lasers'
 import { LAZY_FLUID } from './defs/lazy-fluid'
 import { LIGHTNING } from './defs/lightning'
 import { MIRROR_FOLD } from './defs/mirror-fold'
+import { MURMURATION } from './defs/murmuration'
 import { RADIAL_BURST } from './defs/radial-burst'
 import { RIBBON } from './defs/ribbon'
 import { RISER_STREAKS } from './defs/riser-streaks'
@@ -92,6 +93,7 @@ export const STUDIES: readonly Study[] = [
   LIGHTNING,
   GRID_3D,
   SHAPE_MORPH,
+  MURMURATION,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

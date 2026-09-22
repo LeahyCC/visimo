@@ -22,13 +22,44 @@
 
 const GRID_SLOTS: u32 = 8u;
 
+// A turn is measured as radians a second and scaled to 0 to 1 by this, and the
+// reading is smoothed over the second constant, so a fold is a wave of light
+// that lasts a moment and not a flicker of one frame. 3.5 radians a second is
+// a bird turning through a right angle in about 0.45 s, which a fold reaches and
+// a flock cruising does not.
+const TURN_FULL: f32 = 3.5;
+const TURN_SETTLE: f32 = 0.15;
+
+// How many living birds a flock birth looks for before it gives up and lands
+// on the attractor. A pool that is mostly alive finds one at the first try.
+const KIN_TRIES: i32 = 8;
+
+// Neighbours at touching that make a separation of one, see `steer`.
+const CROWD: f32 = 4.0;
+
+/**
+ * Where the grid sits this frame, as a fraction of one cell in each direction.
+ * Every bird in a cell reads the same nine cells, so with a fixed grid a dense
+ * flock moves in cell-sized blocks and draws a lattice. Moving the grid by a
+ * different fraction each frame makes the blocks a different shape every
+ * frame, and the eye takes the average of them. Both passes that read the grid
+ * ask this and get the same answer, since it depends on the clock alone.
+ */
+fn gridShift() -> vec2<f32> {
+  let frame = i32(params.step.y * 60.0);
+  return vec2<f32>(
+    f32(hash_u(frame, 0, 41)) / 4294967296.0,
+    f32(hash_u(frame, 0, 42)) / 4294967296.0,
+  );
+}
+
 /** Which cell of the uniform grid a place falls in, clamped at the edge. */
 fn cellOf(place: vec2<f32>) -> vec2<i32> {
   let side = params.cover.w;
   let cell = max(params.step.w, 1e-4);
   // The grid is centred on the canvas and its cell is the neighbourhood, so
   // the nine cells a particle reads always cover everything within reach.
-  let at = floor((place / cell) + side * 0.5);
+  let at = floor((place / cell) + side * 0.5 + gridShift());
   return clamp(vec2<i32>(at), vec2<i32>(0, 0), vec2<i32>(i32(side) - 1, i32(side) - 1));
 }
 
@@ -55,7 +86,19 @@ fn bin(@builtin(global_invocation_id) gid: vec3<u32>) {
   // steering terms are averages, so a sample of eight neighbours says nearly
   // what all of them would; an unbounded cell would need a prefix sum and a
   // second dispatch to say the same thing.
-  if (slot < GRID_SLOTS) { slots[cell * GRID_SLOTS + slot] = gid.x; }
+  if (slot < GRID_SLOTS) {
+    slots[cell * GRID_SLOTS + slot] = gid.x;
+  } else {
+    // Which eight are kept has to change every frame. The first eight in
+    // would be the same eight every time, and everything near a crowded cell
+    // would then steer toward those birds and not toward the crowd, which
+    // draws a lattice of anchors across a dense flock. This is reservoir
+    // sampling: the bird that is slot n takes a random one of the eight with
+    // the chance 8 / (n + 1), so every bird in a cell is as likely as any other
+    // to be one of the eight, and a fresh seed each frame moves them on.
+    let pick = hash_u(i32(gid.x), i32(params.step.y * 60.0), 40) % (slot + 1u);
+    if (pick < GRID_SLOTS) { slots[cell * GRID_SLOTS + pick] = gid.x; }
+  }
 }
 
 /** Value noise at a point, the same four smoothed corners the CPU mirror takes. */
@@ -142,7 +185,12 @@ fn steer(index: u32, particle: Particle) -> vec2<f32> {
   }
 
   if (seen <= 0.0) { return vec2<f32>(0.0, 0.0); }
-  let separation = away / seen;
+  // Separation is a sum and not an average: an average is the same push in a
+  // crowd of four and a crowd of sixty, so a pile of birds feels nothing that
+  // stops it packing tighter, and the gather collapses a flock to a point. A
+  // sum grows with the crowd, and four birds at touching is the full push.
+  var separation = away / CROWD;
+  if (length(separation) > 2.0) { separation = normalize(separation) * 2.0; }
   let alignment = heading / seen - particle.place.zw;
   let cohesion = middle / seen - particle.place.xy;
   return separation * weights.x + alignment * weights.y + cohesion * weights.z;
@@ -160,7 +208,36 @@ fn born(index: u32, group: u32) -> Particle {
   let speed = b.y * mix(0.6, 1.25, hash01(seed, batch, 4)) * mix(0.6, 1.0, c.w);
   var place = vec2<f32>(0.0, 0.0);
   var velocity = vec2<f32>(0.0, 0.0);
-  if (c.x > 0.5) {
+  if (c.x > 1.5) {
+    // A flock birth: beside a bird that is already alive, going the way it is
+    // going, so a body that replenishes itself stays where it is. The CPU
+    // never reads the pool back and could not say where the body has got to.
+    // A slot is picked at random and a dead one is tried past, and a pool with
+    // nothing alive (which is how a flock starts) is seeded on a disc about
+    // the attractor, four times as wide as a newborn's distance from a host.
+    let live = u32(params.step.z);
+    var landed = false;
+    for (var attempt = 0; attempt < KIN_TRIES; attempt = attempt + 1) {
+      let pick = u32(hash01(seed, batch, 20 + attempt) * f32(live)) % live;
+      let host = pool[pick];
+      if (host.span.y <= 0.0 || pick == u32(seed)) { continue; }
+      let angle = TAU * hash01(seed, batch, 30);
+      let reach = c.y * sqrt(hash01(seed, batch, 31));
+      place = host.place.xy + vec2<f32>(cos(angle), sin(angle)) * reach;
+      let drift = TAU * hash01(seed, batch, 32);
+      velocity = host.place.zw + vec2<f32>(cos(drift), sin(drift)) * speed;
+      landed = true;
+      break;
+    }
+
+    if (!landed) {
+      let angle = TAU * hash01(seed, batch, 30);
+      let reach = 4.0 * c.y * sqrt(hash01(seed, batch, 31));
+      place = params.attract.xy + vec2<f32>(cos(angle), sin(angle)) * reach;
+      let drift = TAU * hash01(seed, batch, 32);
+      velocity = vec2<f32>(cos(drift), sin(drift)) * speed;
+    }
+  } else if (c.x > 0.5) {
     // A ring burst: laid round a circle about the attractor at the place in
     // the spectrum the hit sat, the two halves mirrors of one another, and
     // thrown outward within the profile's cone.
@@ -192,6 +269,7 @@ fn born(index: u32, group: u32) -> Particle {
     hash01(seed, batch, 1),
     hash01(seed, batch, 2) - 0.5,
   );
+  out.motion = vec4<f32>(0.0, 0.0, 0.0, 0.0);
   return out;
 }
 
@@ -234,6 +312,18 @@ fn step(@builtin(global_invocation_id) gid: vec3<u32>) {
   // rates and goes unstable over a drag of about two.
   let kept = exp(-params.forces.x * dt);
   let velocity = (particle.place.zw + push * dt) * kept;
+  // How hard the bird turned this step: the sine of the angle between the
+  // velocity it had and the one it has, over the step, as a share of a full
+  // turn's rate. A bird at rest has no direction to turn from. Drag scales a
+  // velocity and cannot turn it, so the angle is the push's alone.
+  let was = length(particle.place.zw);
+  let now = length(velocity);
+  var turned = 0.0;
+  if (was > 1e-4 && now > 1e-4) {
+    let sine = (particle.place.z * velocity.y - particle.place.w * velocity.x) / (was * now);
+    turned = clamp(abs(sine) / max(dt, 1e-4) / TURN_FULL, 0.0, 1.0);
+  }
+  let turn = mix(particle.motion.x, turned, 1.0 - exp(-dt / TURN_SETTLE));
   // The gather is a velocity and not an acceleration, so a particle draws in
   // along an exponential and never swings past the attractor.
   let pull = (params.attract.xy - particle.place.xy) * params.noise.z;
@@ -248,5 +338,9 @@ fn step(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let age = particle.span.x + dt;
   let life = select(particle.span.y, 0.0, age >= particle.span.y);
-  pool[index] = Particle(vec4<f32>(place, velocity), vec4<f32>(age, life, particle.span.z, particle.span.w));
+  pool[index] = Particle(
+    vec4<f32>(place, velocity),
+    vec4<f32>(age, life, particle.span.z, particle.span.w),
+    vec4<f32>(turn, 0.0, 0.0, 0.0),
+  );
 }

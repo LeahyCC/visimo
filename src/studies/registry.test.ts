@@ -21,7 +21,7 @@ import { F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { ANALYTIC_RANGES } from '../impls/analytic.params'
 import { CAUSTICS_RANGES } from '../impls/caustics.params'
 import { HALO_RANGES } from '../impls/halo.params'
-import { DUST_RANGES, SPARK_RANGES } from '../impls/particles.params'
+import { DUST_RANGES, MURMURATION_RANGES, SPARK_RANGES } from '../impls/particles.params'
 import { RING_RANGES } from '../impls/rings.params'
 import { SHARD_RANGES } from '../impls/shards.params'
 import { SPECTRUM_RANGES } from '../impls/spectrum.params'
@@ -38,6 +38,7 @@ import type {
   DustKnob,
   HaloKnob,
   ImplId,
+  MurmurationKnob,
   RingsKnob,
   SparksKnob,
   SpectrumKnob,
@@ -160,6 +161,8 @@ const isSpectrumKnob = (knob: string): knob is SpectrumKnob =>
   Object.prototype.hasOwnProperty.call(SPECTRUM_RANGES, knob)
 const isSparksKnob = (knob: string): knob is SparksKnob =>
   Object.prototype.hasOwnProperty.call(SPARK_RANGES, knob)
+const isMurmurationKnob = (knob: string): knob is MurmurationKnob =>
+  Object.prototype.hasOwnProperty.call(MURMURATION_RANGES, knob)
 
 /** The fluid's rates and sizes may run backwards; every other one is a size or a level. */
 const SIGNED = new Set(['colourDrift'])
@@ -187,6 +190,7 @@ function safeRange(impl: ImplId, knob: string): readonly [number, number] | unde
   if (impl === 'rings' && isRingsKnob(knob)) return RING_RANGES[knob]
   if (impl === 'spectrum' && isSpectrumKnob(knob)) return SPECTRUM_RANGES[knob]
   if (impl === 'sparks' && isSparksKnob(knob)) return SPARK_RANGES[knob]
+  if (impl === 'murmuration' && isMurmurationKnob(knob)) return MURMURATION_RANGES[knob]
   if (isPostSafe(knob)) return SAFE_POST[knob]
   return SIGNED.has(knob) ? undefined : [0, Number.POSITIVE_INFINITY]
 }
@@ -360,6 +364,20 @@ const ALLOWED: Record<string, Record<string, string>> = {
     count:
       'the slots the pool holds, which is a budget and never the picture: the throw and the shimmer are what fill it',
     hueSpread: 'how far the hues scatter round the ribbon’s, a setting of the look and not a level',
+  },
+  'murmuration': {
+    life: 'longer than the pool takes to come round, so a bird is replaced by a clone of another while it is at full light and never dims out; a moving life would thin the body from inside',
+    speed:
+      'how fast a newborn drifts from the bird it was born beside, which is the flock’s own diffusion and not a level',
+    hueSpread:
+      'how far down the wheel the leading hue sits from the resting one, a setting of the look and not a level',
+    turnLight:
+      'how much a turn lights a bird, the look of a fold; the folds themselves are what the music moves',
+    drag: 'how fast a bird settles into a heading, which with the gravity is the flock’s cruising speed and would change the body’s length if it moved',
+    curlScale:
+      'how broad the eddies that stir the flock are, the shape of the stirring and not its strength, which is the curl',
+    neighbourhood:
+      'how far a bird looks, which is also the grid’s cell; it is held small so a cell is not overfull, and moving it would change what every bird steers by',
   },
   'fractal-glints': {
     symmetry: 'how many times the frame is folded, a whole number; moving it flickers the fold',

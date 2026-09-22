@@ -33,8 +33,11 @@
  * more, and `director.test.ts` holds every study to winning a seat for at
  * least one of them. A home moved on that evidence says so where it is.
  */
+import { AURORA } from './defs/aurora'
 import { BEAT_PUMP } from './defs/beat-pump'
 import { BEAT_RINGS } from './defs/beat-rings'
+import { BLACK_HOLE } from './defs/black-hole'
+import { BLACK_HOLE_RING } from './defs/black-hole-ring'
 import { CAUSTICS } from './defs/caustics'
 import { CHORD_PETALS } from './defs/chord-petals'
 import { CLEAN_GLASS } from './defs/clean-glass'
@@ -52,6 +55,8 @@ import { IMPLODE } from './defs/implode'
 import { LASERS } from './defs/lasers'
 import { LAZY_FLUID } from './defs/lazy-fluid'
 import { LIGHTNING } from './defs/lightning'
+import { MIRROR_FOLD } from './defs/mirror-fold'
+import { MURMURATION } from './defs/murmuration'
 import { RADIAL_BURST } from './defs/radial-burst'
 import { RIBBON } from './defs/ribbon'
 import { RISER_STREAKS } from './defs/riser-streaks'
@@ -73,8 +78,10 @@ export const STUDIES: readonly Study[] = [
   IMPLODE,
   RADIAL_BURST,
   CURL_DRIFT,
+  MIRROR_FOLD,
   BEAT_PUMP,
   TUNNEL,
+  BLACK_HOLE,
   DYE_PLUMES,
   RIBBON,
   FRACTAL_GLINTS,
@@ -91,6 +98,9 @@ export const STUDIES: readonly Study[] = [
   LIGHTNING,
   GRID_3D,
   SHAPE_MORPH,
+  MURMURATION,
+  BLACK_HOLE_RING,
+  AURORA,
   CYMATICS,
   WARM_SOFT,
   CLEAN_GLASS,

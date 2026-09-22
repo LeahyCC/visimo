@@ -14,6 +14,9 @@
 import type { PaletteId } from '../palettes/palette'
 import { AUDIO_FIELDS } from '../presets/knobs'
 import type { AudioField, Curve, Shape } from '../presets/knobs'
+// Types only, so nothing runs in a circle: `cast.ts` reads values from here
+// and this file reads only the shape of a canvas knob and a canvas row back.
+import type { CanvasKnob, CanvasMapping } from './cast'
 import type { ImplId, ImplKnob, LookStage } from './impls'
 
 export const STUDY_KINDS = ['flow', 'ink', 'look'] as const
@@ -140,7 +143,32 @@ type Piece = {
   requires?: readonly ImplId[]
 }
 
-export type FlowStudy = Piece & { kind: 'flow' }
+/**
+ * What a flow changes about the canvas for as long as it is live: resting
+ * numbers of its own over the ones the canvas already has, and rows of its
+ * own on top of the canvas's.
+ *
+ * The canvas is the cast's and not a study's, which is what keeps a look
+ * swap from throwing the picture away, so this is the one way anything in a
+ * cast can speak to it. The director merges it over `carriedCanvas()` while
+ * the study is live and lerps each knob from the canvas's own value by the
+ * study's presence, so a fold arrives and leaves with the flow that asked for
+ * it rather than snapping on. A pinned cast's canvas file still wins: a
+ * pinned cast is one fixed picture and nothing in it moves.
+ *
+ * Only a flow may carry one. A cast has exactly one flow, so there is exactly
+ * one patch; two inks patching the same canvas would fight over the same
+ * numbers with no rule for who wins.
+ *
+ * It takes no `scale` and no `shape`, for the reason `CanvasMapping` gives:
+ * the canvas keeps no memory of its own.
+ */
+export type StudyCanvas = {
+  knobs?: Readonly<Partial<Record<CanvasKnob, number>>>
+  mapping?: readonly CanvasMapping[]
+}
+
+export type FlowStudy = Piece & { kind: 'flow'; canvas?: StudyCanvas }
 export type InkStudy = Piece & { kind: 'ink' }
 
 /**

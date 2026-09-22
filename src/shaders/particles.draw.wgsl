@@ -103,8 +103,15 @@ fn quad(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> Qua
   let rate = mix(0.1, 0.4, particle.span.z);
   let wave = 0.5 + 0.5 * sin(TAU * (rate * params.step.y + particle.span.z));
   let twinkle = 1.0 - params.light.z * (1.0 - wave);
-  let amount = params.light.x * fade * twinkle * edgeFade(particle.place.xy);
-  out.light = colourOf(particle.span.w, spent) * amount;
+  // A bird turning is brighter and carried toward the leading hue, so a fold
+  // crosses a flock as a wave of light and colour. With the gain and the push
+  // at nothing and the scatter at 1, which is every field but the flock, this
+  // is the particle's own age and seed and nothing else.
+  let turn = particle.motion.x;
+  let amount = params.light.x * fade * twinkle * edgeFade(particle.place.xy)
+    * (1.0 + params.turn.x * turn);
+  let coordinate = particle.span.w * params.turn.z + turn * params.turn.y * 0.5;
+  out.light = colourOf(coordinate, spent) * amount;
   out.stretch = tail / max(across, 1e-6);
   return out;
 }

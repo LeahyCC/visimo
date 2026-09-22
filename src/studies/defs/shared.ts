@@ -8,3 +8,11 @@
  * off in one of them.
  */
 export const NO_CURL = { curl: 0, curlScale: 3.5, curlRate: 0.05 }
+
+/**
+ * The same for the lens term, and for the same reason. The pull is 0, which
+ * is off, and the photon radius sits where the black hole rests, so a change
+ * between two analytic flows blends the pull alone and never slides the
+ * radius the sign turns over at across the crossfade.
+ */
+export const NO_LENS = { lens: 0, photon: 0.07 }

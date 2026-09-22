@@ -35,6 +35,8 @@
  */
 import { BEAT_PUMP } from './defs/beat-pump'
 import { BEAT_RINGS } from './defs/beat-rings'
+import { BLACK_HOLE } from './defs/black-hole'
+import { BLACK_HOLE_RING } from './defs/black-hole-ring'
 import { CAUSTICS } from './defs/caustics'
 import { CHORD_PETALS } from './defs/chord-petals'
 import { CLEAN_GLASS } from './defs/clean-glass'
@@ -77,6 +79,7 @@ export const STUDIES: readonly Study[] = [
   MIRROR_FOLD,
   BEAT_PUMP,
   TUNNEL,
+  BLACK_HOLE,
   DYE_PLUMES,
   RIBBON,
   FRACTAL_GLINTS,
@@ -94,6 +97,7 @@ export const STUDIES: readonly Study[] = [
   GRID_3D,
   SHAPE_MORPH,
   MURMURATION,
+  BLACK_HOLE_RING,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

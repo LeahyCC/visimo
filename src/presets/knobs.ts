@@ -267,6 +267,14 @@ export type KaleidoscopeKnob = (typeof KALEIDOSCOPE_KNOBS)[number]
  * evolves, in turns a second of its slowest part. The last two shape the
  * term and are not a strength, so presence leaves them alone.
  *
+ * `lens` is the pull a black hole has on the light around it, in field widths
+ * a second at the fastest the pull ever gets. It is a magnitude and not a
+ * direction: outside the photon radius it always draws in, and inside it
+ * always pushes gently out, which is what sweeps the middle clear instead of
+ * gathering the picture into a bright dot. `photon` is where that turn
+ * happens, as a fraction of the distance to the corner; it shapes the term
+ * rather than strengthening it, so presence leaves it alone.
+ *
  * A term added later is a coefficient here and a few lines of
  * `impls/analytic.params.ts`; that file's header is the recipe.
  */
@@ -278,6 +286,8 @@ export const ANALYTIC_KNOBS = [
   'curl',
   'curlScale',
   'curlRate',
+  'lens',
+  'photon',
 ] as const
 export type AnalyticKnob = (typeof ANALYTIC_KNOBS)[number]
 

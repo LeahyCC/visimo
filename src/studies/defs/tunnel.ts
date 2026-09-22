@@ -1,5 +1,5 @@
 import type { FlowStudy } from '../types'
-import { NO_CURL } from './shared'
+import { NO_CURL, NO_LENS } from './shared'
 
 /**
  * Steady travel, the picture always streaming out of the middle and off the
@@ -52,7 +52,7 @@ export const TUNNEL: FlowStudy = {
   home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.75, hardness: 0.5 },
   reach: 0.5,
   moments: { intro: 0, groove: 1, build: 1, drop: 0, rest: 0, outro: 0 },
-  knobs: { ...NO_CURL, radial: 0.04, falloff: 0, swirl: 0.002, twist: 0 },
+  knobs: { ...NO_CURL, ...NO_LENS, radial: 0.04, falloff: 0, swirl: 0.002, twist: 0 },
   mapping: [
     { from: 'energy', to: 'radial', gain: 0.04, curve: 'linear' },
     { from: 'tension', to: 'radial', gain: 0.15, curve: 'linear' },

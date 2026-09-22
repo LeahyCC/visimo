@@ -257,6 +257,17 @@ const MAY_RUN_UNDER: Record<string, Record<string, string>> = {
 }
 
 /**
+ * What a flow with no lens in it says of the two lens knobs. Its pull is 0,
+ * which is what off means, and the photon radius is the shape the black hole
+ * rests at, so a change between two analytic flows blends only the pull.
+ */
+const UNUSED_LENS = {
+  lens: 'the lens term is off in this flow, and a pull of 0 is what off means',
+  photon:
+    'a shape of the lens term, held where the black hole rests so a change to it blends only the pull',
+}
+
+/**
  * What a flow that has no curl in it says of the three curl knobs. Its speed
  * is 0 and the other two are the shape curl drift rests at, which is why they
  * sit still and not because nobody thought of them.
@@ -298,16 +309,19 @@ const ALLOWED: Record<string, Record<string, string>> = {
     swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
     twist: 'the same, and a twist that varies with radius is the polar twist study',
     ...UNUSED_CURL,
+    ...UNUSED_LENS,
   },
   'radial-burst': {
     swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
     twist: 'the same, and a twist that varies with radius is the polar twist study',
     ...UNUSED_CURL,
+    ...UNUSED_LENS,
   },
   'beat-pump': {
     swirl: 'this flow is the radial term alone; a turn about the centre is the vortex study',
     twist: 'the same, and a twist that varies with radius is the polar twist study',
     ...UNUSED_CURL,
+    ...UNUSED_LENS,
   },
   'tunnel': {
     falloff:
@@ -315,6 +329,7 @@ const ALLOWED: Record<string, Record<string, string>> = {
     twist:
       'a twist that varies with radius is the polar twist study, and the swirl is the turn this study has',
     ...UNUSED_CURL,
+    ...UNUSED_LENS,
   },
   'mirror-fold': {
     falloff:
@@ -322,12 +337,22 @@ const ALLOWED: Record<string, Record<string, string>> = {
     twist:
       'a twist that varies with radius would shear the seams apart, and the fold is the only symmetry this study has; a turn that varies with radius is the polar twist study',
     ...UNUSED_CURL,
+    ...UNUSED_LENS,
   },
   'curl-drift': {
     radial: 'this flow is the curl term alone; a pull to the middle is the implode study',
     falloff: 'the shape of the radial term, which this flow does not use',
     swirl: 'this flow is the curl term alone; a turn about the centre is the vortex study',
     twist: 'the same, and a twist that varies with radius is the polar twist study',
+    ...UNUSED_LENS,
+  },
+  'black-hole': {
+    radial:
+      'the lens is this flow’s pull, and it carries its own falloff; a plain zoom beside it would be the implode study',
+    falloff: 'the shape of the radial term, which this flow does not use',
+    twist:
+      'a twist that varies with radius is the polar twist study; the frame dragging here is the swirl',
+    ...UNUSED_CURL,
   },
   'dye-plumes': {
     hitDye:

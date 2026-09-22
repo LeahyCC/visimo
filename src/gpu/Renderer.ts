@@ -33,6 +33,7 @@ import { Director } from '../director/director'
 import type { MomentWeights, Playhead } from '../director/moment'
 import { Hud } from '../hud/Hud'
 import { AnalyticFlow } from '../impls/analytic'
+import { BlackHoleInk } from '../impls/BlackHoleInk'
 import { CausticsInk } from '../impls/CausticsInk'
 import { FlowBlend } from '../impls/FlowBlend'
 import type { LiveFlow } from '../impls/FlowBlend'
@@ -684,6 +685,7 @@ class Renderer {
     if (impl === 'petals') return new PetalsInk()
     if (impl === 'lightning') return new LightningInk()
     if (impl === 'grid') return new GridInk()
+    if (impl === 'blackhole') return new BlackHoleInk()
     if (impl === 'dye') {
       // The dye draws the field a fluid flow is stirring, which is what the
       // study's `requires` promises is in the cast beside it.

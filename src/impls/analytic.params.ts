@@ -10,10 +10,12 @@
  * Sharing one implementation between them means a study is nothing but
  * numbers, and a cast can blend two of them by blending their knobs.
  *
- * Three terms exist so far. `radial` runs along the line to the centre,
- * `swirl` and `twist` run around it, and `curl` is a drifting noise that folds
- * the picture over on itself without gathering or thinning it. Adding another
- * (shear bands, lattice, ripple, drip) is three things and no more:
+ * Four terms exist so far. `radial` runs along the line to the centre,
+ * `swirl` and `twist` run around it, `curl` is a drifting noise that folds
+ * the picture over on itself without gathering or thinning it, and `lens` is
+ * the pull of a black hole, which is `radial` with a sign that turns over at
+ * a radius of its own. Adding another (shear bands, lattice, ripple, drip) is
+ * three things and no more:
  *
  *   1. its coefficient in `ANALYTIC_KNOBS` (`presets/knobs.ts`) and a range
  *      in `ANALYTIC_RANGES` below,
@@ -48,7 +50,7 @@ import type { Extent } from '../scenes/fluid.params'
 export const ANALYTIC_SIZE = 128
 
 /** Floats in the uniform; the `Field` struct in analytic.field.wgsl matches. */
-export const ANALYTIC_UNIFORM_FLOATS = 16
+export const ANALYTIC_UNIFORM_FLOATS = 20
 
 const TWO_PI = Math.PI * 2
 
@@ -75,6 +77,10 @@ export type AnalyticField = {
   curlScale: number
   /** Where the pattern is in its evolution, in turns, wrapped at `CURL_PERIOD`. */
   curlClock: number
+  /** Field widths a second at the fastest the black hole's pull ever gets. */
+  lens: number
+  /** Where the pull turns over, as a fraction of `reference`. Never zero. */
+  photon: number
 }
 
 /** Resting values for anything no live study named, as `fluidParams` has. */
@@ -86,6 +92,8 @@ export const ANALYTIC_DEFAULTS: Readonly<Record<AnalyticKnob, number>> = {
   curl: 0,
   curlScale: 3.5,
   curlRate: 0.05,
+  lens: 0,
+  photon: 0.18,
 }
 
 /**
@@ -104,6 +112,14 @@ export const ANALYTIC_RANGES: Readonly<Record<AnalyticKnob, readonly [number, nu
   curlScale: [0.5, 8],
   // Turns a second of the slowest wave; the fastest turns at 3.25 times it.
   curlRate: [0, 0.25],
+  // A pull and never a push: the sign of this term is the profile's, which
+  // turns over at the photon radius on its own. The top is `radial`'s, since
+  // a field width a second carries the whole picture off the edge in about one.
+  lens: [0, 1.2],
+  // A shape, and never zero: at nothing there is no inside for the escape
+  // half of the profile to live in. The top keeps the dark middle well
+  // inside the frame on any canvas.
+  photon: [0.02, 0.45],
 }
 
 /**
@@ -154,6 +170,58 @@ export const radialProfile = (t: number, falloff: number): number => {
   const f = Math.max(falloff, 0)
   const at = Math.max(t, 0)
   return (at * Math.exp(-f * at)) / radialPeak(f)
+}
+
+/**
+ * The most the raw lens shape `s^2 (1 - s)` reaches, at `s = 2/3`. The
+ * profile is divided by it for `radialPeak`'s reason: `lens` then means the
+ * fastest the pull ever gets, whatever `photon` is doing, so a study driving
+ * the two from different rows does not find each row changing what the other
+ * means.
+ */
+export const LENS_PEAK = 4 / 27
+
+/**
+ * How hard the field pushes out inside the photon radius, as a share of
+ * `lens`. It is small because the escape is not the effect: the effect is
+ * that nothing draws toward the middle, so what lands there is carried away
+ * and the disc stays dark. A push this size clears a pixel out of the middle
+ * over a second or so, where a pull of any size would gather the picture
+ * there into a bright dot, which is the one thing a black hole must not look
+ * like.
+ */
+export const LENS_ESCAPE = 0.25
+
+/**
+ * The lens term's shape: the speed along the outward ray, signed, as a
+ * multiple of `lens`. `t` is the distance from the centre as a fraction of
+ * `reference`, so 1 is the corner, and `photon` is where the sign turns over
+ * in the same units.
+ *
+ * Outside the photon radius it is negative, which is inward. Its magnitude is
+ * `s^2 (1 - s)` with `s = photon / t`, so far from the hole it falls off with
+ * the square of the distance, as a pull does, and it goes to exactly zero at
+ * the photon radius rather than stepping to its peak there. The peak sits at
+ * `t = 1.5 x photon`, which is the ring of piled-up light the ink draws over.
+ *
+ * Inside it is positive, which is outward, and it is zero at both ends: at
+ * the exact centre, so there is no point where the direction jumps, and again
+ * at the photon radius, so the whole profile is continuous across it. That is
+ * what makes the middle dark. Nothing draws toward it, and the little that
+ * lands there is swept back out to the ring.
+ */
+export function lensProfile(t: number, photon: number): number {
+  const p = Math.max(photon, 1e-4)
+  const at = Math.max(t, 0)
+  if (at < p) {
+    // A parabola that is 0 at the centre, `LENS_ESCAPE` half way out and 0
+    // again at the photon radius, which is what keeps the two halves joined.
+    const u = at / p
+    return LENS_ESCAPE * 4 * u * (1 - u)
+  }
+
+  const s = p / at
+  return -(s * s * (1 - s)) / LENS_PEAK
 }
 
 /**
@@ -324,6 +392,7 @@ export function analyticField(
   const at = (knob: AnalyticKnob) => tuning[knob] ?? ANALYTIC_DEFAULTS[knob]
   const held = Math.max(presence, 0)
   const [lowest, highest] = ANALYTIC_RANGES.curlScale
+  const [photonLowest, photonHighest] = ANALYTIC_RANGES.photon
   return {
     radial: at('radial') * held,
     falloff: Math.max(at('falloff'), 0),
@@ -334,6 +403,11 @@ export function analyticField(
     curl: at('curl') * held,
     curlScale: Math.min(Math.max(at('curlScale'), lowest), highest),
     curlClock: clock,
+    lens: at('lens') * held,
+    // A shape, like `falloff` and `curlScale`, so presence leaves it where it
+    // is: a photon radius faded toward zero would shrink the dark middle away
+    // as the study arrived rather than fading the pull.
+    photon: Math.min(Math.max(at('photon'), photonLowest), photonHighest),
   }
 }
 
@@ -344,7 +418,11 @@ export function analyticField(
  * of zeros. Implode at a tension of zero is exactly this case.
  */
 export const fieldMoves = (field: AnalyticField): boolean =>
-  field.radial !== 0 || field.swirl !== 0 || field.twist !== 0 || field.curl !== 0
+  field.radial !== 0 ||
+  field.swirl !== 0 ||
+  field.twist !== 0 ||
+  field.curl !== 0 ||
+  field.lens !== 0
 
 /**
  * The velocity at a point of the field, in field widths a second, which is
@@ -371,7 +449,10 @@ export function analyticVelocity(
   const ux = dx / unit
   const uy = dy / unit
 
-  const speed = field.radial * radialProfile(t, field.falloff)
+  // Both radial terms are a speed along the same ray, so they add. The lens
+  // carries its own sign: the profile turns over at the photon radius.
+  const speed =
+    field.radial * radialProfile(t, field.falloff) + field.lens * lensProfile(t, field.photon)
   // Solid-body swirl plus the part that is only near the middle. An angular
   // speed times the radius is a speed along the tangent, which is the perp
   // of the outward unit vector.
@@ -390,6 +471,7 @@ export function analyticVelocity(
  *   4..7   rotate: swirl, twist, spare, spare
  *   8..11  frame:  centre x, centre y, reference radius, spare
  *   12..15 curl:   speed, cells across, clock in turns, spare
+ *   16..19 lens:   pull at its fastest, the photon radius, spare, spare
  */
 export function writeAnalyticUniform(field: AnalyticField, out: Float32Array): Float32Array {
   out[0] = field.radial
@@ -411,5 +493,10 @@ export function writeAnalyticUniform(field: AnalyticField, out: Float32Array): F
   out[13] = field.curlScale
   out[14] = field.curlClock
   out[15] = 0
+
+  out[16] = field.lens
+  out[17] = field.photon
+  out[18] = 0
+  out[19] = 0
   return out
 }

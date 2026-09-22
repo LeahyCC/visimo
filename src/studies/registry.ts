@@ -33,6 +33,7 @@
  * more, and `director.test.ts` holds every study to winning a seat for at
  * least one of them. A home moved on that evidence says so where it is.
  */
+import { AURORA } from './defs/aurora'
 import { BEAT_PUMP } from './defs/beat-pump'
 import { BEAT_RINGS } from './defs/beat-rings'
 import { BLACK_HOLE } from './defs/black-hole'
@@ -98,6 +99,7 @@ export const STUDIES: readonly Study[] = [
   SHAPE_MORPH,
   MURMURATION,
   BLACK_HOLE_RING,
+  AURORA,
   WARM_SOFT,
   CLEAN_GLASS,
   HARD_CLEAN,

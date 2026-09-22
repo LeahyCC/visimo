@@ -48,6 +48,10 @@ Most of the first section comes from a full review of the repo on 2026-09-13. Th
 
 **New inks crowd the old ones at the hard end.** Adding the lightning took every drop from the shards until its home was moved. The fairness test caught it, which is what it is for, but the hard, high-drive corner is getting full while the soft end is still thin. The next studies should be soft ones.
 
+**The boids grid keeps eight birds a cell, and that is what limits a dense flock.** Found on 2026-09-21 building the murmuration. Everything in a cell reads the same nine cells, so past about eight birds a cell the steering is by a sample and a flock draws a lattice or collapses to a pile; the murmuration works round it with a reach of 0.02 of the short side, a reservoir sample and a grid that moves each frame, and the README's particle field section says what each does. A study that wants a tight, dense body (the school, in particular) will meet it first. The fix is a bigger cell capacity or a prefix sum and a second dispatch, neither of which was worth building for one study.
+
+**The murmuration has been watched on one track.** Pendulum, The Terminal, in headless Edge with a measured loudness. How the attractor wanders on a track with a different bar, how the turn colour reads at a clear build and drop, and how it sits in a cast of three beside the halo or the lasers have not been seen.
+
 ## Left from the studies handoff
 
 A flow for the WebGL2 path, where curl drift is the obvious one since it needs no compute. The performance pass, above.

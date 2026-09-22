@@ -45,6 +45,29 @@ export type FeedbackParams = {
   /** Radians of rotation applied to the history. */
   rotate: number
   /**
+   * How many mirrored sectors the history is folded into, 0 for no fold at
+   * all. This is the kaleidoscope, and it belongs here rather than in a
+   * velocity field because it is a change of where the lookup reads and not
+   * a motion: the pass has already carried the picture along the flow and
+   * zoomed and turned it, and the fold is one more step on that same point.
+   *
+   * It is snapped to a whole even number by `foldSectors`, and under 2 it is
+   * no fold. Even because the sectors alternate between the wedge and its
+   * mirror image: with an odd count the last sector round the circle meets
+   * the first one the wrong way up and there is a seam the fold cannot hide.
+   * Whole because a fraction of a sector puts a moving seam through the
+   * picture, which reads as a tear rather than as a mirror.
+   */
+  fold: number
+  /**
+   * How far the fold is applied, 0 to 1, and 0 is exactly no fold. The pass
+   * turns each point's angle from where it would have read toward where the
+   * fold would read it, so a fold arrives as the picture creasing along its
+   * mirror lines rather than as a cut. The distance from the middle is left
+   * alone at every mix, so the picture is folded and never pulled in.
+   */
+  foldMix: number
+  /**
    * How far the scene's own velocity field drags the history, 0 for none.
    * At 1 the last frame is read back exactly one step along the flow, so
    * every part of the screen bends its own way instead of the whole picture
@@ -145,7 +168,11 @@ export type FeedbackParams = {
 // them by the real step, so a trail lasts, travels, turns and cools the same
 // number of seconds on any display. `carry` is per second already, since the
 // velocity it scales is, and `ceiling` and `hold` are brightnesses and have no
-// rate in them at all.
+// rate in them at all. Neither has `fold`, which is a count of sectors, nor
+// `foldMix`, which is how far along one lookup sits between two places: both
+// are where the pass reads and not how fast anything happens, so a fold that
+// is six sectors deep is six sectors deep at 30 frames a second and at 144,
+// and neither goes through `feedbackStep`.
 
 export type BloomParams = {
   enabled: boolean
@@ -291,11 +318,13 @@ export const DEFAULT_POST_PARAMS: PostParams = {
     zoom: 1.012,
     rotate: 0.002,
     // Off: the pass is the zoom and turn it always was. Nothing is taken off
-    // the history, nothing holds its mean, nothing ages its colour or its
-    // detail, and the ceiling sits far above anything a scene draws, so the
-    // shipped casts meet none of it. Every one of these is exactly off at its
-    // default, which is why the pinned casts draw what they always drew
-    // without a compatibility path of their own.
+    // the history, nothing holds its mean, nothing folds it, nothing ages its
+    // colour or its detail, and the ceiling sits far above anything a scene
+    // draws, so the shipped casts meet none of it. Every one of these is
+    // exactly off at its default, which is why the pinned casts draw what they
+    // always drew without a compatibility path of their own.
+    fold: 0,
+    foldMix: 0,
     carry: 0,
     floor: 0,
     fade: 0,
@@ -451,6 +480,106 @@ export function fadeKeep(peak: number, fade: number, frames: number): number {
   const light = Math.max(peak, 0)
   return (light / (light + fade)) ** frames
 }
+
+/**
+ * The most sectors the fold may be driven to. Past this the wedges are
+ * narrower than the marks in them, every one holds a sliver of the same few
+ * pixels, and a kaleidoscope turns into a doily. It also keeps the seams far
+ * enough apart to be seen as seams, which is the whole look.
+ */
+export const MAX_FOLD = 24
+
+/**
+ * The fewest sectors that are a fold at all. One sector is the picture
+ * itself, so the first fold there is has two.
+ */
+export const MIN_FOLD = 2
+
+const TWO_PI = Math.PI * 2
+
+/**
+ * How far out the fold reaches, in the square coordinates the pass rotates
+ * in, where the frame is half a unit tall and wider than that on any stage
+ * but a square one.
+ *
+ * A fold reads from the same distance out at a different angle, and past half
+ * a unit that distance has left the frame through the top or the bottom, so
+ * there is nothing there to fold: the first cut folded the whole frame and
+ * drew black wedges wherever a sector read from off the edge. So the fold is
+ * the biggest circle the frame holds, which is what a kaleidoscope's field is
+ * anyway, and outside it the picture is the one the pass always read.
+ */
+export const FOLD_REACH = 0.5
+
+/**
+ * How wide the fold's edge is. Falling to nothing over a band rather than at
+ * a line is what keeps the corners from showing a ring where the fold stops,
+ * and it is the same smoothstep the vignette's edge uses.
+ */
+export const FOLD_EDGE = 0.14
+
+/**
+ * How much of the fold a point this far from the middle gets: all of it well
+ * inside the circle the frame holds, none of it outside, and a smooth step
+ * between. `post.feedback.wgsl` is a transcription of this.
+ */
+export function foldHold(radius: number): number {
+  const t = Math.min(Math.max((radius - (FOLD_REACH - FOLD_EDGE)) / FOLD_EDGE, 0), 1)
+  return 1 - t * t * (3 - 2 * t)
+}
+
+/**
+ * `feedback.fold` as the pass is handed it: a whole even number of sectors,
+ * or 0 for no fold. See the knob for why it is even and why it is whole. A
+ * count that rounds under `MIN_FOLD` is no fold rather than the smallest one,
+ * so a row that walks the count up from nothing starts at nothing.
+ *
+ * Pure and GPU free, the way `canvasGain` is, so the snapping happens once on
+ * the CPU and the pass reads a count it can use without rounding of its own.
+ */
+export function foldSectors(fold: number): number {
+  if (!Number.isFinite(fold)) return 0
+  const snapped = 2 * Math.round(fold / 2)
+  if (snapped < MIN_FOLD) return 0
+  return Math.min(snapped, MAX_FOLD)
+}
+
+/**
+ * Where the fold reads, as an angle. The circle is cut into `sectors` equal
+ * wedges and every one of them shows the same wedge of the picture, every
+ * other one mirrored, which is what puts a kaleidoscope's reflected seams in.
+ * The wrap is over two wedges and the `abs` mirrors the second back over the
+ * first, so the pattern closes exactly once round the circle for an even
+ * count, and a count under two is no fold and is the angle it was handed.
+ *
+ * Only the angle moves: the caller keeps the radius, so the picture is folded
+ * and never gathered toward the middle. It is the whole fold and not part of
+ * one, because a fold is either applied to a lookup or it is not: how much of
+ * it is seen is `foldWeight`, which cross-fades the two samples. Turning the
+ * angle part of the way instead cannot be done without a seam. The folded
+ * angle wraps the circle once and the plain one does not, so any walk between
+ * them has to break somewhere, and it broke along the negative x axis, as a
+ * straight dark ray out of the middle.
+ *
+ * `post.feedback.wgsl` is a transcription of this, and this is what the tests
+ * hold; if the two ever disagree, this file is right.
+ */
+export function foldAngle(angle: number, sectors: number): number {
+  if (!(sectors >= MIN_FOLD)) return angle
+  const period = (2 * TWO_PI) / sectors
+  return Math.abs(angle - period * Math.floor(angle / period + 0.5))
+}
+
+/**
+ * How much of the folded sample a pixel this far out gets: the canvas's own
+ * `feedback.foldMix`, thinned to nothing past the circle the frame holds. The
+ * pass reads the history twice when this is above 0 and mixes the two, so the
+ * fold ghosts in and out rather than cutting.
+ *
+ * It is handed a mix already held to 0 to 1 by `writePostUniform`, as the pass
+ * is, and a radius in the square coordinates the pass folds in.
+ */
+export const foldWeight = (mix: number, radius: number): number => mix * foldHold(radius)
 
 /**
  * A long frame would weight the new frame several times over, and that flash
@@ -891,6 +1020,18 @@ export const POST_LANES = {
       p.feedback.rotate = value
     },
   },
+  'feedback.fold': {
+    read: (p: PostParams) => p.feedback.fold,
+    write: (p: PostParams, value: number) => {
+      p.feedback.fold = value
+    },
+  },
+  'feedback.foldMix': {
+    read: (p: PostParams) => p.feedback.foldMix,
+    write: (p: PostParams, value: number) => {
+      p.feedback.foldMix = value
+    },
+  },
   'feedback.carry': {
     read: (p: PostParams) => p.feedback.carry,
     write: (p: PostParams, value: number) => {
@@ -1175,8 +1316,14 @@ export function writePostUniform(
   // leaves the multiplicative floor's gate at 1 for every pixel.
   out[32] = trails ? step.floor : 0
   out[33] = trails ? step.fade : 0
-  out[34] = 0
-  out[35] = 0
+  // The fold rides in the two floats this vec4 has spare, which are the only
+  // two left in the block the feedback pass already reads. Neither is a rate,
+  // so neither comes off the step: the count is snapped here once, and the
+  // mix is held to 0 to 1 the way the grade's numbers are, so the pass only
+  // ever sees a pair it can use. Both are zero with the stage off, and a zero
+  // count or a zero mix is no fold at all.
+  out[34] = trails ? foldSectors(feedback.fold) : 0
+  out[35] = trails ? gradeValue(feedback.foldMix, 0) : 0
 
   // The ribbon, last again. It is resolved to pixels here so the shader does
   // no scaling of its own. A ribbon that is off, or has no light or no width,

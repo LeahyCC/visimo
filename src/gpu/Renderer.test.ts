@@ -38,6 +38,7 @@ import {
   CAUSTICS_KNOBS,
   DUST_KNOBS,
   HALO_KNOBS,
+  MURMURATION_KNOBS,
   RINGS_KNOBS,
   SPARKS_KNOBS,
   SPECTRUM_KNOBS,
@@ -481,6 +482,26 @@ vi.mock('../impls/LightningInk', () => ({
     }
     dispose() {
       impls.disposed.lightning = (impls.disposed.lightning ?? 0) + 1
+    }
+  },
+}))
+
+vi.mock('../impls/BlackHoleInk', () => ({
+  BlackHoleInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.blackhole = (impls.built.blackhole ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('blackhole', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('blackhole')
+    }
+    dispose() {
+      impls.disposed.blackhole = (impls.disposed.blackhole ?? 0) + 1
     }
   },
 }))
@@ -2063,6 +2084,71 @@ describe('the study bench', () => {
     await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
     expect(() => draw(1000)).not.toThrow()
     expect(impls.built.sparks).toBeUndefined()
+    expect(graphics.render).toHaveBeenCalled()
+    expect(failure).not.toHaveBeenCalled()
+  })
+
+  it('builds the murmuration ink for its study, hands it its numbers and draws it in cast order', async () => {
+    const { draw } = await start()
+    renderer.setBench({
+      live: live('ribbon', 'murmuration', 'clean-glass'),
+      frame: (packet) => {
+        // A groove and nothing that real tracks rarely raise: no tension,
+        // release or impact, so the flock comes in on the level alone.
+        packet[F.energy] = 0.6
+        packet[F.pace] = 0.5
+        packet[F.tension] = 0
+      },
+    })
+    draw(1000)
+    expect(impls.built.murmuration).toBe(1)
+    expect(impls.drawn).toEqual(['ribbon', 'murmuration'])
+    expect(impls.seen.murmuration?.presence).toBe(1)
+    expect(Object.keys(impls.seen.murmuration?.knobs ?? {}).sort()).toEqual(
+      [...MURMURATION_KNOBS].sort(),
+    )
+    expect(impls.seen.murmuration?.knobs.count ?? 0).toBeGreaterThan(3000)
+    const calm = impls.seen.murmuration?.knobs.cohesion ?? 0
+
+    // The study's tension row reaches the ink through the resolver: a build
+    // draws the flock in tighter.
+    renderer.setBench({
+      live: renderer.liveCast,
+      frame: (packet) => {
+        packet[F.energy] = 0.6
+        packet[F.pace] = 0.5
+        packet[F.tension] = 1
+      },
+    })
+    draw(2000)
+    expect(impls.seen.murmuration?.knobs.cohesion ?? 0).toBeGreaterThan(calm + 1)
+  })
+
+  it('does not build the murmuration ink for a study that is faded to nothing', async () => {
+    const { draw } = await start()
+    const cast = live('ribbon', 'murmuration', 'clean-glass')
+    const flock = cast.studies[1]
+    if (!flock) throw new Error('the murmuration is in the cast')
+    flock.presence = 0
+    renderer.setBench({ live: cast })
+    draw(1000)
+    expect(impls.built.murmuration).toBeUndefined()
+    expect(impls.updates.murmuration).toBeUndefined()
+    flock.presence = 0.5
+    draw(2000)
+    expect(impls.built.murmuration).toBe(1)
+    expect(impls.seen.murmuration?.presence).toBe(0.5)
+  })
+
+  it('skips the murmuration on the WebGL2 path, which has no compute and draws the fractal alone', async () => {
+    const { element, draw } = sizedCanvas(640, 480)
+    device.acquireGpu.mockResolvedValue(null)
+    const failure = vi.fn()
+    renderer.setPreset(castOrDefault('prism'))
+    renderer.setBench({ live: live('ribbon', 'murmuration', 'clean-glass') })
+    await expect(renderer.attach(element, canvas(), failure)).resolves.toBe('ok')
+    expect(() => draw(1000)).not.toThrow()
+    expect(impls.built.murmuration).toBeUndefined()
     expect(graphics.render).toHaveBeenCalled()
     expect(failure).not.toHaveBeenCalled()
   })

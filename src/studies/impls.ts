@@ -37,6 +37,8 @@ export const IMPL_IDS = [
   'petals',
   'lightning',
   'grid',
+  'murmuration',
+  'blackhole',
   'aurora',
   'look',
 ] as const
@@ -173,6 +175,8 @@ export const PARTICLE_KNOBS = [
   'alignment',
   'cohesion',
   'neighbourhood',
+  // How much brighter, and how far toward the leading hue, a turning one is.
+  'turnLight',
 ] as const
 export type ParticleKnob = (typeof PARTICLE_KNOBS)[number]
 
@@ -194,6 +198,43 @@ export const DUST_KNOBS = [
   'gather',
 ] as const satisfies readonly ParticleKnob[]
 export type DustKnob = (typeof DUST_KNOBS)[number]
+
+/**
+ * The flock's subset of the field's knobs, and the first to switch the boids
+ * grid on. `rate` is the birds a second and `count` the slots the pool holds,
+ * so the flock alive is about `rate` times the seconds a bird lives; `life` is
+ * held longer than the pool takes to come round, see `MURMURATION_PROFILE`.
+ * `separation`, `alignment` and `cohesion` are the three rules and
+ * `neighbourhood` is how far a bird looks; `gather`, `attractX` and `attractY`
+ * are what drifts the whole body to a moving point, and `curl` and `curlScale`
+ * are the broad current that carries it across the frame on the way. `streak`
+ * is seconds of a bird's own travel drawn behind it, and `turnLight` is how
+ * much a bird turning hard is brightened.
+ */
+export const MURMURATION_KNOBS = [
+  'count',
+  'rate',
+  'life',
+  'speed',
+  'size',
+  'streak',
+  'intensity',
+  'hueSpread',
+  'turnLight',
+  'drag',
+  'gravity',
+  'gravityAngle',
+  'curl',
+  'curlScale',
+  'gather',
+  'attractX',
+  'attractY',
+  'separation',
+  'alignment',
+  'cohesion',
+  'neighbourhood',
+] as const satisfies readonly ParticleKnob[]
+export type MurmurationKnob = (typeof MURMURATION_KNOBS)[number]
 
 /**
  * The caustics' numbers. Their ranges and units are in
@@ -378,6 +419,30 @@ export const GRID_KNOBS = [
 export type GridKnob = (typeof GRID_KNOBS)[number]
 
 /**
+ * The black hole ink's numbers. Their ranges and units are in
+ * `impls/blackhole.params.ts`. `disc` is where the empty middle ends, `width`
+ * is half the burning ring's thickness and `annulus` how far the bending part
+ * reaches beyond it, all three fractions of the short side; `heat` is how
+ * hard the ring burns as a multiple of the intensity and `beam` how much
+ * brighter its approaching side is, with `spin` saying in turns where that
+ * side points; `bend` is the share of what the canvas lets go of each frame
+ * that the annulus puts back, which is what keeps the loop bounded; `hue` is
+ * turns added to the key, for both of the study's hues together.
+ */
+export const BLACKHOLE_KNOBS = [
+  'disc',
+  'width',
+  'annulus',
+  'heat',
+  'beam',
+  'bend',
+  'intensity',
+  'hue',
+  'spin',
+] as const
+export type BlackHoleKnob = (typeof BLACKHOLE_KNOBS)[number]
+
+/**
  * The aurora's numbers. Their ranges and units are in
  * `impls/aurora.params.ts`. `intensity` is the light the foot of a curtain
  * settles at on a still canvas and `curtains` how many are lit, a fraction
@@ -484,6 +549,7 @@ export type ImplKnob =
   | PetalKnob
   | LightningKnob
   | GridKnob
+  | BlackHoleKnob
   | AuroraKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
@@ -506,6 +572,8 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   petals: PETAL_KNOBS,
   lightning: LIGHTNING_KNOBS,
   grid: GRID_KNOBS,
+  murmuration: MURMURATION_KNOBS,
+  blackhole: BLACKHOLE_KNOBS,
   aurora: AURORA_KNOBS,
   look: LOOK_KNOBS,
 }

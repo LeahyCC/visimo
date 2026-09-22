@@ -35,7 +35,17 @@ export const CURL_DRIFT: FlowStudy = {
   home: { drive: 0.5, weight: 0.5, tonality: 0.5, steadiness: 0.5, hardness: 0.5 },
   reach: 1,
   moments: { intro: 1, groove: 0, build: 0, drop: 0, rest: 1, outro: 1 },
-  knobs: { radial: 0, falloff: 0, swirl: 0, twist: 0, curl: 0.02, curlScale: 3.5, curlRate: 0.05 },
+  knobs: {
+    radial: 0,
+    falloff: 0,
+    swirl: 0,
+    twist: 0,
+    curl: 0.02,
+    curlScale: 3.5,
+    curlRate: 0.05,
+    lens: 0,
+    photon: 0.07,
+  },
   mapping: [
     { from: 'energy', to: 'curl', gain: 0.05, curve: 'linear' },
     { from: 'swell', to: 'curl', gain: 0.02, curve: 'linear' },

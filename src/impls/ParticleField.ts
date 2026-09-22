@@ -279,7 +279,7 @@ export class ParticleField implements InkImpl {
     if (!this.gear || !fieldRuns(params, presence)) return
     this.live = true
     this.groupCount = planSpawns(params, this.profile, features, dt, this.spawns, this.groups)
-    particleColours(features, params.hueSpread, this.colours)
+    particleColours(features, params.hueSpread, this.colours, this.profile.colour)
     this.frameStep = dt
   }
 
@@ -302,7 +302,9 @@ export class ParticleField implements InkImpl {
         groups: this.groups,
         groupCount: this.groupCount,
         flowCover: carried?.cover ?? null,
-        wrap: this.profile.shape === 'field',
+        wrap: this.profile.shape === 'field' && this.profile.fill === 'field',
+        scatter: this.profile.scatter,
+        turnHue: this.profile.turnHue,
       },
       this.uniformData,
     )

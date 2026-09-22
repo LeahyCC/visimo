@@ -11,7 +11,7 @@
  */
 import { findStudy, parseCast, studiesOfKind } from '../src/presets'
 import type { PinnedCast, Study, StudyKind } from '../src/presets'
-import { carriedCanvas } from '../src/studies/cast'
+import { canvasBuffers, carriedCanvas, patchCanvas } from '../src/studies/cast'
 
 export const SOLO_PREFIX = 'solo:'
 
@@ -46,6 +46,11 @@ const options = (slot: StudyKind, study: Study): readonly Study[] => {
 
 // A solo has no file to read a canvas from, so it draws on the one the
 // director gives a cast it chooses. Otherwise a flow would move nothing.
+//
+// A flow that patches the canvas has that patch merged in at presence 1, the
+// way the director would merge it were it choosing. A solo is a pinned cast
+// and a pinned cast's own canvas wins, so without this the one study whose
+// whole point is what it does to the canvas would be soloed without it.
 const build = (study: Study): PinnedCast => {
   for (const flow of options('flow', study))
     for (const ink of options('ink', study))
@@ -58,7 +63,12 @@ const build = (study: Study): PinnedCast => {
               flow: flow.id,
               inks: [ink.id],
               look: look.id,
-              canvas: carriedCanvas(),
+              canvas: patchCanvas(
+                carriedCanvas(),
+                flow.kind === 'flow' ? flow.canvas : undefined,
+                1,
+                canvasBuffers(),
+              ),
               overrides: {},
             },
             'demo/soloCast.ts',

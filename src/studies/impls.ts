@@ -37,6 +37,7 @@ export const IMPL_IDS = [
   'petals',
   'lightning',
   'grid',
+  'murmuration',
   'blackhole',
   'look',
 ] as const
@@ -173,6 +174,8 @@ export const PARTICLE_KNOBS = [
   'alignment',
   'cohesion',
   'neighbourhood',
+  // How much brighter, and how far toward the leading hue, a turning one is.
+  'turnLight',
 ] as const
 export type ParticleKnob = (typeof PARTICLE_KNOBS)[number]
 
@@ -194,6 +197,43 @@ export const DUST_KNOBS = [
   'gather',
 ] as const satisfies readonly ParticleKnob[]
 export type DustKnob = (typeof DUST_KNOBS)[number]
+
+/**
+ * The flock's subset of the field's knobs, and the first to switch the boids
+ * grid on. `rate` is the birds a second and `count` the slots the pool holds,
+ * so the flock alive is about `rate` times the seconds a bird lives; `life` is
+ * held longer than the pool takes to come round, see `MURMURATION_PROFILE`.
+ * `separation`, `alignment` and `cohesion` are the three rules and
+ * `neighbourhood` is how far a bird looks; `gather`, `attractX` and `attractY`
+ * are what drifts the whole body to a moving point, and `curl` and `curlScale`
+ * are the broad current that carries it across the frame on the way. `streak`
+ * is seconds of a bird's own travel drawn behind it, and `turnLight` is how
+ * much a bird turning hard is brightened.
+ */
+export const MURMURATION_KNOBS = [
+  'count',
+  'rate',
+  'life',
+  'speed',
+  'size',
+  'streak',
+  'intensity',
+  'hueSpread',
+  'turnLight',
+  'drag',
+  'gravity',
+  'gravityAngle',
+  'curl',
+  'curlScale',
+  'gather',
+  'attractX',
+  'attractY',
+  'separation',
+  'alignment',
+  'cohesion',
+  'neighbourhood',
+] as const satisfies readonly ParticleKnob[]
+export type MurmurationKnob = (typeof MURMURATION_KNOBS)[number]
 
 /**
  * The caustics' numbers. Their ranges and units are in
@@ -508,6 +548,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   petals: PETAL_KNOBS,
   lightning: LIGHTNING_KNOBS,
   grid: GRID_KNOBS,
+  murmuration: MURMURATION_KNOBS,
   blackhole: BLACKHOLE_KNOBS,
   look: LOOK_KNOBS,
 }

@@ -14,7 +14,12 @@
 // grid scale. A scene that offers no field has a single zero texel bound and
 // a carry of zero, so there is one pipeline here and no branch. post.floor is
 // the light taken off the history, already scaled by the step, and the knee
-// of the multiplicative floor beside it.
+// of the multiplicative floor beside it, and then the kaleidoscope: how many
+// mirrored sectors the lookup is folded into and how far the fold is applied.
+// The fold rides in that vec4 because those are the two floats the block the
+// pass reads has spare; it belongs to the lookup and not to the floor. The
+// count arrives whole and even and the mix arrives inside 0 to 1, both done
+// once on the CPU, so nothing here rounds or clamps them.
 //
 // post.hold and post.age are what a long memory needs and a short one never
 // did: the mean brightness the canvas is held at, and what happens to light
@@ -33,6 +38,30 @@
 // the finest cross there is, which is what a filament wants: a wider one puts
 // a halo round a whole trail instead of an edge back into it.
 const SHARPEN_REACH: f32 = 1.0;
+
+const TWO_PI: f32 = 6.283185307179586;
+
+// How far out the fold reaches and how wide its edge is, in the square
+// coordinates below, where the frame is half a unit tall. `FOLD_REACH` and
+// `FOLD_EDGE` in post/params.ts say why the fold stops at the biggest circle
+// the frame holds rather than going on to the corners.
+const FOLD_REACH: f32 = 0.5;
+const FOLD_EDGE: f32 = 0.14;
+
+// The kaleidoscope, as an angle. `foldAngle` in post/params.ts is where the
+// reasoning lives and which the tests hold; if the two ever disagree, that
+// file is right.
+//
+// The circle is cut into `sectors` equal wedges and every one of them shows
+// the same wedge of the picture, every other one mirrored, which is where a
+// kaleidoscope's reflected seams come from. The wrap is over two wedges and
+// the abs mirrors the second back over the first, so an even count closes
+// exactly once round the circle. Only the angle moves and the caller puts the
+// length back, so the picture is creased and not gathered inward.
+fn foldedAngle(at: f32, sectors: f32) -> f32 {
+  let period = 2.0 * TWO_PI / sectors;
+  return abs(at - period * floor(at / period + 0.5));
+}
 
 // Light taken off the carried history, so a constant a scene adds to every
 // pixel cannot sum to a haze: under gain g and floor f a constant c settles
@@ -95,6 +124,39 @@ fn keeping(base: f32, gain: f32) -> f32 {
   return clamp(base - (1.0 - base) * post.hold.y * (1.0 - gain), 0.0, 1.0);
 }
 
+// The history at one point, with the unsharp on it and the edge mask beside
+// it in w. Both belong to the point, so the fold can read a second one and
+// mix the two without either of them bleeding into the other.
+//
+// Off the edge of the last frame there is nothing to carry. Clamping alone
+// repeats the border pixel for as far as the warp reaches, which drew long
+// radial streaks round the rim whenever a zoom under 1 or the flow pulled the
+// picture inward.
+//
+// The unsharp is on the history as it is read and before anything scales it,
+// so the four taps and the middle are all the same light. Every frame loses a
+// little detail to the sampler between the warp and the filter, and over a
+// second of memory that is the difference between filaments and mush. The
+// result is floored at zero: the overshoot on the dark side of an edge is the
+// same size as the boost on the bright side, and light cannot go negative. A
+// sharpen of 0 skips the four taps outright.
+fn read(wanted: vec2<f32>, crisp: f32) -> vec4<f32> {
+  let uv = clamp(wanted, vec2<f32>(0.0), vec2<f32>(1.0));
+  let off = max(abs(wanted - vec2<f32>(0.5)) - vec2<f32>(0.5), vec2<f32>(0.0));
+  let inside = select(0.0, 1.0, off.x + off.y <= 0.0);
+  var colour = textureSample(history, samp, uv).rgb;
+  if (crisp > 0.0) {
+    let reach = post.texel * SHARPEN_REACH;
+    var around = textureSample(history, samp, clamp(uv + vec2<f32>(reach.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
+    around += textureSample(history, samp, clamp(uv - vec2<f32>(reach.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
+    around += textureSample(history, samp, clamp(uv + vec2<f32>(0.0, reach.y), vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
+    around += textureSample(history, samp, clamp(uv - vec2<f32>(0.0, reach.y), vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
+    colour = max(colour + (colour - around * 0.25) * crisp, vec3<f32>(0.0));
+  }
+
+  return vec4<f32>(colour, inside);
+}
+
 @fragment
 fn fs(in: Blit) -> @location(0) vec4<f32> {
   // The flow first, so the zoom and the turn below act on where the current
@@ -114,32 +176,37 @@ fn fs(in: Blit) -> @location(0) vec4<f32> {
   let s = sin(angle);
   let c = cos(angle);
   let spun = vec2<f32>(centred.x * c - centred.y * s, centred.x * s + centred.y * c) / zoom;
-  let wanted = spun / aspect + vec2<f32>(0.5);
-  let uv = clamp(wanted, vec2<f32>(0.0), vec2<f32>(1.0));
-  // Off the edge of the last frame there is nothing to carry. Clamping alone
-  // repeats the border pixel for as far as the warp reaches, which drew long
-  // radial streaks round the rim whenever a zoom under 1 or the flow pulled
-  // the picture inward.
-  let off = max(abs(wanted - vec2<f32>(0.5)) - vec2<f32>(0.5), vec2<f32>(0.0));
-  let inside = select(0.0, 1.0, off.x + off.y <= 0.0);
-  var taken = textureSample(history, samp, uv).rgb;
-
-  // The unsharp, on the history as it is read and before anything scales it,
-  // so the four taps and the middle are all the same light. Every frame loses
-  // a little detail to the sampler between the warp and the filter, and over a
-  // second of memory that is the difference between filaments and mush. The
-  // result is floored at zero: the overshoot on the dark side of an edge is
-  // the same size as the boost on the bright side, and light cannot go
-  // negative. A sharpen of 0 skips the four taps outright.
   let crisp = post.age.z;
-  if (crisp > 0.0) {
-    let reach = post.texel * SHARPEN_REACH;
-    var around = textureSample(history, samp, clamp(uv + vec2<f32>(reach.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
-    around += textureSample(history, samp, clamp(uv - vec2<f32>(reach.x, 0.0), vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
-    around += textureSample(history, samp, clamp(uv + vec2<f32>(0.0, reach.y), vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
-    around += textureSample(history, samp, clamp(uv - vec2<f32>(0.0, reach.y), vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
-    taken = max(taken + (taken - around * 0.25) * crisp, vec3<f32>(0.0));
+  var got = read(spun / aspect + vec2<f32>(0.5), crisp);
+
+  // The fold, on the same square coordinates the turn above works in, so a
+  // wide stage is folded into wedges and not sheared ones. Both numbers are
+  // uniform, so the branch is taken by the whole draw or by none of it: a
+  // canvas that names no fold reads exactly what it always read, down to the
+  // last bit, and pays for neither the trigonometry nor the second read.
+  //
+  // The mix is a cross-fade between the two reads and not a partial turn of
+  // the angle, which is the one thing that cannot be done without a seam; see
+  // `foldAngle`. Past the biggest circle the frame holds there is nothing to
+  // fold, because a sector that far out reads from off the top or the bottom,
+  // so the weight falls away there and the corners keep the picture they had.
+  let sectors = post.floor.z;
+  let foldMix = post.floor.w;
+  if (sectors >= 2.0 && foldMix > 0.0) {
+    let radius = length(spun);
+    let held = 1.0 - smoothstep(FOLD_REACH - FOLD_EDGE, FOLD_REACH, radius);
+    let amount = foldMix * held;
+    let aimed = foldedAngle(atan2(spun.y, spun.x), sectors);
+    let folded = vec2<f32>(cos(aimed), sin(aimed)) * radius;
+    // Read whatever the weight is, rather than under a second branch: the
+    // weight is a pixel's own and a sampler's derivatives may only be taken
+    // in control flow the whole draw agrees on. At a weight of 0 the mix is
+    // the first read exactly, which is what a corner past the reach gets.
+    got = mix(got, read(folded / aspect + vec2<f32>(0.5), crisp), amount);
   }
+
+  let inside = got.w;
+  let taken = got.rgb;
 
   // The canvas hold. The mean of the last frame is one texel the ladder in
   // post.reduce.wgsl left; over the hold, what survives is scaled by their

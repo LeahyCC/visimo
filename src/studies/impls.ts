@@ -37,6 +37,7 @@ export const IMPL_IDS = [
   'petals',
   'lightning',
   'grid',
+  'blackhole',
   'look',
 ] as const
 export type ImplId = (typeof IMPL_IDS)[number]
@@ -377,6 +378,30 @@ export const GRID_KNOBS = [
 export type GridKnob = (typeof GRID_KNOBS)[number]
 
 /**
+ * The black hole ink's numbers. Their ranges and units are in
+ * `impls/blackhole.params.ts`. `disc` is where the empty middle ends, `width`
+ * is half the burning ring's thickness and `annulus` how far the bending part
+ * reaches beyond it, all three fractions of the short side; `heat` is how
+ * hard the ring burns as a multiple of the intensity and `beam` how much
+ * brighter its approaching side is, with `spin` saying in turns where that
+ * side points; `bend` is the share of what the canvas lets go of each frame
+ * that the annulus puts back, which is what keeps the loop bounded; `hue` is
+ * turns added to the key, for both of the study's hues together.
+ */
+export const BLACKHOLE_KNOBS = [
+  'disc',
+  'width',
+  'annulus',
+  'heat',
+  'beam',
+  'bend',
+  'intensity',
+  'hue',
+  'spin',
+] as const
+export type BlackHoleKnob = (typeof BLACKHOLE_KNOBS)[number]
+
+/**
  * The stages a look may switch on. The ribbon is an ink and the feedback is
  * the canvas, so neither is a look's to enable.
  */
@@ -461,6 +486,7 @@ export type ImplKnob =
   | PetalKnob
   | LightningKnob
   | GridKnob
+  | BlackHoleKnob
 
 /** What each implementation accepts. A study's knobs are exactly one of these lists. */
 export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
@@ -482,6 +508,7 @@ export const IMPL_KNOBS: Readonly<Record<ImplId, readonly ImplKnob[]>> = {
   petals: PETAL_KNOBS,
   lightning: LIGHTNING_KNOBS,
   grid: GRID_KNOBS,
+  blackhole: BLACKHOLE_KNOBS,
   look: LOOK_KNOBS,
 }
 

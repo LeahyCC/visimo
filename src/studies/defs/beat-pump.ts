@@ -1,5 +1,5 @@
 import type { FlowStudy } from '../types'
-import { NO_CURL } from './shared'
+import { NO_CURL, NO_LENS } from './shared'
 
 /**
  * A zoom pulse that lands on the predicted beat: the flow for the groove and
@@ -116,7 +116,7 @@ export const BEAT_PUMP: FlowStudy = {
   home: { drive: 0.7, weight: 0.5, tonality: 0.5, steadiness: 0.85, hardness: 0.75 },
   reach: 0.5,
   moments: { intro: 0, groove: 1, build: 0, drop: 1, rest: 0, outro: 0 },
-  knobs: { ...NO_CURL, radial: 0, falloff: 0, swirl: 0, twist: 0 },
+  knobs: { ...NO_CURL, ...NO_LENS, radial: 0, falloff: 0, swirl: 0, twist: 0 },
   mapping: [
     {
       from: 'beatPhase',

@@ -485,6 +485,26 @@ vi.mock('../impls/LightningInk', () => ({
   },
 }))
 
+vi.mock('../impls/BlackHoleInk', () => ({
+  BlackHoleInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.blackhole = (impls.built.blackhole ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('blackhole', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('blackhole')
+    }
+    dispose() {
+      impls.disposed.blackhole = (impls.disposed.blackhole ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/FlowBlend', () => ({
   FlowBlend: class {
     init() {}

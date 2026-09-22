@@ -137,7 +137,12 @@ describe('what draws', () => {
   it('draws a plate that is catching up dimmer than one that has settled, and never out', () => {
     expect(settledLight(0)).toBe(1)
     expect(settledLight(0.5)).toBeGreaterThan(0.95)
-    expect(settledLight(3)).toBeLessThan(0.7)
+    // A full chord swap is a gap of about six, and the dip is gentle on
+    // purpose: `GLOW_GAIN` is what stops a held chord washing out now, so this
+    // only has to take the edge off a moving figure and not carry the whole
+    // job, and a chord change must not read as the darkest moment of the bar.
+    expect(settledLight(6)).toBeGreaterThan(0.6)
+    expect(settledLight(6)).toBeLessThan(0.8)
     expect(settledLight(100)).toBeGreaterThanOrEqual(SETTLED_FLOOR)
     let last = 2
     for (const gap of [0, 0.5, 1, 2, 4, 8, 16]) {

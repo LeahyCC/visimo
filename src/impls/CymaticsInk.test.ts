@@ -179,7 +179,7 @@ describe('the cymatics ink', () => {
     const data = gpu.calls.writes[0]?.data
     expect([data?.[0], data?.[1]]).toEqual([1080, 1920])
     // The plate is a square against the short side.
-    expect(data?.[2]).toBeCloseTo(0.8 * 1080, 3)
+    expect(data?.[2]).toBeCloseTo(0.66 * 1080, 3)
   })
 
   it('carries its presence in the blend constant, which is how an ink fades', () => {

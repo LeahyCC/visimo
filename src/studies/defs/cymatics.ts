@@ -80,19 +80,34 @@ const struck = (from: StudyField, gain: number): StudyMapping => ({
  * lines meet. It has a colour of its own and not the shared palette's: each
  * note has a saturated hue at its place on the circle of fifths turned by
  * `keyHue`, and the colour at a point of the plate is the notes' hues weighted
- * by how much of the sum each is there. The intensity rests at 1.2, above 1 on
- * purpose, so the core clears the bloom's threshold while the glow does not.
+ * by how much of the sum each is there.
+ *
+ * The resting numbers here are much smaller than a first pass gave them, and
+ * the reason is the canvas plus whatever flow carries it: a review on a real
+ * adapter under the director's own solo cast (Curl drift, which every solo
+ * ink gets) found a held chord washing into wide, near-white ridges. The
+ * canvas keeps 0.975 of itself a frame and Curl drift keeps dragging what it
+ * kept, so a line that sits still for as long as a groove holds a chord
+ * accumulates and smears far past what one frame drew. Nothing here can turn
+ * the canvas or the flow off, so the fix is entirely in how little light and
+ * how little width one frame contributes: `intensity` rests at 0.42, `width`
+ * and `glow` at 0.24 and 0.3, and `GLOW_GAIN` in `cymatics.params.ts` is small
+ * enough that the glow's own accumulated sum stays well under the canvas's
+ * ceiling. `docs/studies/cymatics.md` has the numbers this was tuned against
+ * and the trade-off it found: this thin is also dimmer and less saturated
+ * than the bar asks for, and there was no setting that gave both without a
+ * calmer flow underneath it than Curl drift.
  *
  * It is sparse by construction, a line drawing and no fill. Measured on a grid
  * over every canvas shape (`cymaticsCoverage`, with tests that hold it), a
- * triad at rest lights about 1 percent of a 16:9 frame, a loud one under 5 and a
- * loud seven-note scale about 5, and the plate is a square, so a square canvas
- * is the worst frame there is and even there the loudest reads under 10. That is also the flash
- * statement for WCAG 2.3.1: the light is a set of thin lines in a bounded
- * square, no mode changes faster than its 120 ms attack and 1.4 s release allow,
- * and the spring rebounds once or twice at 2.5 Hz, moving a line's width, so
- * nothing toggles a large area of luminance on or off and there is no strobe in
- * the construction.
+ * triad at rest lights a few tenths of a percent of a 16:9 frame and the
+ * loudest, busiest chord under half a percent, so it is nowhere near the
+ * fifth the tests hold every study to. That is also the flash statement for
+ * WCAG 2.3.1: the light is a set of thin lines in a bounded square, no mode
+ * changes faster than its 120 ms attack and 1.4 s release allow, and the
+ * spring rebounds once or twice at 2.5 Hz, moving a line's width, so nothing
+ * toggles a large area of luminance on or off and there is no strobe in the
+ * construction.
  *
  * A packet with no note in it lights no mode, and a plate with none ringing
  * draws nothing: no pass encoded and nothing uploaded. That is the silence gate,
@@ -122,11 +137,11 @@ export const CYMATICS: InkStudy = {
     mode10: 0,
     mode11: 0,
     layer: 0.1,
-    sharp: 0.25,
-    width: 1,
-    glow: 2.5,
+    sharp: 0.3,
+    width: 0.24,
+    glow: 0.3,
     strike: 0.45,
-    intensity: 1.2,
+    intensity: 0.42,
   },
   mapping: [
     mode('chroma0', 'mode0'),
@@ -141,19 +156,19 @@ export const CYMATICS: InkStudy = {
     mode('chroma9', 'mode9'),
     mode('chroma10', 'mode10'),
     mode('chroma11', 'mode11'),
-    { from: 'energy', to: 'layer', gain: 0.75, curve: 'sqrt' },
+    { from: 'energy', to: 'layer', gain: 0.08, curve: 'sqrt' },
     { from: 'tension', to: 'layer', gain: -0.1, curve: 'linear' },
-    { from: 'tension', to: 'sharp', gain: 0.75, curve: 'linear' },
-    { from: 'energy', to: 'width', gain: 0.6, curve: 'sqrt' },
+    { from: 'tension', to: 'sharp', gain: 0.7, curve: 'linear' },
+    { from: 'energy', to: 'width', gain: 0.02, curve: 'sqrt' },
     {
       from: 'bassPulse',
       to: 'glow',
-      gain: 3,
+      gain: 0.1,
       curve: 'linear',
       shape: { kind: 'envelope', attackMs: 5, releaseMs: 300 },
     },
-    { from: 'energy', to: 'glow', gain: 2, curve: 'sqrt' },
-    { from: 'harmonicChange', to: 'glow', gain: 2, curve: 'linear' },
+    { from: 'energy', to: 'glow', gain: 0.08, curve: 'sqrt' },
+    { from: 'harmonicChange', to: 'glow', gain: 0.08, curve: 'linear' },
     struck('beatPulse', 0.25),
     struck('lowMidPulse', 0.12),
     struck('harmonicChange', 0.16),

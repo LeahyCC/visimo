@@ -104,7 +104,7 @@ export const PARTNER_GAIN = 0.6
 export const MODE_MIN = 0.01
 
 /** The plate's side as a share of the canvas's short side. */
-export const PLATE = 0.8
+export const PLATE = 0.66
 
 /** The canvas height a width in pixels is written against. */
 const REFERENCE_HEIGHT = 1080
@@ -122,13 +122,19 @@ export const FADE_FROM = 0.03
 /**
  * The line, in the units the intensity multiplies. The core is a thin line of
  * full light that is pulled toward white, so it is hot at the centre, and the
- * glow round it is the note's own colour and carries less than a tenth of the
- * core's light. The canvas keeps 0.975 of itself a frame, so a figure that
- * holds still settles at about forty times what a frame adds: what is drawn
- * has to be thin for what accumulates to be thin, and the glow is small for
- * the same reason the petals' halo is.
+ * glow round it is the note's own colour.
+ *
+ * The canvas keeps 0.975 of itself a frame, so a figure that holds still
+ * settles at about forty times what a frame adds, and the canvas's own
+ * ceiling clamps any pixel that reaches it: a glow whose peak is over about a
+ * twenty-fifth of the ceiling saturates to it over the whole radius the glow
+ * reaches, which is what turned a soft colour into a wide near-white ridge on
+ * a real adapter. `GLOW_GAIN` is small enough that the glow's peak, once
+ * summed by the canvas, stays under the ceiling: at `intensity` 1 it settles
+ * at `GLOW_GAIN x 40`, well under a tenth of `feedback.ceiling`'s 1.8 rest,
+ * so the colour reads as a soft ring and not a second, dimmer core.
  */
-export const GLOW_GAIN = 0.09
+export const GLOW_GAIN = 0.00045
 export const CORE_WHITE = 0.35
 
 /** What each knob may reach, inclusive. The params clamp to them. */
@@ -151,8 +157,8 @@ export const CYMATICS_RANGES: Record<CymaticsKnob, readonly [number, number]> = 
   sharp: [0, 1],
   // A line's half width in device pixels, and the glow's reach in pixels at the
   // reference height.
-  width: [0.4, 4],
-  glow: [1, 24],
+  width: [0.22, 4],
+  glow: [0.3, 24],
   // How hard the plate has been struck. The struck plate rings, so the study
   // reaches this through a spring, which may overshoot a little either way.
   strike: [0, 1],
@@ -248,12 +254,18 @@ export function unsettled(params: CymaticsParams, features: Float32Array): numbe
 /**
  * What the lines are drawn at while the plate is still catching up, as a share
  * of full light: sand that has not settled is not gathered, and a line that
- * sweeps across the plate at full light leaves a full light sheet behind it on
- * a canvas that keeps 0.975 of itself. Dimmed, the ghost of the last chord is
- * faint and the new figure lights as it lands, which is what the change reads
- * as. It never goes out: the sweep is seen.
+ * sweeps across the plate leaves a sheet behind it on a canvas that keeps
+ * 0.975 of itself. Dimmed a little, the ghost of the last chord is fainter and
+ * the new figure lights as it lands, which is what the change reads as.
+ *
+ * The dip is gentle on purpose. `GLOW_GAIN` now keeps a held chord from
+ * washing out on its own, so this is no longer the only thing standing
+ * between a moving figure and a bright sheet, and a strike (`strike` in the
+ * study) lands on a chord change through `harmonicChange`: a change should
+ * read as the plate being struck again, not as the dimmest moment of the bar.
+ * It never goes out: the sweep is seen.
  */
-export const SETTLED_FLOOR = 0.3
+export const SETTLED_FLOOR = 0.65
 export const SETTLED_SCALE = 2.5
 export const settledLight = (gap: number): number =>
   SETTLED_FLOOR + (1 - SETTLED_FLOOR) / (1 + (gap / SETTLED_SCALE) ** 2)

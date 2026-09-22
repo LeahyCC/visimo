@@ -15,6 +15,7 @@ import { CHROMA_ROW, F, PACKET_LENGTH } from '../audio/FeatureExtractor'
 import { closeness } from '../director/score'
 import { TRACKS } from '../director/tracks.fixture'
 import {
+  CYMATICS_RANGES,
   cymaticsCoverage,
   cymaticsLit,
   cymaticsParams,
@@ -353,8 +354,10 @@ describe('the cymatics study', () => {
       expect(loud.layer).toBeGreaterThan(soft.layer)
       expect(loud.strike).toBeGreaterThan(soft.strike)
       expect(loud.intensity).toBeLessThanOrEqual(soft.intensity)
-      // Above 1, so the core blooms, and not more so for being loud.
-      expect(soft.intensity).toBeGreaterThan(1)
+      // Never above rest, whatever the level: the rest is what a held chord on
+      // a real, busy track has to stay under without washing the canvas out.
+      expect(soft.intensity).toBeGreaterThan(0)
+      expect(soft.intensity).toBeLessThanOrEqual(CYMATICS_RANGES.intensity[1])
     })
   })
 

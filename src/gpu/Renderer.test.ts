@@ -445,6 +445,26 @@ vi.mock('../impls/GridInk', () => ({
   },
 }))
 
+vi.mock('../impls/OceanInk', () => ({
+  OceanInk: class {
+    readonly detail = ''
+    constructor() {
+      impls.built.ocean = (impls.built.ocean ?? 0) + 1
+    }
+    init() {}
+    resize() {}
+    update(_features: Float32Array, _dt: number, knobs: Record<string, number>, presence: number) {
+      record('ocean', knobs, presence)
+    }
+    render() {
+      impls.drawn.push('ocean')
+    }
+    dispose() {
+      impls.disposed.ocean = (impls.disposed.ocean ?? 0) + 1
+    }
+  },
+}))
+
 vi.mock('../impls/PetalsInk', () => ({
   PetalsInk: class {
     readonly detail = ''

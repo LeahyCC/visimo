@@ -1315,6 +1315,7 @@ A look has one more field than the rest, `palette`: the palette the picture is c
 | `chord-petals`    | ink  | `petals`       | I G b R   | cheap  |
 | `lightning`       | ink  | `lightning`    | g D       | cheap  |
 | `grid-3d`         | ink  | `grid`         | i G B d   | cheap  |
+| `ocean`           | ink  | `ocean`        | I g R O   | medium |
 | `shape-morph`     | ink  | `morph`        | G b d     | heavy  |
 | `warm-soft`       | look | `look`         | I G R O   | cheap  |
 | `clean-glass`     | look | `look`         | G b D     | cheap  |
